@@ -22,6 +22,7 @@ const (
 	screenConfirm
 	screenProgress
 	screenDriveSelect
+	screenError  // For errors that require manual dismissal
 )
 
 // Model represents the application state
@@ -41,6 +42,7 @@ type Model struct {
 	selectedDrive string      // Selected drive path
 	cylonFrame   int          // Animation frame for cylon effect
 	canceling    bool         // Flag to indicate operation is being canceled
+	errorRequiresManualDismissal bool  // Flag for errors that need manual dismissal
 }
 
 // InitialModel creates a new model
@@ -85,22 +87,45 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case DriveOperation:
-		m.message = msg.message
-		if msg.success {
-			// Show success message then return to main
-			return m, tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
-				return tea.KeyMsg{Type: tea.KeyEsc}
-			})
+		if strings.Contains(msg.message, "LUKS drive is locked") || 
+		   strings.Contains(msg.message, "cryptsetup luksOpen") {
+			// LUKS error - needs manual dismissal
+			m.message = msg.message
+			m.errorRequiresManualDismissal = true
+			m.lastScreen = m.screen
+			m.screen = screenError
+			return m, nil
+		} else {
+			// Regular message
+			m.message = msg.message
+			if msg.success {
+				// Show success message then return to main
+				return m, tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
+					return tea.KeyMsg{Type: tea.KeyEsc}
+				})
+			}
+			return m, nil
 		}
-		return m, nil
 
 	case BackupDriveStatus:
 		if msg.error != nil {
-			// Show error and return to drive selection
-			m.message = msg.error.Error()
-			return m, tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
-				return tea.KeyMsg{Type: tea.KeyEsc}
-			})
+			// Check if this is a LUKS error that needs manual dismissal
+			errorMsg := msg.error.Error()
+			if strings.Contains(errorMsg, "LUKS drive is locked") || 
+			   strings.Contains(errorMsg, "cryptsetup luksOpen") {
+				// LUKS error - needs manual dismissal
+				m.message = errorMsg
+				m.errorRequiresManualDismissal = true
+				m.lastScreen = m.screen
+				m.screen = screenError
+				return m, nil
+			} else {
+				// Regular error - auto-dismiss after 3 seconds
+				m.message = errorMsg
+				return m, tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
+					return tea.KeyMsg{Type: tea.KeyEsc}
+				})
+			}
 		} else {
 			// Drive successfully mounted, confirm backup
 			backupTypeDesc := "ENTIRE SYSTEM (1:1)"
@@ -181,6 +206,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
+		// Handle error screen dismissal first
+		if m.screen == screenError {
+			// Any key press dismisses the error screen
+			m.screen = m.lastScreen
+			m.message = ""
+			m.errorRequiresManualDismissal = false
+			return m, nil
+		}
+		
 		switch msg.String() {
 		case "ctrl+c", "q":
 			if m.screen == screenMain {
@@ -202,7 +236,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 
 		case "esc":
-			if m.screen != screenMain {
+			if m.screen == screenError {
+				// Return to previous screen from error
+				m.screen = m.lastScreen
+				m.message = ""
+				m.errorRequiresManualDismissal = false
+				return m, nil
+			} else if m.screen != screenMain {
 				// Reset backup state when returning to main menu
 				resetBackupState()
 				m.screen = screenMain
@@ -406,6 +446,8 @@ func (m Model) View() string {
 		return m.renderProgress()
 	case screenDriveSelect:
 		return m.renderDriveSelect()
+	case screenError:
+		return m.renderError()
 	default:
 		return "Unknown screen"
 	}

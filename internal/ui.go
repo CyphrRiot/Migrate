@@ -458,8 +458,12 @@ func (m Model) renderDriveSelect() string {
 		}
 	} else {
 		// Show available drives
-		info := infoBoxStyle.Render("Select a drive to mount. LUKS encrypted drives will prompt for password.")
+		info := infoBoxStyle.Render("Select a drive to mount.")
 		s.WriteString(info + "\n\n")
+		
+		// Add LUKS warning
+		luksWarning := warningStyle.Render("⚠️  LUKS encrypted drives must be unlocked manually first")
+		s.WriteString(luksWarning + "\n\n")
 
 		for i, choice := range m.choices {
 			if m.cursor == i {
@@ -493,6 +497,26 @@ func (m Model) renderDriveSelect() string {
 // Render help text
 func (m Model) renderHelp() string {
 	return helpStyle.Render("↑/↓: navigate • enter: select • q: quit • esc: back")
+}
+
+// Render error screen that requires manual dismissal
+func (m Model) renderError() string {
+	var s strings.Builder
+
+	// Header
+	s.WriteString(titleStyle.Render("❌ Error") + "\n\n")
+
+	// Error message with enhanced styling
+	errorMsg := errorStyle.Render(m.message)
+	s.WriteString(errorMsg + "\n\n")
+
+	// Help text - emphasize manual dismissal
+	help := helpStyle.Render("📖 Please read the instructions above • Press ESC or any key when ready to continue")
+	s.WriteString(help)
+
+	// Center the content with beautiful border
+	content := borderStyle.Width(m.width - 8).Render(s.String())
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
 }
 
 // Progress message type

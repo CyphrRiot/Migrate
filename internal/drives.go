@@ -268,17 +268,45 @@ func LoadDrives() tea.Cmd {
 // Mount selected drive
 func mountSelectedDrive(drive DriveInfo) tea.Cmd {
 	return func() tea.Msg {
-		var mountPoint string
-		var err error
-
+		// Check if this is a locked LUKS drive
 		if drive.Encrypted {
-			// Handle LUKS encrypted drive
-			mountPoint, err = mountLUKSDrive(drive)
-		} else {
-			// Handle regular drive
-			mountPoint, err = mountRegularDrive(drive)
+			// Check if it's already unlocked by looking for the mapper device
+			mapperName := "luks-" + drive.UUID
+			mapperPath := "/dev/mapper/" + mapperName
+			
+			if _, err := os.Stat(mapperPath); os.IsNotExist(err) {
+				// LUKS drive is locked - show helpful error
+				return DriveOperation{
+					message: fmt.Sprintf("❌ LUKS drive is locked\n\nTo unlock manually:\nsudo cryptsetup luksOpen %s %s\nsudo udisksctl mount -b %s\n\nThen restart migrate.", drive.Device, mapperName, mapperPath),
+					success: false,
+				}
+			}
+			
+			// LUKS drive is unlocked, try to mount the mapper device
+			mountPoint, err := mountRegularDrive(DriveInfo{
+				Device: mapperPath,
+				Size: drive.Size,
+				Label: drive.Label,
+				UUID: drive.UUID,
+				Filesystem: drive.Filesystem,
+				Encrypted: false, // Treat unlocked LUKS as regular drive
+			})
+			
+			if err != nil {
+				return DriveOperation{
+					message: fmt.Sprintf("Failed to mount unlocked LUKS drive %s: %v", mapperPath, err),
+					success: false,
+				}
+			}
+
+			return DriveOperation{
+				message: fmt.Sprintf("Successfully mounted LUKS drive %s to %s", drive.Device, mountPoint),
+				success: true,
+			}
 		}
 
+		// Regular drive mounting
+		mountPoint, err := mountRegularDrive(drive)
 		if err != nil {
 			return DriveOperation{
 				message: fmt.Sprintf("Failed to mount %s: %v", drive.Device, err),
@@ -389,24 +417,54 @@ func mountRegularDrive(drive DriveInfo) (string, error) {
 // Mount any external drive for backup (replaces hardcoded Grendel-only mounting)
 func mountDriveForBackup(drive DriveInfo) tea.Cmd {
 	return func() tea.Msg {
-		var mountPoint string
-		var err error
-
+		// Check if this is a locked LUKS drive
 		if drive.Encrypted {
-			// Handle LUKS encrypted drive
-			mountPoint, err = mountLUKSDrive(drive)
-		} else {
-			// Handle regular drive
-			mountPoint, err = mountRegularDrive(drive)
+			// Check if it's already unlocked by looking for the mapper device
+			mapperName := "luks-" + drive.UUID
+			mapperPath := "/dev/mapper/" + mapperName
+			
+			if _, err := os.Stat(mapperPath); os.IsNotExist(err) {
+				// LUKS drive is locked - show helpful error
+				return BackupDriveStatus{
+					error: fmt.Errorf("❌ LUKS drive is locked\n\nTo unlock manually:\nsudo cryptsetup luksOpen %s %s\nsudo udisksctl mount -b %s\n\nThen restart migrate.", drive.Device, mapperName, mapperPath),
+				}
+			}
+			
+			// LUKS drive is unlocked, try to mount the mapper device
+			mountPoint, err := mountRegularDrive(DriveInfo{
+				Device: mapperPath,
+				Size: drive.Size,
+				Label: drive.Label,
+				UUID: drive.UUID,
+				Filesystem: drive.Filesystem,
+				Encrypted: false, // Treat unlocked LUKS as regular drive
+			})
+			
+			if err != nil {
+				return BackupDriveStatus{
+					error: fmt.Errorf("Failed to mount unlocked LUKS drive %s: %v", mapperPath, err),
+				}
+			}
+
+			// Successfully mounted LUKS drive - now ask for backup confirmation
+			return BackupDriveStatus{
+				drivePath:  drive.Device,
+				driveSize:  drive.Size,
+				driveType:  fmt.Sprintf("%s [LUKS]", drive.Label),
+				mountPoint: mountPoint,
+				needsMount: false,
+				error:      nil,
+			}
 		}
 
+		// Regular drive mounting
+		mountPoint, err := mountRegularDrive(drive)
 		if err != nil {
 			return BackupDriveStatus{
 				error: fmt.Errorf("Failed to mount %s: %v", drive.Device, err),
 			}
 		}
 
-		// Successfully mounted - now ask for backup confirmation
 		return BackupDriveStatus{
 			drivePath:  drive.Device,
 			driveSize:  drive.Size,
