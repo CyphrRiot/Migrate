@@ -267,25 +267,56 @@ func calculateRealProgress() (float64, string) {
 		}
 
 	} else {
-		// Still discovering files - use conservative time-based progress during initial scan
+		// Files being discovered AND processed simultaneously
 		elapsed := time.Since(backupStartTime)
 		
 		if totalFilesFound == 0 {
 			progress = 0.0 // True 0% until we start finding files
 			message = "Scanning filesystem..."
-		} else if elapsed.Seconds() < 60 {
-			// First minute: start at 1% once files are found
+		} else if elapsed.Seconds() < 30 {
+			// First 30 seconds: very conservative, just show we're making progress
 			progress = 0.01
 			message = fmt.Sprintf("Scanning filesystem (%s files found)", formatNumber(totalFilesFound))
-		} else if elapsed.Seconds() < 300 { // First 5 minutes
-			// Gradual increase from 1% to 8% over 5 minutes based on time + file discovery
-			timeProgress := (elapsed.Seconds() - 60) / 240 // 0 to 1 over 4 minutes
-			progress = 0.01 + (timeProgress * 0.07) // 1% to 8%
-			message = fmt.Sprintf("Scanning and processing (%s files found)", formatNumber(totalFilesFound))
 		} else {
-			// After 5 minutes: cap at 10% until directory walk actually completes
-			progress = 0.10
-			message = fmt.Sprintf("Scanning and processing (%s files found)", formatNumber(totalFilesFound))
+			// After 30 seconds: use time-based progress that's more reasonable
+			filesProcessed := filesSkipped + filesCopied
+			
+			if filesProcessed == 0 {
+				// Still just scanning, no processing yet
+				progress = 0.01 + (elapsed.Seconds() / 300) * 0.09 // 1% to 10% over 5 minutes
+				if progress > 0.10 {
+					progress = 0.10
+				}
+				message = fmt.Sprintf("Scanning filesystem (%s files found)", formatNumber(totalFilesFound))
+			} else {
+				// We're processing files - use a hybrid approach
+				// Base progress on time, but accelerate based on processing rate
+				baseProgress := 0.10 + (elapsed.Seconds() - 30) / 600 * 0.60 // 10% to 70% over 10 more minutes
+				if baseProgress > 0.70 {
+					baseProgress = 0.70
+				}
+				
+				// Bonus progress for high processing rates (don't penalize fast processing)
+				processingRatio := float64(filesProcessed) / float64(totalFilesFound)
+				if processingRatio > 0.8 && totalFilesFound > 10000 {
+					// If we've processed >80% of discovered files and have significant file count
+					// give bonus progress 
+					baseProgress += 0.05
+				}
+				
+				progress = baseProgress
+				if progress > 0.75 {
+					progress = 0.75 // Still cap at 75% until walk completes
+				}
+				
+				if filesCopied > 0 {
+					message = fmt.Sprintf("Processing files (%s copied, %s skipped, %s found)",
+						formatNumber(filesCopied), formatNumber(filesSkipped), formatNumber(totalFilesFound))
+				} else {
+					message = fmt.Sprintf("Scanning files (%s skipped, %s found)",
+						formatNumber(filesSkipped), formatNumber(totalFilesFound))
+				}
+			}
 		}
 	}
 

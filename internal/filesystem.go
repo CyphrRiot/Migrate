@@ -38,6 +38,13 @@ func syncDirectories(src, dst string, logFile *os.File) error {
 
 	// Counter to periodically check for cancellation and show progress
 	fileCounter := 0
+	localFilesFound := 0  // Local counter to batch atomic operations
+
+	// Pre-compile exclusion patterns for performance (avoid string ops in hot path)
+	exclusionPrefixes := make([]string, len(ExcludePatterns))
+	for i, pattern := range ExcludePatterns {
+		exclusionPrefixes[i] = strings.TrimSuffix(pattern, "/*")
+	}
 
 	// Walk through the source directory efficiently
 	err = filepath.WalkDir(src, func(path string, d os.DirEntry, err error) error {
@@ -54,9 +61,9 @@ func syncDirectories(src, dst string, logFile *os.File) error {
 			return nil // Skip errors, don't fail entire backup
 		}
 
-		// Skip excluded patterns
-		for _, pattern := range ExcludePatterns {
-			if strings.Contains(path, strings.TrimSuffix(pattern, "/*")) {
+		// Skip excluded patterns (using pre-compiled prefixes for performance)
+		for _, prefix := range exclusionPrefixes {
+			if strings.Contains(path, prefix) {
 				if d.IsDir() {
 					return filepath.SkipDir
 				}
@@ -130,8 +137,16 @@ func syncDirectories(src, dst string, logFile *os.File) error {
 
 		// Handle regular files with smart tracking
 		if d.Type().IsRegular() {
-			// Count this file in our totals
-			atomic.AddInt64(&totalFilesFound, 1)
+			// Count this file in our local counter (batch atomic operations)
+			localFilesFound++
+			
+			// Batch update atomic counter every 1000 files for performance
+			if localFilesFound%1000 == 0 {
+				atomic.AddInt64(&totalFilesFound, 1000)
+				if logFile != nil && localFilesFound%10000 == 0 { // Log every 10k files
+					fmt.Fprintf(logFile, "Processed %s files...\n", formatNumber(atomic.LoadInt64(&totalFilesFound)))
+				}
+			}
 
 			// Quick paths for known scenarios
 			if _, err := os.Stat(dstPath); os.IsNotExist(err) {
@@ -175,6 +190,12 @@ func syncDirectories(src, dst string, logFile *os.File) error {
 		// Skip special files
 		return nil
 	})
+
+	// Final batch update for any remaining files not yet added to atomic counter
+	remainingFiles := localFilesFound % 1000
+	if remainingFiles > 0 {
+		atomic.AddInt64(&totalFilesFound, int64(remainingFiles))
+	}
 
 	// Mark directory walk as complete
 	directoryWalkComplete = true
