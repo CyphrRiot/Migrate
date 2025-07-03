@@ -49,9 +49,37 @@ var filesDeleted int64         // Files deleted in cleanup
 var totalFilesFound int64      // Total files discovered during walk
 var directoryWalkComplete bool // Directory enumeration finished
 
+// Reset all backup progress counters and state
+func resetBackupState() {
+	// Reset timing
+	backupStartTime = time.Time{}
+	
+	// Reset counters
+	filesSkipped = 0
+	filesCopied = 0
+	filesDeleted = 0
+	totalFilesFound = 0
+	progressCallCounter = 0
+	totalFilesProcessed = 0
+	totalFilesEstimate = 0
+	
+	// Reset phase tracking
+	directoryWalkComplete = false
+	syncPhaseComplete = false
+	deletionPhaseActive = false
+	
+	// Reset TUI state
+	tuiBackupCompleted = false
+	tuiBackupError = nil
+	tuiBackupCancelling = false
+}
+
 // Start backup operation - TUI ONLY (Pure Go)
 func startBackup(config BackupConfig) tea.Cmd {
 	return func() tea.Msg {
+		// Reset all backup state before starting
+		resetBackupState()
+		
 		// Always run in TUI mode with pure Go implementation
 		go runBackupSilently(config)
 		return ProgressUpdate{Percentage: -1, Message: "Starting backup...", Done: false}

@@ -203,6 +203,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "esc":
 			if m.screen != screenMain {
+				// Reset backup state when returning to main menu
+				resetBackupState()
 				m.screen = screenMain
 				m.cursor = 0
 				m.choices = []string{"🚀 Backup System", "🔄 Restore System", "💾 Mount External Drive", "ℹ️ About", "❌ Exit"}
@@ -289,6 +291,7 @@ func (m Model) handleSelection() (tea.Model, tea.Cmd) {
 			m.message = "Custom path restore not implemented yet"
 			// TODO: Implement custom path selection
 		case 2: // Back
+			resetBackupState() // Reset state when going back to main from restore menu
 			m.screen = screenMain
 			m.choices = []string{"🚀 Backup System", "🔄 Restore System", "💾 Mount External Drive", "ℹ️ About", "❌ Exit"}
 			m.cursor = 0
@@ -335,6 +338,7 @@ func (m Model) handleSelection() (tea.Model, tea.Cmd) {
 			wasUnmountOp := (m.operation == "unmount_backup")
 			
 			// Clear state and return to main menu
+			resetBackupState() // Reset all backup state
 			m.confirmation = ""
 			m.operation = ""
 			m.selectedDrive = ""
@@ -351,6 +355,7 @@ func (m Model) handleSelection() (tea.Model, tea.Cmd) {
 			}
 		}
 	case screenAbout:
+		resetBackupState() // Reset state when returning from about screen
 		m.screen = screenMain
 		m.choices = []string{"🚀 Backup System", "🔄 Restore System", "💾 Mount External Drive", "ℹ️ About", "❌ Exit"}
 		m.cursor = 0
