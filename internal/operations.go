@@ -30,6 +30,7 @@ type ProgressUpdate struct {
 // Global completion tracking for TUI
 var tuiBackupCompleted = false
 var tuiBackupError error
+var tuiBackupCancelling = false // Track if cancellation is in progress
 
 // Global variables to track backup progress and timing  
 var backupStartTime time.Time
@@ -74,6 +75,7 @@ func runBackupSilently(config BackupConfig) {
 
 	tuiBackupCompleted = false
 	tuiBackupError = nil
+	tuiBackupCancelling = false
 
 	// Initialize progress tracking
 	backupStartTime = time.Now()
@@ -98,6 +100,7 @@ func runBackupSilently(config BackupConfig) {
 		}
 		tuiBackupCompleted = true
 		if shouldCancelBackup() {
+			tuiBackupCancelling = false // Cancellation complete
 			tuiBackupError = fmt.Errorf("backup canceled by user")
 		} else {
 			tuiBackupError = fmt.Errorf("backup failed: %v", err)
@@ -167,6 +170,17 @@ func performPureGoBackup(sourcePath, destPath string, logFile *os.File) error {
 // Check TUI backup progress with real disk usage monitoring
 func CheckTUIBackupProgress() tea.Cmd {
 	return tea.Tick(200*time.Millisecond, func(t time.Time) tea.Msg {
+		// Check if cancellation was requested - switch to cancelling state
+		if shouldCancelBackup() && !tuiBackupCancelling && !tuiBackupCompleted {
+			tuiBackupCancelling = true
+			return ProgressUpdate{Percentage: -1, Message: "Cancelling backup...", Done: false}
+		}
+
+		// If we're in cancelling state, keep showing that message until actually complete
+		if tuiBackupCancelling && !tuiBackupCompleted {
+			return ProgressUpdate{Percentage: -1, Message: "Cancelling backup...", Done: false}
+		}
+
 		if tuiBackupCompleted {
 			if tuiBackupError != nil {
 				return ProgressUpdate{Error: tuiBackupError, Done: true}
@@ -174,9 +188,15 @@ func CheckTUIBackupProgress() tea.Cmd {
 			return ProgressUpdate{Percentage: 1.0, Message: "Backup completed successfully!", Done: true}
 		}
 
-		// Calculate real progress based on disk usage
-		progress, message := calculateRealProgress()
-		return ProgressUpdate{Percentage: progress, Message: message, Done: false}
+		// Only show regular progress if not cancelling
+		if !tuiBackupCancelling {
+			// Calculate real progress based on disk usage
+			progress, message := calculateRealProgress()
+			return ProgressUpdate{Percentage: progress, Message: message, Done: false}
+		}
+
+		// Default fallback (shouldn't reach here)
+		return ProgressUpdate{Percentage: -1, Message: "Processing...", Done: false}
 	})
 }
 
@@ -247,21 +267,25 @@ func calculateRealProgress() (float64, string) {
 		}
 
 	} else {
-		// Still discovering files - keep progress low and realistic
+		// Still discovering files - use conservative time-based progress during initial scan
 		elapsed := time.Since(backupStartTime)
 		
-		// Very conservative progress during scanning phase
-		if elapsed.Seconds() < 60 {
-			progress = 0.02 // Start at 2%
+		if totalFilesFound == 0 {
+			progress = 0.0 // True 0% until we start finding files
 			message = "Scanning filesystem..."
+		} else if elapsed.Seconds() < 60 {
+			// First minute: start at 1% once files are found
+			progress = 0.01
+			message = fmt.Sprintf("Scanning filesystem (%s files found)", formatNumber(totalFilesFound))
 		} else if elapsed.Seconds() < 300 { // First 5 minutes
-			// Gradual increase to 5% over 5 minutes
-			progress = 0.02 + (elapsed.Seconds()-60)/240*0.03 // 2% to 5% over 4 minutes
-			message = fmt.Sprintf("Scanning and processing (%s files found so far)", formatNumber(totalFilesFound))
+			// Gradual increase from 1% to 8% over 5 minutes based on time + file discovery
+			timeProgress := (elapsed.Seconds() - 60) / 240 // 0 to 1 over 4 minutes
+			progress = 0.01 + (timeProgress * 0.07) // 1% to 8%
+			message = fmt.Sprintf("Scanning and processing (%s files found)", formatNumber(totalFilesFound))
 		} else {
-			// After 5 minutes, cap at 8% until directory walk completes
-			progress = 0.08
-			message = fmt.Sprintf("Scanning and processing (%s files found so far)", formatNumber(totalFilesFound))
+			// After 5 minutes: cap at 10% until directory walk actually completes
+			progress = 0.10
+			message = fmt.Sprintf("Scanning and processing (%s files found)", formatNumber(totalFilesFound))
 		}
 	}
 

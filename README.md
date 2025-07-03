@@ -121,11 +121,14 @@ mv migrate ~/.local/bin/
 git clone https://github.com/CyphrRiot/Migrate.git
 cd Migrate
 
-# Build static binary (pure Go, zero dependencies)
-CGO_ENABLED=0 go build -a -ldflags '-extldflags "-static"' -o bin/migrate .
+# Build static binary (pure Go, zero dependencies, maximum portability)
+make build
 
-# Install
-cp bin/migrate ~/.local/bin/
+# Or build explicitly as static
+make static
+
+# Install locally
+make install
 ```
 
 ## 🖥️ Usage
