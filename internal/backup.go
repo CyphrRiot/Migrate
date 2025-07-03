@@ -238,8 +238,8 @@ func runBackupSilently(config BackupConfig) {
 	destStartUsedSpace, _ = getUsedDiskSpace(config.DestinationPath)
 	
 	if logFile != nil {
-		fmt.Fprintf(logFile, "Using pure Go: source=%dGB, dest_start=%dGB\n", 
-			sourceUsedSpace/(1024*1024*1024), destStartUsedSpace/(1024*1024*1024))
+		fmt.Fprintf(logFile, "Using pure Go: source=%s, dest_start=%s\n", 
+			formatBytes(sourceUsedSpace), formatBytes(destStartUsedSpace))
 	}
 
 	// Use pure Go implementation for actual backup
@@ -536,6 +536,56 @@ func getFileSHA256(filePath string) (string, error) {
 	}
 
 	return hex.EncodeToString(hasher.Sum(nil)), nil
+}
+
+// Format bytes into human readable size with proper units and formatting
+func formatBytes(bytes int64) string {
+	const unit = 1024
+	if bytes < unit {
+		return fmt.Sprintf("%d B", bytes)
+	}
+	
+	// Calculate the appropriate unit
+	units := []string{"B", "KB", "MB", "GB", "TB", "PB"}
+	value := float64(bytes)
+	unitIndex := 0
+	
+	for value >= unit && unitIndex < len(units)-1 {
+		value /= unit
+		unitIndex++
+	}
+	
+	// If we have >= 1000 of current unit, promote to next unit (e.g., 1000GB -> 1.0TB)
+	if value >= 1000 && unitIndex < len(units)-1 {
+		value /= unit
+		unitIndex++
+	}
+	
+	// Format the number based on its size
+	var formatted string
+	if value >= 100 {
+		// For 100+ units, show whole number with comma separator if > 999
+		wholeValue := int(value + 0.5) // Round to nearest integer
+		if wholeValue >= 1000 {
+			formatted = fmt.Sprintf("%d", wholeValue)
+			// Add comma thousands separator for readability
+			str := formatted
+			if len(str) > 3 {
+				n := len(str)
+				formatted = str[:n-3] + "," + str[n-3:]
+			}
+		} else {
+			formatted = fmt.Sprintf("%.0f", value)
+		}
+	} else if value >= 10 {
+		// For 10-99.x units, show 1 decimal place
+		formatted = fmt.Sprintf("%.1f", value)
+	} else {
+		// For <10 units, show 2 decimal places
+		formatted = fmt.Sprintf("%.2f", value)
+	}
+	
+	return formatted + " " + units[unitIndex]
 }
 
 // Delete files from backup that no longer exist in source (--delete equivalent)
@@ -867,34 +917,52 @@ func calculateRealProgress() (float64, string) {
 		progress = 1.0
 	}
 	
-	// Convert to GB for display  
-	currentDestGB := currentDestUsed / (1024 * 1024 * 1024)
-	sourceGB := sourceUsedSpace / (1024 * 1024 * 1024)
-	
 	// Calculate how much was copied in this session
 	copiedThisSession := currentDestUsed - destStartUsedSpace
-	copiedSessionGB := copiedThisSession / (1024 * 1024 * 1024)
-	
+
+	// Convert to formatted human-readable sizes
+	currentDestFormatted := formatBytes(currentDestUsed)
+	sourceFormatted := formatBytes(sourceUsedSpace)
+	copiedSessionFormatted := formatBytes(copiedThisSession)
+
 	// Calculate time estimation based on current session progress
 	elapsed := time.Since(backupStartTime)
 	var timeStr string
-	if copiedThisSession > 0 && elapsed.Seconds() > 10 {
-		// Base estimation on session progress, not total progress
+	
+	// Only show time estimate if we've actually copied meaningful data
+	// If most files are being skipped (incremental backup), don't show misleading estimates
+	if copiedThisSession > 100*1024*1024 && elapsed.Seconds() > 30 { // At least 100MB copied and 30 seconds elapsed
+		// Base estimation on session progress
 		remainingBytes := sourceUsedSpace - currentDestUsed
 		bytesPerSecond := float64(copiedThisSession) / elapsed.Seconds()
-		remainingSeconds := float64(remainingBytes) / bytesPerSecond
-		remaining := time.Duration(remainingSeconds) * time.Second
 		
-		hours := int(remaining.Hours())
-		minutes := int(remaining.Minutes()) % 60
-		timeStr = fmt.Sprintf(" (Est %dh %dm)", hours, minutes)
+		// Sanity check: if copy rate is suspiciously slow, don't show estimate
+		if bytesPerSecond > 1024*1024 { // At least 1MB/s
+			remainingSeconds := float64(remainingBytes) / bytesPerSecond
+			remaining := time.Duration(remainingSeconds) * time.Second
+			
+			hours := int(remaining.Hours())
+			minutes := int(remaining.Minutes()) % 60
+			
+			// Don't show crazy estimates
+			if hours < 1000 { 
+				timeStr = fmt.Sprintf(" (Est %dh %dm)", hours, minutes)
+			} else {
+				timeStr = " (Calculating...)"
+			}
+		} else {
+			timeStr = " (Calculating...)"
+		}
+	} else if copiedThisSession < 1024*1024 && elapsed.Seconds() > 60 {
+		// Very little data copied - likely an incremental backup with mostly skipped files
+		timeStr = " (Mostly skipping identical files)"
 	} else {
 		timeStr = " (Calculating...)"
 	}
 	
 	// Show ACTUAL progress: current destination usage vs source total
-	message := fmt.Sprintf("Copying %dGB / %dGB (+%dGB this session)%s", 
-		currentDestGB, sourceGB, copiedSessionGB, timeStr)
+	message := fmt.Sprintf("Copying %s / %s (+%s this session)%s", 
+		currentDestFormatted, sourceFormatted, copiedSessionFormatted, timeStr)
 		
 	return progress, message
 }
