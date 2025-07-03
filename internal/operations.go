@@ -247,22 +247,20 @@ func calculateRealProgress() (float64, string) {
 		}
 
 	} else {
-		// Still discovering files
+		// Still discovering files - keep progress low and realistic
 		elapsed := time.Since(backupStartTime)
-		if elapsed.Seconds() < 30 {
-			progress = 0.05
+		
+		// Very conservative progress during scanning phase
+		if elapsed.Seconds() < 60 {
+			progress = 0.02 // Start at 2%
 			message = "Scanning filesystem..."
+		} else if elapsed.Seconds() < 300 { // First 5 minutes
+			// Gradual increase to 5% over 5 minutes
+			progress = 0.02 + (elapsed.Seconds()-60)/240*0.03 // 2% to 5% over 4 minutes
+			message = fmt.Sprintf("Scanning and processing (%s files found so far)", formatNumber(totalFilesFound))
 		} else {
-			// Base early progress on files found so far
-			estimatedTotal := totalFilesFound * 2 // Rough estimate
-			if estimatedTotal > 0 {
-				progress = float64(filesSkipped+filesCopied) / float64(estimatedTotal) * 0.85
-				if progress > 0.20 {
-					progress = 0.20 // Cap early progress
-				}
-			} else {
-				progress = 0.10
-			}
+			// After 5 minutes, cap at 8% until directory walk completes
+			progress = 0.08
 			message = fmt.Sprintf("Scanning and processing (%s files found so far)", formatNumber(totalFilesFound))
 		}
 	}

@@ -1,7 +1,7 @@
-# Migrate v1.0.5
+# Migrate v1.0.6
 <!-- Version is defined in version.go - update there to change everywhere -->
 
-A stunningly beautiful **TUI-only** backup and restore tool built with [Bubble Tea](https://github.com/charmbracelet/bubbletea) and [Lipgloss](https://github.com/charmbracelet/lipgloss), featuring Tokyo Night inspired theming and **pure Go implementation with zero external dependencies**.
+A stunningly beautiful **Terminal** backup and restore tool built with [Bubble Tea](https://github.com/charmbracelet/bubbletea) and [Lipgloss](https://github.com/charmbracelet/lipgloss), featuring Tokyo Night inspired theming and **pure Go implementation with zero external dependencies**.
 
 Now with **full `rsync --delete` equivalent functionality** including SHA256-based file deduplication and automatic cleanup of deleted files!
 
@@ -10,7 +10,7 @@ Now with **full `rsync --delete` equivalent functionality** including SHA256-bas
 ## ⚠️ Warning: 
 > ⚠️ This is new software with significant improvements over the bash version. While extensively tested, please ensure you have important data backed up elsewhere before use. Test backup and restore operations in non-critical environments first. ⚠️
 
-> 🚨 **Major Update**: The tool now works with **any external drive** instead of being hardcoded to specific drives. Select your backup drive from the available options.
+> 🚨 **Major Update**: The tool now works with **any external drive**. Select your backup drive from the available options.
 
 ## 🎉 Pure Go Implementation
 
@@ -72,22 +72,23 @@ But with better file verification and a beautiful TUI interface!
 ## 📊 Perfect Progress Tracking
 
 ### Smart Progress Calculation
-The tool intelligently calculates progress by measuring actual disk space usage:
+The tool intelligently calculates progress by tracking actual file operations during backup:
 
 ```
-Progress = current_destination_usage / total_source_size
+Progress = (files_processed / total_files_found) * 85% + deletion_phase_progress * 15%
 ```
 
 ### Immediate Progress Display
-- **Accounts for existing backup data** - If destination has 800GB, shows ~44% immediately
+- **File-based tracking** - Shows actual files being processed, not just disk usage estimates
 - **Real-time updates** - Progress updates every 200ms (5x per second)
-- **Session tracking** - Shows how much copied in current session
-- **Accurate time estimation** - Based on current copy rate
+- **Two-phase breakdown** - 85% for sync phase, 15% for deletion phase
+- **Accurate file counts** - Shows copied vs skipped files with running totals
 
 ### Example Progress Display
 ```
-Copying 1.78 TB / 1.82 TB (+24.5 GB this session) (Est 2h 15m)
-Progress: [████████████████████████████████████████░░░░░░░░] 98.2%
+Scanning and processing (1,247 files found so far)
+Syncing files (421 copied, 1,826 skipped of 2,247 total)
+Deleting removed files (18 files cleaned up)
 ```
 
 ## 🎨 Beautiful Interface
@@ -282,6 +283,12 @@ require (
 ```
 
 ## 🎯 Recent Achievements
+
+### ✅ Progress & UI Improvements (v1.0.6)
+- **FIXED**: Progress calculation - no more jumping to 20% immediately
+- **FIXED**: Corrected README progress documentation to reflect file-based tracking
+- **IMPROVED**: More realistic progress during scanning phase (2% → 5% → 8% cap)
+- **ENHANCED**: Better time-based progress scaling during initial filesystem scan
 
 ### ✅ CRITICAL Bug Fixes (v1.0.5)
 - **FIXED**: Goroutine execution bug that prevented incremental backups
