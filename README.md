@@ -3,6 +3,8 @@
 
 A stunningly beautiful **TUI-only** backup and restore tool built with [Bubble Tea](https://github.com/charmbracelet/bubbletea) and [Lipgloss](https://github.com/charmbracelet/lipgloss), featuring Tokyo Night inspired theming and **pure Go implementation with zero external dependencies**.
 
+![Migrate Beautiful Interface](interface.gif)
+
 ## ⚠️ Warning: 
 > ⚠️ This is new software with significant improvements over the bash version. While extensively tested, please ensure you have important data backed up elsewhere before use. Test backup and restore operations in non-critical environments first. ⚠️
 
@@ -63,8 +65,6 @@ Progress: [███████████████████████
 ```
 
 ## 🎨 Beautiful Interface
-
-![Migrate Beautiful Interface](interface.gif)
 
 The interface features:
 - **Tokyo Night theme** - Professionally designed color scheme
