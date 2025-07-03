@@ -1,4 +1,5 @@
-# Migrate v1.0.0
+# Migrate v1.0.1
+<!-- Version is defined in version.go - update there to change everywhere -->
 
 A stunningly beautiful **TUI-only** backup and restore tool built with [Bubble Tea](https://github.com/charmbracelet/bubbletea) and [Lipgloss](https://github.com/charmbracelet/lipgloss), featuring Tokyo Night inspired theming and **pure Go implementation with zero external dependencies**.
 
@@ -242,13 +243,20 @@ require (
 
 ## 🎯 Recent Achievements
 
-### ✅ TUI-Only Interface (v1.0.0)
+### ✅ TUI-Only Interface (v1.0.1)
 - Removed all CLI options - beautiful interface always
 - Simplified user experience - just run `migrate` 
 - No confusion about modes or options
 - Consistent, delightful interaction every time
 
-### ✅ Pure Go Implementation (v1.0.0)
+### ✅ Enhanced Operations (v1.0.1)
+- Added comprehensive dependency checking on startup
+- Improved progress screen with app branding and log file location
+- Smart cancellation handling - Ctrl+C shows "Canceling..." status
+- Better logging system using ~/.cache/migrate/ or /tmp fallback
+- Proper cancellation cleanup ensures safe operation termination
+
+### ✅ Pure Go Implementation (v1.0.1)
 - Complete rewrite using pure Go instead of rsync
 - Zero external dependencies during backup operations
 - Efficient file copying with proper error handling

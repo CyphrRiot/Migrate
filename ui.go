@@ -224,9 +224,9 @@ func (m model) renderAbout() string {
 	s.WriteString(titleStyle.Render("ℹ️ About Migrate") + "\n\n")
 
 	// About content
-	about := `Migrate v1.0.0 - Beautiful Backup & Restore Tool
+	about := GetAboutText() + `
 
-Created by: Cypher Riot
+Created by: ` + AppAuthor + `
 
 🔗 Links:
    GitHub: https://github.com/CyphrRiot/Migrate
@@ -302,9 +302,9 @@ func (m model) renderProgress() string {
 	// App branding header
 	ascii := asciiStyle.Render(asciiArt)
 	s.WriteString(ascii + "\n")
-	title := titleStyle.Render("Beautiful Backup & Restore Tool")
+	title := titleStyle.Render(AppDesc)
 	s.WriteString(title + "\n")
-	subtitle := subtitleStyle.Render("v1.0.0 • Created by Cypher Riot")
+	subtitle := subtitleStyle.Render(GetSubtitle())
 	s.WriteString(subtitle + "\n\n")
 
 	// Operation title
@@ -314,18 +314,22 @@ func (m model) renderProgress() string {
 		s.WriteString(titleStyle.Render("🔄 Operation in Progress") + "\n\n")
 	}
 
-	// Operation info - show source and destination drives
+	// Operation info - show source and destination drives  
+	logPath := getLogFilePath() // Get log path for display
 	if m.operation == "system_backup" {
 		s.WriteString("📁 Backup Type: Complete System (1:1)\n")
 		s.WriteString("📂 Source: / (Internal Drive)\n")
-		s.WriteString("💾 Destination: " + m.selectedDrive + " (External Drive)\n\n")
+		s.WriteString("💾 Destination: " + m.selectedDrive + " (External Drive)\n")
+		s.WriteString("📋 Log: " + logPath + "\n\n")
 	} else if m.operation == "home_backup" {
 		s.WriteString("📁 Backup Type: Home Directory Only\n")
 		s.WriteString("📂 Source: ~/ (Home Directory)\n")  
-		s.WriteString("💾 Destination: " + m.selectedDrive + " (External Drive)\n\n")
+		s.WriteString("💾 Destination: " + m.selectedDrive + " (External Drive)\n")
+		s.WriteString("📋 Log: " + logPath + "\n\n")
 	} else {
 		opInfo := fmt.Sprintf("Running: %s", m.operation)
 		s.WriteString(subtitleStyle.Render(opInfo) + "\n")
+		s.WriteString("📋 Log: " + logPath + "\n\n")
 	}
 
 	// Progress bar (only show if not canceling)
@@ -432,8 +436,8 @@ func (m model) renderProgressBar() string {
 // Render header with beautiful ASCII art
 func (m model) renderHeader() string {
 	ascii := asciiStyle.Render(asciiArt)
-	title := titleStyle.Render("Beautiful Backup & Restore Tool")
-	subtitle := subtitleStyle.Render("v1.0.0 • Created by Cypher Riot")
+	title := titleStyle.Render(AppDesc)
+	subtitle := subtitleStyle.Render(GetSubtitle())
 	
 	return ascii + "\n" + title + "\n" + subtitle
 }
