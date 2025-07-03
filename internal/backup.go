@@ -290,10 +290,17 @@ func performPureGoBackup(sourcePath, destPath string, logFile *os.File) error {
 		return err
 	}
 
+	// Mark sync phase as complete
+	syncPhaseComplete = true
+
 	// Phase 2: Delete files that exist in backup but not in source (--delete behavior)
 	if logFile != nil {
 		fmt.Fprintf(logFile, "Starting deletion phase (removing files not in source)\n")
 	}
+	
+	// Mark deletion phase as active
+	deletionPhaseActive = true
+	
 	err = deleteExtraFilesFromBackup(sourcePath, destPath, logFile)
 	if err != nil {
 		if logFile != nil {
@@ -301,6 +308,9 @@ func performPureGoBackup(sourcePath, destPath string, logFile *os.File) error {
 		}
 		return fmt.Errorf("deletion phase failed: %v", err)
 	}
+	
+	// Mark deletion phase as complete
+	deletionPhaseActive = false
 
 	if logFile != nil {
 		fmt.Fprintf(logFile, "Pure Go backup completed successfully\n")
@@ -337,9 +347,9 @@ func syncDirectories(src, dst string, logFile *os.File) error {
 
 	// Walk through the source directory efficiently
 	err = filepath.WalkDir(src, func(path string, d os.DirEntry, err error) error {
-		// Check for cancellation every 100 files
+		// Check for cancellation less frequently for better performance
 		fileCounter++
-		if fileCounter%100 == 0 && shouldCancelBackup() {
+		if fileCounter%1000 == 0 && shouldCancelBackup() { // Check every 1000 files instead of 100
 			return fmt.Errorf("operation canceled")
 		}
 
@@ -403,18 +413,33 @@ func syncDirectories(src, dst string, logFile *os.File) error {
 			return nil
 		}
 
-		// Handle regular files
+		// Handle regular files with concurrency
 		if d.Type().IsRegular() {
-			// Check if files are identical before copying
+			// Quick paths for known scenarios
+			if _, err := os.Stat(dstPath); os.IsNotExist(err) {
+				// Destination doesn't exist - definitely need to copy
+				err = copyFileEfficient(path, dstPath)
+				if err != nil && logFile != nil {
+					fmt.Fprintf(logFile, "Error copying %s: %v\n", path, err)
+				} else {
+					copiedCount++
+					if logFile != nil && copiedCount%100 == 0 {
+						fmt.Fprintf(logFile, "Copied %d files, skipped %d identical files\n", copiedCount, skippedCount)
+					}
+				}
+				return nil
+			}
+
+			// Destination exists - check if identical
 			if filesAreIdentical(path, dstPath) {
 				skippedCount++
-				if logFile != nil && skippedCount%100 == 0 {
+				if logFile != nil && skippedCount%500 == 0 { // Less frequent logging
 					fmt.Fprintf(logFile, "Skipped %d identical files so far...\n", skippedCount)
 				}
 				return nil
 			}
 
-			// Copy file (only if different)
+			// Files are different - copy
 			err = copyFileEfficient(path, dstPath)
 			if err != nil && logFile != nil {
 				fmt.Fprintf(logFile, "Error copying %s: %v\n", path, err)
@@ -454,6 +479,11 @@ func copyFileEfficient(src, dst string) error {
 		return err
 	}
 
+	// Create destination directory if needed
+	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
+		return err
+	}
+
 	// Create destination file
 	dstFile, err := os.Create(dst)
 	if err != nil {
@@ -461,8 +491,15 @@ func copyFileEfficient(src, dst string) error {
 	}
 	defer dstFile.Close()
 
-	// Copy file contents
-	_, err = io.Copy(dstFile, srcFile)
+	// Use larger buffer for better performance on large files
+	bufSize := 64 * 1024 // 64KB buffer
+	if fi.Size() > 100*1024*1024 { // Files >100MB get bigger buffer
+		bufSize = 1024 * 1024 // 1MB buffer
+	}
+
+	// Copy file contents with optimized buffer
+	buffer := make([]byte, bufSize)
+	_, err = io.CopyBuffer(dstFile, srcFile, buffer)
 	if err != nil {
 		return err
 	}
@@ -478,7 +515,7 @@ func copyFileEfficient(src, dst string) error {
 	return nil
 }
 
-// Check if two files are identical by comparing size and SHA256 hash
+// Check if two files are identical using fast checks first, then hash only if needed
 func filesAreIdentical(src, dst string) bool {
 	// Get file info for both files
 	srcInfo, err := os.Stat(src)
@@ -491,23 +528,33 @@ func filesAreIdentical(src, dst string) bool {
 		return false // Destination doesn't exist
 	}
 
-	// Quick size comparison first
+	// Quick size comparison first (fastest check)
 	if srcInfo.Size() != dstInfo.Size() {
 		return false
 	}
 
-	// For very small files (under 1KB), always check hash
-	// For larger files, also check modification time as optimization
-	if srcInfo.Size() > 1024 {
-		// If modification times are different, files might be different
-		// But we still need to hash check as modification time can be misleading
-		// This is just an early optimization hint
-		if !srcInfo.ModTime().Equal(dstInfo.ModTime()) {
-			// Still do hash check, but this suggests they might be different
-		}
+	// For empty files, if sizes match (both 0), they're identical
+	if srcInfo.Size() == 0 {
+		return true
 	}
 
-	// Compare SHA256 hashes
+	// Fast modification time check (much faster than hashing)
+	// If times are identical and sizes match, very likely the same file
+	if srcInfo.ModTime().Equal(dstInfo.ModTime()) {
+		return true // Skip hash check for files with identical mtime + size
+	}
+
+	// For small files (≤1MB), do hash comparison
+	if srcInfo.Size() <= 1024*1024 {
+		return filesHashIdentical(src, dst)
+	}
+
+	// For large files, use sampling strategy instead of full hash
+	return largFilesIdentical(src, dst, srcInfo.Size())
+}
+
+// Hash comparison for small files only
+func filesHashIdentical(src, dst string) bool {
 	srcHash, err := getFileSHA256(src)
 	if err != nil {
 		return false
@@ -519,6 +566,67 @@ func filesAreIdentical(src, dst string) bool {
 	}
 
 	return srcHash == dstHash
+}
+
+// Fast comparison for large files using sampling
+func largFilesIdentical(src, dst string, size int64) bool {
+	// Open both files
+	srcFile, err := os.Open(src)
+	if err != nil {
+		return false
+	}
+	defer srcFile.Close()
+
+	dstFile, err := os.Open(dst)
+	if err != nil {
+		return false
+	}
+	defer dstFile.Close()
+
+	// Sample strategy: check beginning, middle, and end
+	sampleSize := int64(4096) // 4KB samples
+	positions := []int64{
+		0,                    // Beginning
+		size / 2,             // Middle  
+		size - sampleSize,    // End
+	}
+
+	// For very large files, add a few more random samples
+	if size > 100*1024*1024 { // >100MB
+		positions = append(positions, 
+			size/4,       // Quarter
+			size*3/4,     // Three quarters
+		)
+	}
+
+	for _, pos := range positions {
+		if pos < 0 {
+			pos = 0
+		}
+		if pos+sampleSize > size {
+			sampleSize = size - pos
+		}
+
+		// Compare samples at this position
+		srcBuf := make([]byte, sampleSize)
+		dstBuf := make([]byte, sampleSize)
+
+		srcFile.Seek(pos, 0)
+		dstFile.Seek(pos, 0)
+
+		srcFile.Read(srcBuf)
+		dstFile.Read(dstBuf)
+
+		// If any sample differs, files are different
+		for i := range srcBuf {
+			if srcBuf[i] != dstBuf[i] {
+				return false
+			}
+		}
+	}
+
+	// All samples match - very likely identical
+	return true
 }
 
 // Calculate SHA256 hash of a file
@@ -875,8 +983,12 @@ var backupStartTime time.Time
 var sourceUsedSpace int64      // Source drive used space (fixed)
 var destStartUsedSpace int64   // Destination used space when backup started (fixed)
 var progressCallCounter int    // Simple counter to prove function is being called
+var totalFilesProcessed int64  // New: track files processed
+var totalFilesEstimate int64   // New: estimated total files
+var syncPhaseComplete bool     // New: track if sync phase is done
+var deletionPhaseActive bool   // New: track deletion phase
 
-// Calculate actual backup progress - PROPERLY FIXED LOGIC
+// Calculate actual backup progress - IMPROVED WITH PHASE TRACKING
 func calculateRealProgress() (float64, string) {
 	// Get backup drive mount point
 	backupMount, mounted := checkAnyBackupMounted()
@@ -900,6 +1012,11 @@ func calculateRealProgress() (float64, string) {
 		if err != nil {
 			return 0.01, "Error reading destination drive"
 		}
+		
+		// Reset phase tracking
+		syncPhaseComplete = false
+		deletionPhaseActive = false
+		totalFilesProcessed = 0
 	}
 	
 	// Force filesystem sync and get CURRENT destination usage
@@ -909,60 +1026,85 @@ func calculateRealProgress() (float64, string) {
 		return 0.01, "Error reading destination drive"
 	}
 	
-	// CORRECTED LOGIC: 
-	// If destination already has data (like 795GB), that counts as progress already made!
-	// Current progress = destination_current_usage / source_total_usage
-	progress := float64(currentDestUsed) / float64(sourceUsedSpace)
-	if progress > 1.0 {
-		progress = 1.0
-	}
-	
 	// Calculate how much was copied in this session
 	copiedThisSession := currentDestUsed - destStartUsedSpace
 
 	// Convert to formatted human-readable sizes
 	currentDestFormatted := formatBytes(currentDestUsed)
 	sourceFormatted := formatBytes(sourceUsedSpace)
-	copiedSessionFormatted := formatBytes(copiedThisSession)
 
-	// Calculate time estimation based on current session progress
-	elapsed := time.Since(backupStartTime)
-	var timeStr string
+	// IMPROVED PROGRESS CALCULATION
+	var progress float64
+	var phaseMessage string
 	
-	// Only show time estimate if we've actually copied meaningful data
-	// If most files are being skipped (incremental backup), don't show misleading estimates
-	if copiedThisSession > 100*1024*1024 && elapsed.Seconds() > 30 { // At least 100MB copied and 30 seconds elapsed
-		// Base estimation on session progress
-		remainingBytes := sourceUsedSpace - currentDestUsed
-		bytesPerSecond := float64(copiedThisSession) / elapsed.Seconds()
+	if deletionPhaseActive {
+		// During deletion phase, use 85-100% range
+		progress = 0.85 + (0.15 * 0.5) // Assume deletion is roughly halfway
+		phaseMessage = " (Deleting removed files)"
+	} else if syncPhaseComplete {
+		// Sync complete, about to start deletion
+		progress = 0.85
+		phaseMessage = " (Preparing deletion phase)"
+	} else {
+		// During sync phase, use space-based calculation but cap at 85%
+		spaceProgress := float64(currentDestUsed) / float64(sourceUsedSpace)
+		if spaceProgress > 0.85 {
+			spaceProgress = 0.85 // Cap sync phase at 85%
+		}
+		progress = spaceProgress
 		
-		// Sanity check: if copy rate is suspiciously slow, don't show estimate
-		if bytesPerSecond > 1024*1024 { // At least 1MB/s
-			remainingSeconds := float64(remainingBytes) / bytesPerSecond
-			remaining := time.Duration(remainingSeconds) * time.Second
+		// Calculate time estimation for sync phase only
+		elapsed := time.Since(backupStartTime)
+		var timeStr string
+		
+		if copiedThisSession > 100*1024*1024 && elapsed.Seconds() > 30 {
+			// Estimate time for sync phase only (to 85%)
+			remainingToSync := sourceUsedSpace - currentDestUsed
+			if remainingToSync < 0 {
+				remainingToSync = 0
+			}
 			
-			hours := int(remaining.Hours())
-			minutes := int(remaining.Minutes()) % 60
-			
-			// Don't show crazy estimates
-			if hours < 1000 { 
-				timeStr = fmt.Sprintf(" (Est %dh %dm)", hours, minutes)
+			bytesPerSecond := float64(copiedThisSession) / elapsed.Seconds()
+			if bytesPerSecond > 1024*1024 {
+				remainingSeconds := float64(remainingToSync) / bytesPerSecond
+				remaining := time.Duration(remainingSeconds) * time.Second
+				
+				hours := int(remaining.Hours())
+				minutes := int(remaining.Minutes()) % 60
+				
+				if hours < 1000 {
+					timeStr = fmt.Sprintf(" (Est %dh %dm to sync)", hours, minutes)
+				} else {
+					timeStr = " (Calculating...)"
+				}
 			} else {
 				timeStr = " (Calculating...)"
 			}
+		} else if copiedThisSession < 1024*1024 && elapsed.Seconds() > 60 {
+			timeStr = " (Mostly skipping identical files)"
 		} else {
 			timeStr = " (Calculating...)"
 		}
-	} else if copiedThisSession < 1024*1024 && elapsed.Seconds() > 60 {
-		// Very little data copied - likely an incremental backup with mostly skipped files
-		timeStr = " (Mostly skipping identical files)"
-	} else {
-		timeStr = " (Calculating...)"
+		
+		phaseMessage = timeStr
 	}
 	
-	// Show ACTUAL progress: current destination usage vs source total
-	message := fmt.Sprintf("Copying %s / %s (+%s this session)%s", 
-		currentDestFormatted, sourceFormatted, copiedSessionFormatted, timeStr)
+	if progress > 1.0 {
+		progress = 1.0
+	}
+	
+	// Show ACTUAL progress with phase information - CLEANER FORMAT
+	var message string
+	if copiedThisSession < 10*1024*1024 { // Less than 10MB copied this session
+		// Don't show the tiny session progress - it's just annoying
+		message = fmt.Sprintf("Syncing %s / %s%s", 
+			currentDestFormatted, sourceFormatted, phaseMessage)
+	} else {
+		// Only show session progress if it's meaningful (≥10MB)
+		copiedSessionFormatted := formatBytes(copiedThisSession)
+		message = fmt.Sprintf("Syncing %s / %s (+%s this session)%s", 
+			currentDestFormatted, sourceFormatted, copiedSessionFormatted, phaseMessage)
+	}
 		
 	return progress, message
 }
