@@ -40,6 +40,7 @@ type model struct {
 	drives       []DriveInfo  // Available drives
 	selectedDrive string      // Selected drive path
 	cylonFrame   int          // Animation frame for cylon effect
+	canceling    bool         // Flag to indicate operation is being canceled
 }
 
 // Initial model
@@ -119,12 +120,28 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Error != nil {
 			m.message = fmt.Sprintf("Error: %v", msg.Error)
 			m.progress = 0
+			m.canceling = false // Reset canceling state on error
 		} else {
-			m.progress = msg.Percentage
-			m.message = msg.Message
+			// Only update progress if we're not canceling
+			if !m.canceling {
+				m.progress = msg.Percentage
+				m.message = msg.Message
+			}
 		}
 		
-		if msg.Done {
+		if msg.Done || m.canceling {
+			// Reset canceling state when operation completes
+			wasCanceling := m.canceling
+			m.canceling = false
+			
+			if wasCanceling {
+				// Operation was canceled
+				m.message = "Operation canceled by user"
+				return m, tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
+					return tea.KeyMsg{Type: tea.KeyEsc}
+				})
+			}
+			
 			// Check if this was a backup operation completion
 			if strings.Contains(m.operation, "backup") && msg.Error == nil {
 				// Backup completed successfully, ask about unmounting
@@ -140,8 +157,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				})
 			}
 		} else {
-			// NOT DONE - Schedule next progress update
-			return m, checkTUIBackupProgress()
+			// NOT DONE - Schedule next progress update (unless canceling)
+			if !m.canceling {
+				return m, checkTUIBackupProgress()
+			}
 		}
 		
 		return m, nil
@@ -166,6 +185,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+c", "q":
 			if m.screen == screenMain {
 				return m, tea.Quit
+			}
+			// Handle Ctrl+C during progress - set canceling state
+			if m.screen == screenProgress {
+				m.canceling = true
+				m.message = "Canceling operation... Please wait for cleanup to complete."
+				// Signal the backup operation to cancel
+				cancelBackup()
+				// Continue to let the progress update handle the cleanup
+				return m, nil
 			}
 			// Go back to main menu from other screens
 			m.screen = screenMain

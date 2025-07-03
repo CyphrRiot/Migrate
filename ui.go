@@ -299,36 +299,62 @@ func (m model) renderConfirmation() string {
 func (m model) renderProgress() string {
 	var s strings.Builder
 
-	// Header
-	s.WriteString(titleStyle.Render("🔄 Operation in Progress") + "\n\n")
+	// App branding header
+	ascii := asciiStyle.Render(asciiArt)
+	s.WriteString(ascii + "\n")
+	title := titleStyle.Render("Beautiful Backup & Restore Tool")
+	s.WriteString(title + "\n")
+	subtitle := subtitleStyle.Render("v1.0.0 • Created by Cypher Riot")
+	s.WriteString(subtitle + "\n\n")
+
+	// Operation title
+	if m.canceling {
+		s.WriteString(titleStyle.Render("🛑 Canceling Operation") + "\n\n")
+	} else {
+		s.WriteString(titleStyle.Render("🔄 Operation in Progress") + "\n\n")
+	}
 
 	// Operation info - show source and destination drives
 	if m.operation == "system_backup" {
-		s.WriteString("Original Drive: /\n")
-		s.WriteString("Backup Drive: " + m.selectedDrive + "\n\n")
+		s.WriteString("📁 Backup Type: Complete System (1:1)\n")
+		s.WriteString("📂 Source: / (Internal Drive)\n")
+		s.WriteString("💾 Destination: " + m.selectedDrive + " (External Drive)\n\n")
 	} else if m.operation == "home_backup" {
-		s.WriteString("Original Drive: ~/\n")  
-		s.WriteString("Backup Drive: " + m.selectedDrive + "\n\n")
+		s.WriteString("📁 Backup Type: Home Directory Only\n")
+		s.WriteString("📂 Source: ~/ (Home Directory)\n")  
+		s.WriteString("💾 Destination: " + m.selectedDrive + " (External Drive)\n\n")
 	} else {
 		opInfo := fmt.Sprintf("Running: %s", m.operation)
 		s.WriteString(subtitleStyle.Render(opInfo) + "\n")
 	}
 
-	// Progress bar
-	progressBar := m.renderProgressBar()
-	s.WriteString(progressBar + "\n\n")
+	// Progress bar (only show if not canceling)
+	if !m.canceling {
+		progressBar := m.renderProgressBar()
+		s.WriteString(progressBar + "\n\n")
+	}
 
 	// Status message
 	if m.message != "" {
-		statusMsg := lipgloss.NewStyle().
-			Foreground(secondaryColor).
-			Align(lipgloss.Center).
-			Render(m.message)
+		var statusStyle lipgloss.Style
+		if m.canceling || strings.Contains(m.message, "Cancel") {
+			statusStyle = warningStyle
+		} else {
+			statusStyle = lipgloss.NewStyle().
+				Foreground(secondaryColor).
+				Align(lipgloss.Center)
+		}
+		statusMsg := statusStyle.Render(m.message)
 		s.WriteString(statusMsg + "\n")
 	}
 
 	// Help text
-	help := helpStyle.Render("Please wait... • Ctrl+C: cancel")
+	var help string
+	if m.canceling {
+		help = helpStyle.Render("Please wait for cleanup to complete...")
+	} else {
+		help = helpStyle.Render("Please wait... • Ctrl+C: cancel")
+	}
 	s.WriteString("\n" + help)
 
 	// Center the content
