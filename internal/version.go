@@ -7,9 +7,9 @@ package internal
 
 const (
 	AppName    = "Migrate"
-	AppVersion = "1.0.7"  // ⬅️ CHANGE VERSION HERE ONLY
+	AppVersion = "1.0.8"  // ⬅️ CHANGE VERSION HERE ONLY
 	AppAuthor  = "Cypher Riot"
-	AppDesc    = "Live Backup & Restore"
+	AppDesc    = "A Beautiful Live Backup & Restore"
 )
 
 // GetVersionString returns the formatted version string for display
@@ -27,9 +27,9 @@ func GetAppTitle() string {
 	return AppName + " v" + AppVersion + " - " + AppDesc
 }
 
-// GetSubtitle returns the formatted subtitle with version and author
+// GetSubtitle returns the formatted subtitle with version only
 func GetSubtitle() string {
-	return "v" + AppVersion + " • Created by " + AppAuthor
+	return "v" + AppVersion + " by " + AppAuthor  // Removed the bullet point
 }
 
 // GetAboutText returns the formatted about text
