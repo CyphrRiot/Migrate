@@ -1,10 +1,14 @@
 # Makefile for Migrate
 
-.PHONY: build clean install uninstall run test
+.PHONY: build clean install uninstall run test static
 
-# Build the application
+# Build the application (static binary)
 build:
-	go build -o bin/migrate .
+	CGO_ENABLED=0 go build -a -ldflags '-extldflags "-static"' -o bin/migrate .
+
+# Build static binary (explicit target)
+static:
+	CGO_ENABLED=0 go build -a -ldflags '-extldflags "-static"' -o bin/migrate .
 
 # Clean build artifacts
 clean:
@@ -26,7 +30,7 @@ run: build
 
 # Test build
 test:
-	go build -o /tmp/migrate-test .
+	CGO_ENABLED=0 go build -a -ldflags '-extldflags "-static"' -o /tmp/migrate-test .
 	rm /tmp/migrate-test
 
 # Development run (with go run)
