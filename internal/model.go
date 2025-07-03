@@ -1,4 +1,4 @@
-package main
+package internal
 
 import (
 	"fmt"
@@ -25,7 +25,7 @@ const (
 )
 
 // Model represents the application state
-type model struct {
+type Model struct {
 	screen       screen
 	lastScreen   screen
 	cursor       int
@@ -43,9 +43,9 @@ type model struct {
 	canceling    bool         // Flag to indicate operation is being canceled
 }
 
-// Initial model
-func initialModel() model {
-	return model{
+// InitialModel creates a new model
+func InitialModel() Model {
+	return Model{
 		screen:   screenMain,
 		choices:  []string{"🚀 Backup System", "🔄 Restore System", "💾 Mount External Drive", "ℹ️ About", "❌ Exit"},
 		selected: make(map[int]struct{}),
@@ -55,12 +55,12 @@ func initialModel() model {
 }
 
 // Initialize
-func (m model) Init() tea.Cmd {
+func (m Model) Init() tea.Cmd {
 	return nil
 }
 
 // Update handles messages
-func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -159,7 +159,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			// NOT DONE - Schedule next progress update (unless canceling)
 			if !m.canceling {
-				return m, checkTUIBackupProgress()
+				return m, CheckTUIBackupProgress()
 			}
 		}
 		
@@ -191,7 +191,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.canceling = true
 				m.message = "Canceling operation... Please wait for cleanup to complete."
 				// Signal the backup operation to cancel
-				cancelBackup()
+				CancelBackup()
 				// Continue to let the progress update handle the cleanup
 				return m, nil
 			}
@@ -238,7 +238,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 // Handle menu selection
-func (m model) handleSelection() (tea.Model, tea.Cmd) {
+func (m Model) handleSelection() (tea.Model, tea.Cmd) {
 	switch m.screen {
 	case screenMain:
 		switch m.cursor {
@@ -254,7 +254,7 @@ func (m model) handleSelection() (tea.Model, tea.Cmd) {
 			m.screen = screenDriveSelect
 			m.cursor = 0
 			// Load available drives
-			return m, loadDrives()
+			return m, LoadDrives()
 		case 3: // About
 			m.screen = screenAbout
 		case 4: // Exit
@@ -267,13 +267,13 @@ func (m model) handleSelection() (tea.Model, tea.Cmd) {
 			// Go to drive selection instead of hardcoded drive checking
 			m.screen = screenDriveSelect
 			m.cursor = 0
-			return m, loadDrives()
+			return m, LoadDrives()
 		case 1: // Home Directory Only
 			m.operation = "home_backup"
 			// Go to drive selection instead of hardcoded drive checking
 			m.screen = screenDriveSelect
 			m.cursor = 0
-			return m, loadDrives()
+			return m, LoadDrives()
 		case 2: // Back
 			m.screen = screenMain
 			m.choices = []string{"🚀 Backup System", "🔄 Restore System", "💾 Mount External Drive", "ℹ️ About", "❌ Exit"}
@@ -311,20 +311,20 @@ func (m model) handleSelection() (tea.Model, tea.Cmd) {
 				// Start the actual backup with progress checking
 				return m, tea.Batch(
 					startActualBackup(m.operation, m.selectedDrive),
-					checkTUIBackupProgress(),
+					CheckTUIBackupProgress(),
 				)
 			case "system_backup", "home_backup":
 				// Start backup with progress monitoring AND cylon animation
 				return m, tea.Batch(
 					startActualBackup(m.operation, m.selectedDrive),
-					checkTUIBackupProgress(),
+					CheckTUIBackupProgress(),
 					tea.Tick(100*time.Millisecond, func(t time.Time) tea.Msg {
 						return cylonAnimateMsg{}
 					}),
 				)
 			case "unmount_backup":
 				// Unmount the backup drive
-				return m, performBackupUnmount()
+				return m, PerformBackupUnmount()
 			case "system_restore":
 				return m, startRestore("/")
 			default:
@@ -385,7 +385,7 @@ func (m model) handleSelection() (tea.Model, tea.Cmd) {
 }
 
 // View renders the UI
-func (m model) View() string {
+func (m Model) View() string {
 	switch m.screen {
 	case screenMain:
 		return m.renderMainMenu()

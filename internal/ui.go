@@ -1,4 +1,4 @@
-package main
+package internal
 
 import (
 	"fmt"
@@ -123,7 +123,7 @@ const asciiArt = `▖  ▖▘      ▗
      ▄▌        `
 
 // Render the main menu
-func (m model) renderMainMenu() string {
+func (m Model) renderMainMenu() string {
 	var s strings.Builder
 
 	// Header
@@ -149,7 +149,7 @@ func (m model) renderMainMenu() string {
 }
 
 // Render backup menu
-func (m model) renderBackupMenu() string {
+func (m Model) renderBackupMenu() string {
 	var s strings.Builder
 
 	// Header with ASCII art
@@ -182,7 +182,7 @@ func (m model) renderBackupMenu() string {
 }
 
 // Render restore menu
-func (m model) renderRestoreMenu() string {
+func (m Model) renderRestoreMenu() string {
 	var s strings.Builder
 
 	// Header
@@ -217,7 +217,7 @@ func (m model) renderRestoreMenu() string {
 }
 
 // Render about screen
-func (m model) renderAbout() string {
+func (m Model) renderAbout() string {
 	var s strings.Builder
 
 	// Header
@@ -260,7 +260,7 @@ Press any key to return to main menu`
 }
 
 // Render confirmation dialog
-func (m model) renderConfirmation() string {
+func (m Model) renderConfirmation() string {
 	var s strings.Builder
 
 	// Header
@@ -296,7 +296,7 @@ func (m model) renderConfirmation() string {
 }
 
 // Render progress screen
-func (m model) renderProgress() string {
+func (m Model) renderProgress() string {
 	var s strings.Builder
 
 	// App branding header
@@ -367,7 +367,7 @@ func (m model) renderProgress() string {
 }
 
 // Render progress bar with beautiful styling and cylon animation
-func (m model) renderProgressBar() string {
+func (m Model) renderProgressBar() string {
 	width := 50
 	
 	// Check if this is indeterminate progress (-1)
@@ -434,7 +434,7 @@ func (m model) renderProgressBar() string {
 }
 
 // Render header with beautiful ASCII art
-func (m model) renderHeader() string {
+func (m Model) renderHeader() string {
 	ascii := asciiStyle.Render(asciiArt)
 	title := titleStyle.Render(AppDesc)
 	subtitle := subtitleStyle.Render(GetSubtitle())
@@ -443,7 +443,7 @@ func (m model) renderHeader() string {
 }
 
 // Render drive selection screen
-func (m model) renderDriveSelect() string {
+func (m Model) renderDriveSelect() string {
 	var s strings.Builder
 
 	// Header
@@ -491,7 +491,7 @@ func (m model) renderDriveSelect() string {
 }
 
 // Render help text
-func (m model) renderHelp() string {
+func (m Model) renderHelp() string {
 	return helpStyle.Render("↑/↓: navigate • enter: select • q: quit • esc: back")
 }
 

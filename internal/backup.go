@@ -1,4 +1,4 @@
-package main
+package internal
 
 import (
 	"encoding/json"
@@ -26,7 +26,7 @@ func shouldCancelBackup() bool {
 }
 
 // Set backup cancellation flag
-func cancelBackup() {
+func CancelBackup() {
 	atomic.StoreInt64(&backupCancelFlag, 1)
 }
 
@@ -640,7 +640,7 @@ func copyFileWithOwnership(src, dst string, srcInfo os.FileInfo, uid, gid int) e
 }
 
 // Check TUI backup progress with real disk usage monitoring
-func checkTUIBackupProgress() tea.Cmd {
+func CheckTUIBackupProgress() tea.Cmd {
 	return tea.Tick(200*time.Millisecond, func(t time.Time) tea.Msg {
 		if tuiBackupCompleted {
 			if tuiBackupError != nil {
@@ -933,8 +933,8 @@ The restored system will overwrite the fresh install and boot exactly as it was 
 	return os.WriteFile(infoPath, []byte(info), 0644)
 }
 
-// Load available drives - SAFE external drive detection using HOTPLUG
-func loadDrives() tea.Cmd {
+// LoadDrives loads available drives - SAFE external drive detection using HOTPLUG
+func LoadDrives() tea.Cmd {
 	return func() tea.Msg {
 		// Get all block devices including hotplug info
 		cmd := exec.Command("lsblk", "-J", "-o", "NAME,SIZE,LABEL,UUID,FSTYPE,MOUNTPOINT,TYPE,HOTPLUG")
@@ -1270,7 +1270,7 @@ func startActualBackup(operationType, mountPoint string) tea.Cmd {
 }
 
 // Perform backup drive unmount after successful backup (works with any drive)
-func performBackupUnmount() tea.Cmd {
+func PerformBackupUnmount() tea.Cmd {
 	return func() tea.Msg {
 		// Get the current backup mount point
 		mountPoint, mounted := checkAnyBackupMounted()
