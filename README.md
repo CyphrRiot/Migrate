@@ -1,4 +1,4 @@
-# Migrate v1.0.4
+# Migrate v1.0.5
 <!-- Version is defined in version.go - update there to change everywhere -->
 
 A stunningly beautiful **TUI-only** backup and restore tool built with [Bubble Tea](https://github.com/charmbracelet/bubbletea) and [Lipgloss](https://github.com/charmbracelet/lipgloss), featuring Tokyo Night inspired theming and **pure Go implementation with zero external dependencies**.
@@ -283,11 +283,12 @@ require (
 
 ## 🎯 Recent Achievements
 
-### ✅ Critical Bug Fix (v1.0.4)
+### ✅ CRITICAL Bug Fixes (v1.0.5)
+- **FIXED**: Goroutine execution bug that prevented incremental backups
+- **FIXED**: Btrfs subvolume handling - `/home` directory now properly backed up
 - **FIXED**: Directory contents not being copied when directory creation fails
-- **FIXED**: Changed `os.Mkdir` to `os.MkdirAll` for better reliability
-- **IMPROVED**: Better error logging and recovery - continues processing even if directory creation fails
-- **ENHANCED**: More detailed logging for directory operations
+- **IMPROVED**: Synchronous backup execution eliminates race conditions
+- **ENHANCED**: Smart filesystem boundary detection for btrfs subvolumes
 
 ### ✅ Code Reorganization (v1.0.3)
 - Split monolithic backup.go (1,700+ lines) into focused modules

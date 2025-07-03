@@ -34,6 +34,7 @@ func syncDirectories(src, dst string, logFile *os.File) error {
 
 	if logFile != nil {
 		fmt.Fprintf(logFile, "Starting directory walk of %s\n", src)
+		fmt.Fprintf(logFile, "DEBUG: Source='%s', Destination='%s'\n", src, dst)
 	}
 
 	// Counter to periodically check for cancellation and show progress
@@ -41,6 +42,18 @@ func syncDirectories(src, dst string, logFile *os.File) error {
 
 	// Walk through the source directory efficiently
 	err = filepath.WalkDir(src, func(path string, d os.DirEntry, err error) error {
+		// DEBUG: Log key directory traversals
+		if strings.Contains(path, "/home/grendel") && d.IsDir() && logFile != nil {
+			fmt.Fprintf(logFile, "DEBUG: Walking /home/grendel directory: %s\n", path)
+		}
+		if strings.Contains(path, "Documents") && d.IsDir() && logFile != nil {
+			fmt.Fprintf(logFile, "DEBUG: Walking Documents directory: %s\n", path)
+		}
+		// DEBUG: Log when we encounter Takeout directory
+		if strings.Contains(path, "Takeout") && logFile != nil {
+			fmt.Fprintf(logFile, "DEBUG: Walking encountered Takeout path: %s (isDir=%v)\n", path, d.IsDir())
+		}
+
 		// Check for cancellation less frequently for better performance
 		fileCounter++
 		if fileCounter%1000 == 0 && shouldCancelBackup() { // Check every 1000 files instead of 100
@@ -57,6 +70,9 @@ func syncDirectories(src, dst string, logFile *os.File) error {
 		// Skip excluded patterns
 		for _, pattern := range ExcludePatterns {
 			if strings.Contains(path, strings.TrimSuffix(pattern, "/*")) {
+				if strings.Contains(path, "Takeout") && logFile != nil {
+					fmt.Fprintf(logFile, "DEBUG: Takeout path %s matched exclusion pattern %s - SKIPPING\n", path, pattern)
+				}
 				if d.IsDir() {
 					return filepath.SkipDir
 				}
@@ -87,27 +103,42 @@ func syncDirectories(src, dst string, logFile *os.File) error {
 				}
 				return nil
 			}
-			// Skip if on a different filesystem (-x option)
+			
+			// Skip if on a different filesystem (-x option) BUT allow /home even if different subvolume
 			if stat.Dev != srcDev {
-				if logFile != nil {
-					fmt.Fprintf(logFile, "Skipping different filesystem: %s\n", path)
+				// Allow /home directory even if it's on different btrfs subvolume
+				if strings.HasPrefix(path, "/home") {
+					if logFile != nil {
+						fmt.Fprintf(logFile, "Allowing /home on different filesystem (likely btrfs subvolume): %s\n", path)
+					}
+				} else {
+					if logFile != nil {
+						fmt.Fprintf(logFile, "Skipping different filesystem: %s\n", path)
+					}
+					return filepath.SkipDir
 				}
-				return filepath.SkipDir
+			}
+
+			// DEBUG: Log Takeout directory processing
+			if strings.Contains(path, "Takeout") {
+				if logFile != nil {
+					fmt.Fprintf(logFile, "DEBUG: Processing Takeout directory: %s -> %s\n", path, dstPath)
+				}
 			}
 
 			// Create the directory if it doesn't exist using MkdirAll for safety
 			err = os.MkdirAll(dstPath, fi.Mode())
 			if err != nil {
 				if logFile != nil {
-					fmt.Fprintf(logFile, "Error creating directory %s: %v (continuing)\n", dstPath, err)
+					fmt.Fprintf(logFile, "ERROR: Failed to create directory %s: %v (continuing)\n", dstPath, err)
 				}
 				// Continue processing - don't skip the directory contents!
 			} else {
 				// Set ownership and timestamps only if directory creation succeeded
 				os.Lchown(dstPath, int(stat.Uid), int(stat.Gid))
 				os.Chtimes(dstPath, fi.ModTime(), fi.ModTime())
-				if logFile != nil && strings.Contains(path, "Takeout") {
-					fmt.Fprintf(logFile, "Created directory: %s -> %s\n", path, dstPath)
+				if strings.Contains(path, "Takeout") && logFile != nil {
+					fmt.Fprintf(logFile, "SUCCESS: Created Takeout directory: %s -> %s\n", path, dstPath)
 				}
 			}
 			return nil // Continue processing directory contents
@@ -128,6 +159,11 @@ func syncDirectories(src, dst string, logFile *os.File) error {
 			// Count this file in our totals
 			atomic.AddInt64(&totalFilesFound, 1)
 
+			// DEBUG: Log Takeout files
+			if strings.Contains(path, "Takeout") && logFile != nil {
+				fmt.Fprintf(logFile, "DEBUG: Processing Takeout file: %s -> %s\n", path, dstPath)
+			}
+
 			// Quick paths for known scenarios
 			if _, err := os.Stat(dstPath); os.IsNotExist(err) {
 				// Destination doesn't exist - definitely need to copy
@@ -136,6 +172,9 @@ func syncDirectories(src, dst string, logFile *os.File) error {
 					fmt.Fprintf(logFile, "Error copying %s: %v\n", path, err)
 				} else {
 					atomic.AddInt64(&filesCopied, 1)
+					if strings.Contains(path, "Takeout") && logFile != nil {
+						fmt.Fprintf(logFile, "SUCCESS: Copied Takeout file: %s -> %s\n", path, dstPath)
+					}
 					if logFile != nil && filesCopied%100 == 0 {
 						fmt.Fprintf(logFile, "Copied %s files, skipped %s identical files\n",
 							formatNumber(filesCopied), formatNumber(filesSkipped))
