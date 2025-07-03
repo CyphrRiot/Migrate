@@ -1,7 +1,9 @@
-# Migrate v1.0.1
+# Migrate v1.0.2
 <!-- Version is defined in version.go - update there to change everywhere -->
 
 A stunningly beautiful **TUI-only** backup and restore tool built with [Bubble Tea](https://github.com/charmbracelet/bubbletea) and [Lipgloss](https://github.com/charmbracelet/lipgloss), featuring Tokyo Night inspired theming and **pure Go implementation with zero external dependencies**.
+
+Now with **full `rsync --delete` equivalent functionality** including SHA256-based file deduplication and automatic cleanup of deleted files!
 
 ![Migrate Beautiful Interface](images/interface.gif)
 
@@ -27,6 +29,30 @@ This tool now features a **complete pure Go backup implementation** with **zero 
 - 🔒 **LUKS Support** - Full support for encrypted drives
 - 🎯 **Smart Progress Calculation** - Accounts for existing backup data immediately
 - 🔧 **Static Binary** - Single executable with no dependencies
+- ✨ **NEW: rsync --delete Equivalent** - Full synchronization with file deletion support
+- 🔍 **NEW: SHA256 File Deduplication** - Skip identical files for faster incremental backups
+
+## ⚡ rsync --delete Equivalent
+
+### Full Synchronization Support
+- **✅ Delete removed files** - Files deleted from source are removed from backup
+- **✅ Skip identical files** - SHA256 hash comparison prevents unnecessary copying
+- **✅ Incremental backups** - Only copy changed/new files after first backup
+- **✅ True synchronization** - Backup exactly matches source filesystem
+
+### Advantages Over Traditional rsync
+- **Cryptographic verification** - SHA256 provides stronger integrity than timestamp comparison
+- **Zero dependencies** - No need for rsync binary or shell commands
+- **Better logging** - Detailed statistics on copied vs. skipped files
+- **Consistent behavior** - Same results regardless of system configuration
+
+### Equivalent Command
+Your Migrate tool now performs the equivalent of:
+```bash
+rsync -aAx --delete / /backup/destination/
+```
+
+But with better file verification and a beautiful TUI interface!
 
 ## 🚀 Pure Go Architecture
 

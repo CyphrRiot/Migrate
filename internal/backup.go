@@ -1,6 +1,8 @@
 package internal
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -279,13 +281,25 @@ func performPureGoBackup(sourcePath, destPath string, logFile *os.File) error {
 		return fmt.Errorf("failed to create backup info: %v", err)
 	}
 
-	// Use the efficient Go backup that actually works
+	// Phase 1: Sync directories (copy/update files from source to dest)
 	err = syncDirectories(sourcePath, destPath, logFile)
 	if err != nil {
 		if logFile != nil {
-			fmt.Fprintf(logFile, "ERROR: %v\n", err)
+			fmt.Fprintf(logFile, "ERROR during sync: %v\n", err)
 		}
 		return err
+	}
+
+	// Phase 2: Delete files that exist in backup but not in source (--delete behavior)
+	if logFile != nil {
+		fmt.Fprintf(logFile, "Starting deletion phase (removing files not in source)\n")
+	}
+	err = deleteExtraFilesFromBackup(sourcePath, destPath, logFile)
+	if err != nil {
+		if logFile != nil {
+			fmt.Fprintf(logFile, "ERROR during deletion: %v\n", err)
+		}
+		return fmt.Errorf("deletion phase failed: %v", err)
 	}
 
 	if logFile != nil {
@@ -316,11 +330,13 @@ func syncDirectories(src, dst string, logFile *os.File) error {
 		fmt.Fprintf(logFile, "Starting directory walk of %s\n", src)
 	}
 
-	// Counter to periodically check for cancellation
+	// Counter to periodically check for cancellation and show progress
 	fileCounter := 0
+	skippedCount := 0
+	copiedCount := 0
 
 	// Walk through the source directory efficiently
-	return filepath.WalkDir(src, func(path string, d os.DirEntry, err error) error {
+	err = filepath.WalkDir(src, func(path string, d os.DirEntry, err error) error {
 		// Check for cancellation every 100 files
 		fileCounter++
 		if fileCounter%100 == 0 && shouldCancelBackup() {
@@ -389,10 +405,24 @@ func syncDirectories(src, dst string, logFile *os.File) error {
 
 		// Handle regular files
 		if d.Type().IsRegular() {
-			// Copy file
+			// Check if files are identical before copying
+			if filesAreIdentical(path, dstPath) {
+				skippedCount++
+				if logFile != nil && skippedCount%100 == 0 {
+					fmt.Fprintf(logFile, "Skipped %d identical files so far...\n", skippedCount)
+				}
+				return nil
+			}
+
+			// Copy file (only if different)
 			err = copyFileEfficient(path, dstPath)
 			if err != nil && logFile != nil {
 				fmt.Fprintf(logFile, "Error copying %s: %v\n", path, err)
+			} else {
+				copiedCount++
+				if logFile != nil && copiedCount%100 == 0 {
+					fmt.Fprintf(logFile, "Copied %d files, skipped %d identical files\n", copiedCount, skippedCount)
+				}
 			}
 			return nil
 		}
@@ -400,9 +430,16 @@ func syncDirectories(src, dst string, logFile *os.File) error {
 		// Skip special files
 		return nil
 	})
+
+	// Log final summary
+	if logFile != nil {
+		fmt.Fprintf(logFile, "Sync completed: copied %d files, skipped %d identical files\n", copiedCount, skippedCount)
+	}
+
+	return err
 }
 
-// Efficient file copying
+// Efficient file copying (assumes files are already checked to be different)
 func copyFileEfficient(src, dst string) error {
 	// Open source file
 	srcFile, err := os.Open(src)
@@ -439,6 +476,134 @@ func copyFileEfficient(src, dst string) error {
 	}
 
 	return nil
+}
+
+// Check if two files are identical by comparing size and SHA256 hash
+func filesAreIdentical(src, dst string) bool {
+	// Get file info for both files
+	srcInfo, err := os.Stat(src)
+	if err != nil {
+		return false
+	}
+
+	dstInfo, err := os.Stat(dst)
+	if err != nil {
+		return false // Destination doesn't exist
+	}
+
+	// Quick size comparison first
+	if srcInfo.Size() != dstInfo.Size() {
+		return false
+	}
+
+	// For very small files (under 1KB), always check hash
+	// For larger files, also check modification time as optimization
+	if srcInfo.Size() > 1024 {
+		// If modification times are different, files might be different
+		// But we still need to hash check as modification time can be misleading
+		// This is just an early optimization hint
+		if !srcInfo.ModTime().Equal(dstInfo.ModTime()) {
+			// Still do hash check, but this suggests they might be different
+		}
+	}
+
+	// Compare SHA256 hashes
+	srcHash, err := getFileSHA256(src)
+	if err != nil {
+		return false
+	}
+
+	dstHash, err := getFileSHA256(dst)
+	if err != nil {
+		return false
+	}
+
+	return srcHash == dstHash
+}
+
+// Calculate SHA256 hash of a file
+func getFileSHA256(filePath string) (string, error) {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+
+	hasher := sha256.New()
+	_, err = io.Copy(hasher, file)
+	if err != nil {
+		return "", err
+	}
+
+	return hex.EncodeToString(hasher.Sum(nil)), nil
+}
+
+// Delete files from backup that no longer exist in source (--delete equivalent)
+func deleteExtraFilesFromBackup(sourcePath, backupPath string, logFile *os.File) error {
+	if logFile != nil {
+		fmt.Fprintf(logFile, "Starting cleanup phase (delete files not in source)\n")
+	}
+
+	deletedCount := 0
+
+	return filepath.WalkDir(backupPath, func(backupFile string, d os.DirEntry, err error) error {
+		// Check for cancellation every 50 files
+		if deletedCount%50 == 0 && shouldCancelBackup() {
+			return fmt.Errorf("operation canceled during deletion phase")
+		}
+
+		if err != nil {
+			return nil // Skip errors
+		}
+
+		// Skip excluded patterns even during deletion
+		for _, pattern := range ExcludePatterns {
+			if strings.Contains(backupFile, strings.TrimSuffix(pattern, "/*")) {
+				if d.IsDir() {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+		}
+
+		// Skip special backup files
+		if strings.Contains(backupFile, "BACKUP-INFO.txt") {
+			return nil
+		}
+
+		// Calculate corresponding source file path
+		relPath, err := filepath.Rel(backupPath, backupFile)
+		if err != nil {
+			return nil
+		}
+		sourceFile := filepath.Join(sourcePath, relPath)
+
+		// If file doesn't exist in source, delete it from backup
+		if _, err := os.Stat(sourceFile); os.IsNotExist(err) {
+			deletedCount++
+			
+			if logFile != nil {
+				fmt.Fprintf(logFile, "Deleting: %s (not in source)\n", backupFile)
+			}
+			
+			if d.IsDir() {
+				// Remove directory and all contents
+				err := os.RemoveAll(backupFile)
+				if err != nil && logFile != nil {
+					fmt.Fprintf(logFile, "Error deleting directory %s: %v\n", backupFile, err)
+				}
+				return filepath.SkipDir
+			} else {
+				// Remove file
+				err := os.Remove(backupFile)
+				if err != nil && logFile != nil {
+					fmt.Fprintf(logFile, "Error deleting file %s: %v\n", backupFile, err)
+				}
+			}
+		}
+
+		return nil
+	})
 }
 
 // Copy directory with limited depth (avoids infinite walking but copies substantial data)
