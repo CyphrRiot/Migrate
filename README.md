@@ -1,6 +1,6 @@
 # Migrate v1.0.0
 
-A stunningly beautiful backup and restore tool built with [Bubble Tea](https://github.com/charmbracelet/bubbletea) and [Lipgloss](https://github.com/charmbracelet/lipgloss), featuring Tokyo Night inspired theming and **pure Go implementation with zero external dependencies**.
+A stunningly beautiful **TUI-only** backup and restore tool built with [Bubble Tea](https://github.com/charmbracelet/bubbletea) and [Lipgloss](https://github.com/charmbracelet/lipgloss), featuring Tokyo Night inspired theming and **pure Go implementation with zero external dependencies**.
 
 ## ⚠️ Warning: 
 > ⚠️ This is new software with significant improvements over the bash version. While extensively tested, please ensure you have important data backed up elsewhere before use. Test backup and restore operations in non-critical environments first. ⚠️
@@ -13,7 +13,8 @@ This tool now features a **complete pure Go backup implementation** with **zero 
 
 ## ✨ Features
 
-- 🎨 **Absolutely Beautiful TUI** - Tokyo Night color scheme with smooth animations
+- 🎨 **Absolutely Beautiful TUI** - Tokyo Night color scheme with smooth animations  
+- 🎯 **TUI-Only Interface** - No confusing CLI options, just beautiful UI always
 - 🚀 **Complete System Backup** - 1:1 backup of your entire system using pure Go
 - 🏠 **Home Directory Backup** - Selective backup of personal files
 - 🔄 **System Restore** - Full system restoration from backup
@@ -101,19 +102,18 @@ cp bin/migrate ~/.local/bin/
 
 ## 🖥️ Usage
 
-### Interactive Mode (Recommended)
+### Beautiful TUI Interface (Only Mode)
 ```bash
 sudo migrate
 ```
 
-### CLI Mode
-```bash
-# Start backup
-sudo migrate backup
+That's it! The tool always launches the beautiful TUI interface - no CLI options needed.
 
-# Show help
-migrate help
-```
+### What You'll See
+- 🎨 **Stunning Tokyo Night interface** with smooth animations
+- 📱 **Simple menu system** - navigate with arrow keys and Enter
+- 🔍 **Automatic drive detection** - only shows external/removable drives
+- 📊 **Real-time progress** - watch your backup progress in real-time
 
 ## ⚙️ How It Works
 
@@ -195,7 +195,7 @@ The following paths are automatically excluded for safety:
 
 ### File Structure
 ```
-├── main.go       # Entry point and CLI handling
+├── main.go       # Entry point and TUI initialization
 ├── model.go      # Bubble Tea state management
 ├── ui.go         # Beautiful interface rendering
 ├── backup.go     # Pure Go backup implementation
@@ -242,6 +242,12 @@ require (
 
 ## 🎯 Recent Achievements
 
+### ✅ TUI-Only Interface (v1.0.0)
+- Removed all CLI options - beautiful interface always
+- Simplified user experience - just run `migrate` 
+- No confusion about modes or options
+- Consistent, delightful interaction every time
+
 ### ✅ Pure Go Implementation (v1.0.0)
 - Complete rewrite using pure Go instead of rsync
 - Zero external dependencies during backup operations
@@ -279,4 +285,4 @@ Personal system administration toolkit
 
 ---
 
-**🎉 Achievement Unlocked**: Pure Go backup tool with real-time progress tracking and zero external dependencies!
+**🎉 Achievement Unlocked**: TUI-only pure Go backup tool with real-time progress tracking and zero external dependencies!

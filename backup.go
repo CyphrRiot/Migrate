@@ -10,11 +10,30 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
+
+// Global cancellation flag for backup operations
+var backupCancelFlag int64
+
+// Check if backup should be canceled
+func shouldCancelBackup() bool {
+	return atomic.LoadInt64(&backupCancelFlag) != 0
+}
+
+// Set backup cancellation flag
+func cancelBackup() {
+	atomic.StoreInt64(&backupCancelFlag, 1)
+}
+
+// Reset backup cancellation flag
+func resetBackupCancel() {
+	atomic.StoreInt64(&backupCancelFlag, 0)
+}
 
 // Configuration constants  
 const (
@@ -181,6 +200,9 @@ var tuiBackupError error
 
 // Run backup using pure Go implementation (TUI only)
 func runBackupSilently(config BackupConfig) {
+	// Reset cancellation flag at start
+	resetBackupCancel()
+
 	// Setup logging
 	logFile, err := os.OpenFile("migrate.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err == nil {
@@ -210,7 +232,11 @@ func runBackupSilently(config BackupConfig) {
 				fmt.Fprintf(logFile, "PURE GO ERROR: %v\n", err)
 			}
 			tuiBackupCompleted = true
-			tuiBackupError = fmt.Errorf("backup failed: %v", err)
+			if shouldCancelBackup() {
+				tuiBackupError = fmt.Errorf("backup canceled by user")
+			} else {
+				tuiBackupError = fmt.Errorf("backup failed: %v", err)
+			}
 		} else {
 			if logFile != nil {
 				fmt.Fprintf(logFile, "PURE GO SUCCESS: completed\n")
@@ -254,6 +280,11 @@ func performPureGoBackup(sourcePath, destPath string, logFile *os.File) error {
 
 // Efficient sync directories (based on your working rsync-like implementation)
 func syncDirectories(src, dst string, logFile *os.File) error {
+	// Check for cancellation before starting
+	if shouldCancelBackup() {
+		return fmt.Errorf("operation canceled")
+	}
+
 	// Get the device ID of the source directory to enforce -x (no crossing filesystem boundaries)
 	srcStat, err := os.Lstat(src)
 	if err != nil {
@@ -269,8 +300,17 @@ func syncDirectories(src, dst string, logFile *os.File) error {
 		fmt.Fprintf(logFile, "Starting directory walk of %s\n", src)
 	}
 
+	// Counter to periodically check for cancellation
+	fileCounter := 0
+
 	// Walk through the source directory efficiently
 	return filepath.WalkDir(src, func(path string, d os.DirEntry, err error) error {
+		// Check for cancellation every 100 files
+		fileCounter++
+		if fileCounter%100 == 0 && shouldCancelBackup() {
+			return fmt.Errorf("operation canceled")
+		}
+
 		if err != nil {
 			if logFile != nil {
 				fmt.Fprintf(logFile, "Skip error path %s: %v\n", path, err)
