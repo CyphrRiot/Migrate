@@ -8,6 +8,10 @@
 *.so
 *.dylib
 
+# Ignore my proposal.md and wip.md
+proposal.md
+wip.md
+
 # Test binary, built with `go test -c`
 *.test
 
