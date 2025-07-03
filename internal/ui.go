@@ -38,7 +38,7 @@ var (
 	subtitleStyle = lipgloss.NewStyle().
 			Foreground(textColor).
 			Align(lipgloss.Center).
-			MarginBottom(2)
+			MarginBottom(1)  // Reduced from 2 to 1
 
 	menuItemStyle = lipgloss.NewStyle().
 			PaddingLeft(2).
@@ -185,25 +185,21 @@ func (m Model) renderBackupMenu() string {
 func (m Model) renderRestoreMenu() string {
 	var s strings.Builder
 
-	// Header
+	// Header with ASCII art (same as backup menu)
+	ascii := asciiStyle.Render(asciiArt)
+	s.WriteString(ascii + "\n")
 	s.WriteString(titleStyle.Render("🔄 Restore Options") + "\n\n")
 
-	// Menu options
+	// Menu options with beautiful styling
 	for i, choice := range m.choices {
-		cursor := " "
 		if m.cursor == i {
-			cursor = "❯"
-			s.WriteString(fmt.Sprintf("%s %s\n", 
-				selectedMenuItemStyle.Render(cursor+" "+choice),
-				""))
+			s.WriteString(selectedMenuItemStyle.Render("❯ "+choice) + "\n")
 		} else {
-			s.WriteString(fmt.Sprintf("%s %s\n", 
-				menuItemStyle.Render(cursor+" "+choice),
-				""))
+			s.WriteString(menuItemStyle.Render("  "+choice) + "\n")
 		}
 	}
 
-	// Warning text
+	// Enhanced info box with warning
 	warning := warningStyle.Render("⚠️  WARNING: Restore operations will overwrite existing files!")
 	s.WriteString("\n" + warning)
 
@@ -211,8 +207,8 @@ func (m Model) renderRestoreMenu() string {
 	help := m.renderHelp()
 	s.WriteString("\n" + help)
 
-	// Center the content
-	content := borderStyle.Width(m.width - 4).Render(s.String())
+	// Center the content with beautiful border
+	content := borderStyle.Width(m.width - 8).Render(s.String())
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
 }
 
@@ -220,29 +216,30 @@ func (m Model) renderRestoreMenu() string {
 func (m Model) renderAbout() string {
 	var s strings.Builder
 
-	// Header
+	// Header with ASCII art (consistent with other screens)
+	ascii := asciiStyle.Render(asciiArt)
+	s.WriteString(ascii + "\n")
 	s.WriteString(titleStyle.Render("ℹ️ About Migrate") + "\n\n")
 
 	// About content
 	about := GetAboutText() + `
 
-Created by: ` + AppAuthor + `
+Created by ` + AppAuthor + `
 
-🔗 Links:
-   GitHub: https://github.com/CyphrRiot/Migrate
-   X:      https://x.com/CyphrRiot
+🔗 GitHub: https://github.com/CyphrRiot/Migrate
+🐦 X: https://x.com/CyphrRiot
 
-Powered by: Bubble Tea & Lipgloss
+Powered by Bubble Tea & Lipgloss
 
 Features:
-• Complete 1:1 system backups
-• Interactive TUI interface
-• Real-time progress tracking
-• Safe backup verification
-• Cross-platform compatibility
-
-Original bash version: ~/.local/bin/migrate
-New Go version with beautiful TUI interface
+• Pure Go implementation with zero dependencies
+• Beautiful TUI with Tokyo Night theming
+• Complete system or home directory backup
+• Real-time progress with file-based tracking
+• Smart sync with SHA256 deduplication
+• LUKS encrypted drive support
+• rsync --delete equivalent functionality
+• Static binary for maximum portability
 
 Press any key to return to main menu`
 
@@ -254,8 +251,8 @@ Press any key to return to main menu`
 
 	s.WriteString(info)
 
-	// Center the content
-	content := borderStyle.Width(m.width - 4).Render(s.String())
+	// Center the content with beautiful border
+	content := borderStyle.Width(m.width - 8).Render(s.String())
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
 }
 
@@ -512,6 +509,26 @@ func (m Model) renderError() string {
 
 	// Help text - emphasize manual dismissal
 	help := helpStyle.Render("📖 Please read the instructions above • Press ESC or any key when ready to continue")
+	s.WriteString(help)
+
+	// Center the content with beautiful border
+	content := borderStyle.Width(m.width - 8).Render(s.String())
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
+}
+
+// Render completion screen that requires manual dismissal
+func (m Model) renderComplete() string {
+	var s strings.Builder
+
+	// Header
+	s.WriteString(titleStyle.Render("✅ Operation Complete") + "\n\n")
+
+	// Success message with enhanced styling
+	successMsg := successStyle.Render(m.message)
+	s.WriteString(successMsg + "\n\n")
+
+	// Help text - emphasize manual dismissal
+	help := helpStyle.Render("🎉 Operation completed successfully • Press any key to continue")
 	s.WriteString(help)
 
 	// Center the content with beautiful border

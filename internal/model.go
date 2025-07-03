@@ -22,7 +22,8 @@ const (
 	screenConfirm
 	screenProgress
 	screenDriveSelect
-	screenError  // For errors that require manual dismissal
+	screenError     // For errors that require manual dismissal
+	screenComplete  // For completion messages that require manual dismissal
 )
 
 // Model represents the application state
@@ -95,16 +96,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.lastScreen = m.screen
 			m.screen = screenError
 			return m, nil
-		} else {
-			// Regular message
+		} else if msg.success {
+			// Success message - needs manual dismissal
 			m.message = msg.message
-			if msg.success {
-				// Show success message then return to main
-				return m, tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
-					return tea.KeyMsg{Type: tea.KeyEsc}
-				})
-			}
+			m.lastScreen = m.screen
+			m.screen = screenComplete
 			return m, nil
+		} else {
+			// Regular error message - auto-dismiss after 3 seconds
+			m.message = msg.message
+			return m, tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
+				return tea.KeyMsg{Type: tea.KeyEsc}
+			})
 		}
 
 	case BackupDriveStatus:
@@ -175,8 +178,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.screen = screenConfirm
 				m.cursor = 0
 				return m, nil
+			} else if msg.Error == nil {
+				// Other operation completed successfully - show completion screen
+				m.lastScreen = m.screen
+				m.screen = screenComplete
+				return m, nil
 			} else {
-				// Other operation completed, show result for a moment then return to main
+				// Operation completed with error - auto-dismiss after 3 seconds
 				return m, tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
 					return tea.KeyMsg{Type: tea.KeyEsc}
 				})
@@ -212,6 +220,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.screen = m.lastScreen
 			m.message = ""
 			m.errorRequiresManualDismissal = false
+			return m, nil
+		}
+		
+		// Handle completion screen dismissal
+		if m.screen == screenComplete {
+			// Any key press dismisses the completion screen and returns to main
+			resetBackupState()
+			m.screen = screenMain
+			m.message = ""
+			m.cursor = 0
+			m.choices = []string{"🚀 Backup System", "🔄 Restore System", "💾 Mount External Drive", "ℹ️ About", "❌ Exit"}
 			return m, nil
 		}
 		
@@ -448,6 +467,8 @@ func (m Model) View() string {
 		return m.renderDriveSelect()
 	case screenError:
 		return m.renderError()
+	case screenComplete:
+		return m.renderComplete()
 	default:
 		return "Unknown screen"
 	}
