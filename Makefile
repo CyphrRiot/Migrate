@@ -4,16 +4,16 @@
 
 # Build the application
 build:
-	go build -o migrate .
+	go build -o bin/migrate .
 
 # Clean build artifacts
 clean:
-	rm -f migrate
+	rm -f bin/migrate
 
 # Install to ~/.local/bin
 install: build
 	mkdir -p ~/.local/bin
-	cp migrate ~/.local/bin/
+	cp bin/migrate ~/.local/bin/
 	chmod +x ~/.local/bin/migrate
 
 # Uninstall from ~/.local/bin
@@ -22,7 +22,7 @@ uninstall:
 
 # Run the application
 run: build
-	./migrate
+	bin/migrate
 
 # Test build
 test:

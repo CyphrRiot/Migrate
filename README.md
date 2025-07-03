@@ -3,7 +3,7 @@
 
 A stunningly beautiful **TUI-only** backup and restore tool built with [Bubble Tea](https://github.com/charmbracelet/bubbletea) and [Lipgloss](https://github.com/charmbracelet/lipgloss), featuring Tokyo Night inspired theming and **pure Go implementation with zero external dependencies**.
 
-![Migrate Beautiful Interface](interface.gif)
+![Migrate Beautiful Interface](images/interface.gif)
 
 ## ⚠️ Warning: 
 > ⚠️ This is new software with significant improvements over the bash version. While extensively tested, please ensure you have important data backed up elsewhere before use. Test backup and restore operations in non-critical environments first. ⚠️
@@ -196,11 +196,15 @@ The following paths are automatically excluded for safety:
 
 ### File Structure
 ```
-├── main.go       # Entry point and TUI initialization
-├── model.go      # Bubble Tea state management
-├── ui.go         # Beautiful interface rendering
-├── backup.go     # Pure Go backup implementation
-└── progress.md   # Development progress tracking
+├── main.go           # Entry point and TUI initialization
+├── internal/         # Internal package (prevents external imports)
+│   ├── version.go    # Centralized version management  
+│   ├── backup.go     # Pure Go backup implementation
+│   ├── model.go      # Bubble Tea state management
+│   └── ui.go         # Beautiful interface rendering
+├── bin/              # Compiled binaries
+│   └── migrate       # Static binary executable
+└── go.mod            # Go module definition
 ```
 
 ### Pure Go Design
@@ -223,7 +227,7 @@ The following paths are automatically excluded for safety:
 ### Build Commands
 ```bash
 # Development build
-go build -o migrate .
+go build -o bin/migrate .
 
 # Production build (static binary)
 CGO_ENABLED=0 go build -a -ldflags '-extldflags "-static"' -o bin/migrate .

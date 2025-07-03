@@ -1,4 +1,4 @@
-package main
+package internal
 
 // Version information for Migrate
 // ================================

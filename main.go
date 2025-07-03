@@ -10,6 +10,7 @@ import (
 	"syscall"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"migrate/internal"
 )
 
 // Singleton instance checking
@@ -87,7 +88,7 @@ func main() {
 	// Ensure lock file is removed on exit
 	defer removeInstanceLock()
 
-	fmt.Println("🚀 Starting " + GetAppTitle())
+	fmt.Println("🚀 Starting " + internal.GetAppTitle())
 	fmt.Println("🔍 Checking system dependencies...")
 
 	// Check required system programs
@@ -111,7 +112,7 @@ func main() {
 	}()
 
 	// Always run the beautiful TUI
-	m := initialModel()
+	m := internal.InitialModel()
 	p := tea.NewProgram(m, tea.WithAltScreen())
 	
 	if _, err := p.Run(); err != nil {
