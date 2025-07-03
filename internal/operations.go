@@ -86,26 +86,29 @@ func runBackupSilently(config BackupConfig) {
 	}
 
 	// Use pure Go implementation for actual backup
-	go func() {
-		err := performPureGoBackup(config.SourcePath, config.DestinationPath, logFile)
-		if err != nil {
-			if logFile != nil {
-				fmt.Fprintf(logFile, "PURE GO ERROR: %v\n", err)
-			}
-			tuiBackupCompleted = true
-			if shouldCancelBackup() {
-				tuiBackupError = fmt.Errorf("backup canceled by user")
-			} else {
-				tuiBackupError = fmt.Errorf("backup failed: %v", err)
-			}
-		} else {
-			if logFile != nil {
-				fmt.Fprintf(logFile, "PURE GO SUCCESS: completed\n")
-			}
-			tuiBackupCompleted = true
-			tuiBackupError = nil
+	if logFile != nil {
+		fmt.Fprintf(logFile, "About to start performPureGoBackup SYNCHRONOUSLY\n")
+	}
+	
+	// Run synchronously instead of in goroutine to fix execution bug
+	err = performPureGoBackup(config.SourcePath, config.DestinationPath, logFile)
+	if err != nil {
+		if logFile != nil {
+			fmt.Fprintf(logFile, "PURE GO ERROR: %v\n", err)
 		}
-	}()
+		tuiBackupCompleted = true
+		if shouldCancelBackup() {
+			tuiBackupError = fmt.Errorf("backup canceled by user")
+		} else {
+			tuiBackupError = fmt.Errorf("backup failed: %v", err)
+		}
+	} else {
+		if logFile != nil {
+			fmt.Fprintf(logFile, "PURE GO SUCCESS: completed\n")
+		}
+		tuiBackupCompleted = true
+		tuiBackupError = nil
+	}
 }
 
 // Pure Go backup implementation (no external dependencies)
