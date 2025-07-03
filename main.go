@@ -12,10 +12,40 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-const (
-	appName    = "Migrate"
-	appVersion = "1.0.0"
-)
+// Singleton instance checking
+const lockFilePath = "/tmp/migrate.lock"
+
+// Check if another migrate is running
+func checkSingleInstance() error {
+	// Check if lock file exists
+	if _, err := os.Stat(lockFilePath); err == nil {
+		// Lock file exists, check if process is actually running
+		lockContent, readErr := os.ReadFile(lockFilePath)
+		if readErr == nil {
+			pid := strings.TrimSpace(string(lockContent))
+			if pid != "" {
+				// Check if process is still running
+				if err := exec.Command("kill", "-0", pid).Run(); err == nil {
+					return fmt.Errorf("another migrate process is already running (PID: %s)", pid)
+				}
+			}
+		}
+		// Stale lock file, remove it
+		os.Remove(lockFilePath)
+	}
+	return nil
+}
+
+// Create instance lock
+func createInstanceLock() error {
+	pid := fmt.Sprintf("%d", os.Getpid())
+	return os.WriteFile(lockFilePath, []byte(pid), 0644)
+}
+
+// Remove instance lock
+func removeInstanceLock() {
+	os.Remove(lockFilePath)
+}
 
 func main() {
 	// Simple root check
@@ -25,7 +55,39 @@ func main() {
 		os.Exit(1)
 	}
 
-	fmt.Println("🚀 Starting Migrate v1.0.0 - Pure Go Backup & Restore Tool")
+	// Check for another instance
+	if err := checkSingleInstance(); err != nil {
+		fmt.Println("⚠️  " + err.Error())
+		fmt.Println()
+		
+		// Pretty error display
+		fmt.Println("┌─────────────────────────────────────────┐")
+		fmt.Println("│        🚫 Migration In Progress         │")
+		fmt.Println("├─────────────────────────────────────────┤")
+		fmt.Println("│                                         │")
+		fmt.Println("│  Another migrate process is already     │")
+		fmt.Println("│  running. Please wait for it to         │")
+		fmt.Println("│  complete before starting a new one.    │")
+		fmt.Println("│                                         │")
+		fmt.Println("│  💡 If you're sure no other migrate     │")
+		fmt.Println("│     is running, remove the lock file:   │")
+		fmt.Println("│     sudo rm /tmp/migrate.lock           │")
+		fmt.Println("│                                         │")
+		fmt.Println("└─────────────────────────────────────────┘")
+		fmt.Println()
+		os.Exit(1)
+	}
+
+	// Create lock file
+	if err := createInstanceLock(); err != nil {
+		fmt.Printf("❌ Failed to create instance lock: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Ensure lock file is removed on exit
+	defer removeInstanceLock()
+
+	fmt.Println("🚀 Starting " + GetAppTitle())
 	fmt.Println("🔍 Checking system dependencies...")
 
 	// Check required system programs
@@ -44,6 +106,7 @@ func main() {
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
 	go func() {
 		<-c
+		removeInstanceLock() // Clean up on signal
 		os.Exit(1)
 	}()
 

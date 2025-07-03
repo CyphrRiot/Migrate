@@ -35,6 +35,20 @@ func resetBackupCancel() {
 	atomic.StoreInt64(&backupCancelFlag, 0)
 }
 
+// Get log file path in appropriate location
+func getLogFilePath() string {
+	// Try user's home directory first, fall back to /tmp
+	if homeDir, err := os.UserHomeDir(); err == nil {
+		logDir := filepath.Join(homeDir, ".cache", "migrate")
+		if err := os.MkdirAll(logDir, 0755); err == nil {
+			return filepath.Join(logDir, "migrate.log")
+		}
+	}
+	
+	// Fall back to /tmp
+	return "/tmp/migrate.log"
+}
+
 // Configuration constants  
 const (
 	DefaultMount  = "/run/media"
@@ -203,10 +217,12 @@ func runBackupSilently(config BackupConfig) {
 	// Reset cancellation flag at start
 	resetBackupCancel()
 
-	// Setup logging
-	logFile, err := os.OpenFile("migrate.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	// Setup logging in appropriate directory
+	logPath := getLogFilePath()
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err == nil {
 		fmt.Fprintf(logFile, "\n=== PURE GO BACKUP STARTED: %s ===\n", time.Now().Format(time.RFC3339))
+		fmt.Fprintf(logFile, "Log file: %s\n", logPath)
 		fmt.Fprintf(logFile, "Source: %s -> Destination: %s\n", config.SourcePath, config.DestinationPath)
 		defer logFile.Close()
 	}
@@ -764,10 +780,12 @@ func getDirectorySize(path string) (int64, error) {
 // Start restore operation - TUI ONLY (Pure Go)
 func startRestore(targetPath string) tea.Cmd {
 	return func() tea.Msg {
-		// Setup logging
-		logFile, err := os.OpenFile("migrate.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+		// Setup logging in appropriate directory
+		logPath := getLogFilePath()
+		logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 		if err == nil {
 			fmt.Fprintf(logFile, "\n=== PURE GO RESTORE STARTED: %s ===\n", time.Now().Format(time.RFC3339))
+			fmt.Fprintf(logFile, "Log file: %s\n", logPath)
 			defer logFile.Close()
 		}
 
@@ -900,8 +918,7 @@ Kernel: %s
 Architecture: %s
 Backup Type: %s
 
-This backup was created using Migrate v1.0.0
-Beautiful Backup & Restore Tool by Cypher Riot
+%s
 
 To restore:
 1. Install fresh Arch Linux (any desktop environment)
@@ -910,7 +927,7 @@ To restore:
 4. Run: migrate restore
 
 The restored system will overwrite the fresh install and boot exactly as it was when backed up.
-`, strings.ToUpper(backupType), time.Now().Format(time.RFC3339), hostname, kernel, arch, backupType)
+`, strings.ToUpper(backupType), time.Now().Format(time.RFC3339), hostname, kernel, arch, backupType, GetBackupInfoHeader(backupType))
 
 	infoPath := filepath.Join(mountPoint, "BACKUP-INFO.txt")
 	return os.WriteFile(infoPath, []byte(info), 0644)
