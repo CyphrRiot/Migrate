@@ -75,26 +75,42 @@ func syncDirectories(src, dst string, logFile *os.File) error {
 		if d.IsDir() {
 			fi, err := os.Lstat(path)
 			if err != nil {
-				return nil
+				if logFile != nil {
+					fmt.Fprintf(logFile, "Warning: could not stat directory %s: %v\n", path, err)
+				}
+				return nil // Skip this directory but continue
 			}
 			stat, ok := fi.Sys().(*syscall.Stat_t)
 			if !ok {
+				if logFile != nil {
+					fmt.Fprintf(logFile, "Warning: could not get stat info for %s\n", path)
+				}
 				return nil
 			}
 			// Skip if on a different filesystem (-x option)
 			if stat.Dev != srcDev {
+				if logFile != nil {
+					fmt.Fprintf(logFile, "Skipping different filesystem: %s\n", path)
+				}
 				return filepath.SkipDir
 			}
 
-			// Create the directory if it doesn't exist
-			err = os.Mkdir(dstPath, fi.Mode())
-			if err != nil && !os.IsExist(err) {
-				return nil
+			// Create the directory if it doesn't exist using MkdirAll for safety
+			err = os.MkdirAll(dstPath, fi.Mode())
+			if err != nil {
+				if logFile != nil {
+					fmt.Fprintf(logFile, "Error creating directory %s: %v (continuing)\n", dstPath, err)
+				}
+				// Continue processing - don't skip the directory contents!
+			} else {
+				// Set ownership and timestamps only if directory creation succeeded
+				os.Lchown(dstPath, int(stat.Uid), int(stat.Gid))
+				os.Chtimes(dstPath, fi.ModTime(), fi.ModTime())
+				if logFile != nil && strings.Contains(path, "Takeout") {
+					fmt.Fprintf(logFile, "Created directory: %s -> %s\n", path, dstPath)
+				}
 			}
-			// Set ownership and timestamps
-			os.Lchown(dstPath, int(stat.Uid), int(stat.Gid))
-			os.Chtimes(dstPath, fi.ModTime(), fi.ModTime())
-			return nil
+			return nil // Continue processing directory contents
 		}
 
 		// Handle symbolic links
