@@ -10,7 +10,6 @@ import (
 	"syscall"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 )
 
 const (
@@ -22,74 +21,39 @@ func main() {
 	// Simple root check
 	if os.Geteuid() != 0 {
 		fmt.Println("❌ YOU MUST RUN AS ROOT")
-		fmt.Println("Run: sudo ./bin/migrate")
+		fmt.Println("Run: sudo migrate")
 		os.Exit(1)
 	}
 
-	if len(os.Args) > 1 {
-		// Handle command line arguments for backwards compatibility
-		switch os.Args[1] {
-		case "backup":
-			runBackup()
-		case "restore":
-			target := "/"
-			if len(os.Args) > 2 {
-				target = os.Args[2]
-			}
-			runRestore(target)
-		case "unlock-luks":
-			// Hidden command to unlock LUKS drive
-			unlockLUKSAndRestart()
-			return
-		case "help", "--help", "-h":
-			showCLIHelp()
-		default:
-			fmt.Printf("Unknown command: %s\n", os.Args[1])
-			showCLIHelp()
-			os.Exit(1)
-		}
-		return
-	}
+	fmt.Println("🚀 Starting Migrate v1.0.0 - Pure Go Backup & Restore Tool")
+	fmt.Println("🔍 Checking system dependencies...")
 
-	// Check if LUKS drive needs unlocking
-	if needsLUKSUnlock() {
-		fmt.Println("🔒 LUKS Password Required")
-		fmt.Println("=========================")
-		fmt.Println("Your backup drive is encrypted and needs to be unlocked.")
-		fmt.Println("Please enter your LUKS password when prompted...")
+	// Check required system programs
+	if err := checkSystemDependencies(); err != nil {
+		fmt.Printf("❌ Dependency check failed: %v\n", err)
 		fmt.Println()
-		
-		// Try to unlock the drive
-		if unlockLUKSDrive() {
-			fmt.Println("\n✅ Drive unlocked successfully!")
-			fmt.Println("Starting migration tool...")
-			fmt.Println()
-		} else {
-			fmt.Println("\n❌ Failed to unlock drive. Please try again.")
-			os.Exit(1)
-		}
+		fmt.Println("💡 Install missing dependencies and try again.")
+		os.Exit(1)
 	}
 
-	// Set up signal handling to cleanup backup process on exit
+	fmt.Println("✅ All dependencies available!")
+	fmt.Println()
+
+	// Set up signal handling for clean exit
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
 	go func() {
 		<-c
-		cleanupBackupProcess()
 		os.Exit(1)
 	}()
 
-	// Run the beautiful TUI
+	// Always run the beautiful TUI
 	m := initialModel()
 	p := tea.NewProgram(m, tea.WithAltScreen())
 	
 	if _, err := p.Run(); err != nil {
-		cleanupBackupProcess() // Cleanup on any exit
 		log.Fatal(err)
 	}
-	
-	// Cleanup on normal exit
-	cleanupBackupProcess()
 }
 
 // Check if we already have sudo access
@@ -99,93 +63,164 @@ func hasSudoAccess() bool {
 	return err == nil
 }
 
-func showCLIHelp() {
-	style := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("86")).
-		Bold(true)
-
-	fmt.Printf("%s\n", style.Render("Migrate - Beautiful Backup & Restore Tool"))
-	fmt.Println()
-	fmt.Println("Usage:")
-	fmt.Println("  migrate                 - Launch interactive TUI")
-	fmt.Println("  migrate backup          - Run backup in CLI mode")
-	fmt.Println("  migrate restore [path]  - Run restore in CLI mode")
-	fmt.Println("  migrate help            - Show this help")
-}
-
-func runBackup() {
-	fmt.Println("Running backup in CLI mode...")
-	
-	// Check if any backup drive is mounted (works with any external drive)
-	mountPoint, mounted := checkAnyBackupMounted()
-	if !mounted {
-		fmt.Println("❌ No external backup drive found or mounted!")
-		fmt.Println("Please mount your backup drive first with:")
-		fmt.Println("  ./migrate")
-		fmt.Println("Then select 'Mount External Drive'")
-		os.Exit(1)
+// Check all required system dependencies
+func checkSystemDependencies() error {
+	// Required programs for core functionality
+	requiredPrograms := []struct{
+		name string
+		purpose string  
+		critical bool
+	}{
+		// Drive detection and information
+		{"lsblk", "drive detection and information", true},
+		
+		// Drive mounting/unmounting
+		{"udisksctl", "drive mounting and unmounting", true},
+		{"umount", "drive unmounting", true},
+		
+		// LUKS encryption support
+		{"cryptsetup", "LUKS encryption/decryption", true},
+		
+		// System information
+		{"uname", "system information for backup metadata", true},
+		{"hostname", "hostname for backup metadata", false},
+		
+		// Sudo access validation
+		{"sudo", "privilege escalation", true},
 	}
-	
-	fmt.Printf("✅ Found backup drive at: %s\n", mountPoint)
-	
-	// Run the actual backup
-	config := BackupConfig{
-		SourcePath:      "/",
-		DestinationPath: mountPoint,
-		ExcludePatterns: ExcludePatterns,
-		BackupType:      "Complete System",
-	}
-	
-	// Execute backup synchronously
-	result := startBackup(config)()
-	
-	// Handle result
-	if progressUpdate, ok := result.(ProgressUpdate); ok {
-		if progressUpdate.Error != nil {
-			fmt.Printf("❌ Backup failed: %v\n", progressUpdate.Error)
-			os.Exit(1)
-		} else if progressUpdate.Done {
-			fmt.Println("✅ Backup completed successfully!")
+
+	missing := []string{}
+	warnings := []string{}
+
+	for _, prog := range requiredPrograms {
+		if !checkProgramExists(prog.name) {
+			if prog.critical {
+				missing = append(missing, fmt.Sprintf("%s (%s)", prog.name, prog.purpose))
+			} else {
+				warnings = append(warnings, fmt.Sprintf("%s (%s)", prog.name, prog.purpose))
+			}
 		}
 	}
-}
 
-func runRestore(target string) {
-	fmt.Printf("Running restore to %s in CLI mode...\n", target)
-	// TODO: Implement CLI restore
-}
-
-// Check if LUKS drive needs unlocking
-func needsLUKSUnlock() bool {
-	// Check if backup drive exists
-	cmd := exec.Command("lsblk", "-o", "UUID")
-	out, err := cmd.Output()
-	if err != nil || !strings.Contains(string(out), "d251bd57-1925-4290-b109-21e7b8b8bab8") {
-		return false // No backup drive found
+	// Show warnings for non-critical missing programs
+	if len(warnings) > 0 {
+		fmt.Println("⚠️  Optional programs missing (functionality may be limited):")
+		for _, warning := range warnings {
+			fmt.Printf("   • %s\n", warning)
+		}
+		fmt.Println()
 	}
 
-	// Check if LUKS device already exists (unlocked)
-	mapperPath := "/dev/mapper/luks-d251bd57-1925-4290-b109-21e7b8b8bab8"
-	if _, err := os.Stat(mapperPath); err == nil {
-		return false // Already unlocked
+	// Check for critical missing programs  
+	if len(missing) > 0 {
+		return fmt.Errorf("missing critical programs:\n%s\n\n🔧 Installation commands:\n%s", 
+			formatMissingList(missing), 
+			getInstallCommands(missing))
 	}
 
-	return true // Needs unlocking
+	// Additional checks
+	if err := checkSpecialRequirements(); err != nil {
+		return err
+	}
+
+	return nil
 }
 
-// Unlock LUKS drive
-func unlockLUKSDrive() bool {
-	driveBy := "/dev/disk/by-uuid/d251bd57-1925-4290-b109-21e7b8b8bab8"
-	cmd := exec.Command("udisksctl", "unlock", "-b", driveBy)
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	
-	err := cmd.Run()
+// Check if a program exists in PATH
+func checkProgramExists(program string) bool {
+	_, err := exec.LookPath(program)
 	return err == nil
 }
 
-// Unlock LUKS and restart (unused for now)
-func unlockLUKSAndRestart() {
-	// This could be used for a restart approach if needed
+// Format the missing programs list
+func formatMissingList(missing []string) string {
+	result := ""
+	for _, prog := range missing {
+		result += fmt.Sprintf("   • %s\n", prog)
+	}
+	return result
+}
+
+// Get installation commands for missing programs
+func getInstallCommands(missing []string) string {
+	commands := []string{}
+	
+	needsLsblk := false
+	needsUdisks := false
+	needsCryptsetup := false
+	needsUtil := false
+
+	for _, prog := range missing {
+		if contains(prog, "lsblk") {
+			needsLsblk = true
+		}
+		if contains(prog, "udisksctl") {
+			needsUdisks = true  
+		}
+		if contains(prog, "cryptsetup") {
+			needsCryptsetup = true
+		}
+		if contains(prog, "uname") || contains(prog, "umount") {
+			needsUtil = true
+		}
+	}
+
+	// Debian/Ubuntu
+	debianPkgs := []string{}
+	if needsLsblk || needsUtil {
+		debianPkgs = append(debianPkgs, "util-linux")
+	}
+	if needsUdisks {
+		debianPkgs = append(debianPkgs, "udisks2")
+	}
+	if needsCryptsetup {
+		debianPkgs = append(debianPkgs, "cryptsetup")
+	}
+
+	// Arch Linux  
+	archPkgs := []string{}
+	if needsLsblk || needsUtil {
+		archPkgs = append(archPkgs, "util-linux")
+	}
+	if needsUdisks {
+		archPkgs = append(archPkgs, "udisks2")
+	}
+	if needsCryptsetup {
+		archPkgs = append(archPkgs, "cryptsetup")
+	}
+
+	if len(debianPkgs) > 0 {
+		commands = append(commands, fmt.Sprintf("   Debian/Ubuntu: sudo apt install %s", strings.Join(debianPkgs, " ")))
+	}
+	if len(archPkgs) > 0 {
+		commands = append(commands, fmt.Sprintf("   Arch Linux:    sudo pacman -S %s", strings.Join(archPkgs, " ")))
+	}
+	
+	return strings.Join(commands, "\n")
+}
+
+// Check special requirements beyond just program existence
+func checkSpecialRequirements() error {
+	// Check if we can actually use sudo
+	if !hasSudoAccess() {
+		return fmt.Errorf("sudo access required but not available\n" +
+			"💡 Run 'sudo -v' to authenticate or add your user to sudoers")
+	}
+
+	// Check if /proc/mounts is accessible (should always be, but let's be sure)
+	if _, err := os.Stat("/proc/mounts"); err != nil {
+		return fmt.Errorf("/proc/mounts not accessible - this is unusual and may indicate a problem")
+	}
+
+	// Check if /sys/block exists (used for device detection)
+	if _, err := os.Stat("/sys/block"); err != nil {
+		return fmt.Errorf("/sys/block not accessible - device detection may fail")
+	}
+
+	return nil
+}
+
+// Helper function to check if string contains substring
+func contains(s, substr string) bool {
+	return strings.Contains(s, substr)
 }

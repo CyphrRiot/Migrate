@@ -16,18 +16,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// Global variable to track the running backup process
-var runningBackupCmd *exec.Cmd
-
-// Cleanup function to kill any running backup
-func cleanupBackupProcess() {
-	if runningBackupCmd != nil && runningBackupCmd.Process != nil {
-		// Kill the entire process group (including rsync)
-		syscall.Kill(-runningBackupCmd.Process.Pid, syscall.SIGTERM)
-		runningBackupCmd = nil
-	}
-}
-
 // Configuration constants  
 const (
 	DefaultMount  = "/run/media"
@@ -91,21 +79,28 @@ type BackupDriveStatus struct {
 	error      error
 }
 
-// Check if any backup drive is mounted (works with any external drive)
+// Check if any backup drive is mounted (pure Go - no external commands)
 func checkAnyBackupMounted() (string, bool) {
-	// Check all currently mounted external drives
-	cmd := exec.Command("findmnt", "-rn", "-o", "TARGET,SOURCE")
-	out, err := cmd.Output()
+	// Parse /proc/mounts directly instead of using findmnt command
+	file, err := os.Open("/proc/mounts")
+	if err != nil {
+		return "", false
+	}
+	defer file.Close()
+
+	data, err := io.ReadAll(file)
 	if err != nil {
 		return "", false
 	}
 
-	lines := strings.Split(string(out), "\n")
+	lines := strings.Split(string(data), "\n")
 	for _, line := range lines {
-		if strings.Contains(line, "/run/media/") || strings.Contains(line, "/mnt/") {
-			fields := strings.Fields(line)
-			if len(fields) >= 1 {
-				return fields[0], true
+		fields := strings.Fields(line)
+		if len(fields) >= 2 {
+			mountPoint := fields[1]
+			// Check for typical external drive mount points
+			if strings.Contains(mountPoint, "/run/media/") || strings.Contains(mountPoint, "/mnt/") {
+				return mountPoint, true
 			}
 		}
 	}
@@ -118,21 +113,19 @@ func mountBackupDrive() (string, error) {
 	return "", fmt.Errorf("deprecated function - use drive selection instead")
 }
 
-// Unmount backup drive
+// Unmount backup drive using pure Go
 func unmountBackupDrive(mountPoint string) error {
 	// Sync first
-	exec.Command("sync").Run()
+	syscall.Sync()
 
-	// Get device path
-	cmd := exec.Command("findmnt", "-n", "-o", "SOURCE", mountPoint)
-	out, err := cmd.Output()
+	// Get device path from /proc/mounts instead of using findmnt
+	device, err := getDeviceFromProcMounts(mountPoint)
 	if err != nil {
-		return fmt.Errorf("failed to find device: %v", err)
+		return fmt.Errorf("failed to find device for %s: %v", mountPoint, err)
 	}
-	device := strings.TrimSpace(string(out))
 
 	// Unmount
-	cmd = exec.Command("sudo", "umount", mountPoint)
+	cmd := exec.Command("sudo", "umount", mountPoint)
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("failed to unmount: %v", err)
 	}
@@ -149,93 +142,49 @@ func unmountBackupDrive(mountPoint string) error {
 	return nil
 }
 
-// Start backup operation
-func startBackup(config BackupConfig) tea.Cmd {
-	return func() tea.Msg {
-		// Check if this is CLI mode
-		isCliMode := len(os.Args) > 1 && os.Args[1] == "backup"
-		
-		if isCliMode {
-			// CLI mode - run synchronously with output
-			return runBackupWithOutput(config)
-		} else {
-			// TUI mode - run asynchronously in background
-			go runBackupSilently(config)
-			return ProgressUpdate{Percentage: -1, Message: "Starting backup...", Done: false}
+// Get device path for a mount point from /proc/mounts (pure Go)
+func getDeviceFromProcMounts(mountPoint string) (string, error) {
+	file, err := os.Open("/proc/mounts")
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+
+	data, err := io.ReadAll(file)
+	if err != nil {
+		return "", err
+	}
+
+	lines := strings.Split(string(data), "\n")
+	for _, line := range lines {
+		fields := strings.Fields(line)
+		if len(fields) >= 2 && fields[1] == mountPoint {
+			return fields[0], nil // Return device path
 		}
 	}
+
+	return "", fmt.Errorf("mount point %s not found", mountPoint)
 }
 
-// Run backup with output for CLI
-func runBackupWithOutput(config BackupConfig) ProgressUpdate {
-	mountPoint := config.DestinationPath
-	
-	// Get backup drive info for display
-	cmd := exec.Command("findmnt", "-n", "-o", "SOURCE", mountPoint)
-	backupDevice, _ := cmd.Output()
-	backupDeviceStr := strings.TrimSpace(string(backupDevice))
-	if backupDeviceStr == "" {
-		backupDeviceStr = mountPoint
+// Start backup operation - TUI ONLY (Pure Go)
+func startBackup(config BackupConfig) tea.Cmd {
+	return func() tea.Msg {
+		// Always run in TUI mode with pure Go implementation
+		go runBackupSilently(config)
+		return ProgressUpdate{Percentage: -1, Message: "Starting backup...", Done: false}
 	}
-	
-	// Display drive information
-	fmt.Printf("Source Drive: %s\n", config.SourcePath)
-	fmt.Printf("Backup Drive: %s\n", backupDeviceStr)
-	fmt.Println()
-	
-	// Build REAL rsync command
-	args := []string{
-		"-aAX",
-		"--info=progress2", 
-		"--ignore-errors",
-		"--force",
-	}
-
-	// Add exclude patterns
-	for _, pattern := range config.ExcludePatterns {
-		args = append(args, "--exclude="+pattern)
-	}
-
-	// Exclude the backup mount point itself
-	args = append(args, "--exclude="+mountPoint)
-	
-	// Add source and destination 
-	args = append(args, config.SourcePath, mountPoint+"/")
-
-	// Create the command: sudo rsync [args...]
-	fullArgs := append([]string{"rsync"}, args...)
-	cmd = exec.Command("sudo", fullArgs...)
-	
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	runningBackupCmd = cmd
-
-	fmt.Println("Starting backup...")
-	
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-
-	err := cmd.Run()
-	runningBackupCmd = nil
-
-	if err != nil {
-		fmt.Printf("Backup failed: %v\n", err)
-		return ProgressUpdate{Error: fmt.Errorf("backup failed: %v", err), Done: true}
-	}
-
-	fmt.Println("Backup completed successfully!")
-	return ProgressUpdate{Percentage: 1.0, Message: "Backup completed successfully!", Done: true}
 }
 
 // Global completion tracking for TUI
 var tuiBackupCompleted = false
 var tuiBackupError error
 
-// Run backup using RSYNC with progress parsing (the right way)
+// Run backup using pure Go implementation (TUI only)
 func runBackupSilently(config BackupConfig) {
 	// Setup logging
 	logFile, err := os.OpenFile("migrate.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err == nil {
-		fmt.Fprintf(logFile, "\n=== RSYNC BACKUP STARTED: %s ===\n", time.Now().Format(time.RFC3339))
+		fmt.Fprintf(logFile, "\n=== PURE GO BACKUP STARTED: %s ===\n", time.Now().Format(time.RFC3339))
 		fmt.Fprintf(logFile, "Source: %s -> Destination: %s\n", config.SourcePath, config.DestinationPath)
 		defer logFile.Close()
 	}
@@ -243,28 +192,28 @@ func runBackupSilently(config BackupConfig) {
 	tuiBackupCompleted = false
 	tuiBackupError = nil
 	
-	// Initialize progress tracking with smart baseline
+	// Initialize progress tracking
 	backupStartTime = time.Now()
 	sourceUsedSpace, _ = getUsedDiskSpace(config.SourcePath)
 	destStartUsedSpace, _ = getUsedDiskSpace(config.DestinationPath)
 	
 	if logFile != nil {
-		fmt.Fprintf(logFile, "Using RSYNC: source=%dGB, dest_start=%dGB\n", 
+		fmt.Fprintf(logFile, "Using pure Go: source=%dGB, dest_start=%dGB\n", 
 			sourceUsedSpace/(1024*1024*1024), destStartUsedSpace/(1024*1024*1024))
 	}
 
-	// Use RSYNC for actual backup (the right way)
+	// Use pure Go implementation for actual backup
 	go func() {
-		err := performRsyncBackup(config.SourcePath, config.DestinationPath, logFile)
+		err := performPureGoBackup(config.SourcePath, config.DestinationPath, logFile)
 		if err != nil {
 			if logFile != nil {
-				fmt.Fprintf(logFile, "RSYNC ERROR: %v\n", err)
+				fmt.Fprintf(logFile, "PURE GO ERROR: %v\n", err)
 			}
 			tuiBackupCompleted = true
 			tuiBackupError = fmt.Errorf("backup failed: %v", err)
 		} else {
 			if logFile != nil {
-				fmt.Fprintf(logFile, "RSYNC SUCCESS: completed\n")
+				fmt.Fprintf(logFile, "PURE GO SUCCESS: completed\n")
 			}
 			tuiBackupCompleted = true
 			tuiBackupError = nil
@@ -272,15 +221,24 @@ func runBackupSilently(config BackupConfig) {
 	}()
 }
 
-// Use your working backup code (the right way)
-func performRsyncBackup(sourcePath, destPath string, logFile *os.File) error {
+// Pure Go backup implementation (no external dependencies)
+func performPureGoBackup(sourcePath, destPath string, logFile *os.File) error {
 	if logFile != nil {
-		fmt.Fprintf(logFile, "Starting EFFICIENT GO backup (no rsync dependency)\n")
+		fmt.Fprintf(logFile, "Starting pure Go backup (zero external dependencies)\n")
 		fmt.Fprintf(logFile, "Source: %s -> Dest: %s\n", sourcePath, destPath)
 	}
 
+	// Create backup info file first
+	err := createBackupInfo(destPath, "System Backup")
+	if err != nil {
+		if logFile != nil {
+			fmt.Fprintf(logFile, "Failed to create backup info: %v\n", err)
+		}
+		return fmt.Errorf("failed to create backup info: %v", err)
+	}
+
 	// Use the efficient Go backup that actually works
-	err := syncDirectories(sourcePath, destPath, logFile)
+	err = syncDirectories(sourcePath, destPath, logFile)
 	if err != nil {
 		if logFile != nil {
 			fmt.Fprintf(logFile, "ERROR: %v\n", err)
@@ -289,7 +247,7 @@ func performRsyncBackup(sourcePath, destPath string, logFile *os.File) error {
 	}
 
 	if logFile != nil {
-		fmt.Fprintf(logFile, "GO backup completed successfully\n")
+		fmt.Fprintf(logFile, "Pure Go backup completed successfully\n")
 	}
 	return nil
 }
@@ -737,32 +695,23 @@ func getActualBackupSize(backupMount string) (int64, error) {
 	return int64(usedBytes), nil
 }
 
-// Get used disk space using df (fast)
+// Get used disk space using pure Go syscalls (no external commands)
 func getUsedDiskSpace(path string) (int64, error) {
-	cmd := exec.Command("df", "-B1", path)
-	out, err := cmd.Output()
+	var stat syscall.Statfs_t
+	err := syscall.Statfs(path, &stat)
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("failed to get filesystem stats for %s: %v", path, err)
 	}
 	
-	// Parse df output: second line, third column is used bytes
-	lines := strings.Split(string(out), "\n")
-	if len(lines) < 2 {
-		return 0, fmt.Errorf("invalid df output")
-	}
+	// Calculate used space: total - free
+	// stat.Blocks = total blocks
+	// stat.Bfree = free blocks (including reserved for root)
+	// stat.Bsize = block size
+	totalBytes := int64(stat.Blocks) * int64(stat.Bsize)
+	freeBytes := int64(stat.Bfree) * int64(stat.Bsize)
+	usedBytes := totalBytes - freeBytes
 	
-	fields := strings.Fields(lines[1])
-	if len(fields) < 3 {
-		return 0, fmt.Errorf("invalid df fields")
-	}
-	
-	// Convert used bytes to int64
-	bytes, err := strconv.ParseInt(fields[2], 10, 64)
-	if err != nil {
-		return 0, err
-	}
-	
-	return bytes, nil
+	return usedBytes, nil
 }
 
 // Get directory size using du with timeout and excludes
@@ -772,13 +721,20 @@ func getDirectorySize(path string) (int64, error) {
 	return getUsedDiskSpace(path)
 }
 
-// Start restore operation
+// Start restore operation - TUI ONLY (Pure Go)
 func startRestore(targetPath string) tea.Cmd {
 	return func() tea.Msg {
-		// Mount backup drive
-		mountPoint, err := mountBackupDrive()
-		if err != nil {
-			return ProgressUpdate{Error: err}
+		// Setup logging
+		logFile, err := os.OpenFile("migrate.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+		if err == nil {
+			fmt.Fprintf(logFile, "\n=== PURE GO RESTORE STARTED: %s ===\n", time.Now().Format(time.RFC3339))
+			defer logFile.Close()
+		}
+
+		// Check if backup drive is already mounted (user should mount via TUI first)
+		mountPoint, mounted := checkAnyBackupMounted()
+		if !mounted {
+			return ProgressUpdate{Error: fmt.Errorf("no backup drive mounted - please mount a backup drive first through the main menu")}
 		}
 
 		// Check if backup exists
@@ -787,32 +743,101 @@ func startRestore(targetPath string) tea.Cmd {
 			return ProgressUpdate{Error: fmt.Errorf("no valid backup found at %s", mountPoint)}
 		}
 
-		// Build rsync command for restore
-		args := []string{
-			"sudo", "rsync",
-			"-aAX",
-			"--info=progress2",
-			"--delete",
-			"--human-readable",
-			"--exclude=BACKUP-INFO.txt",
-			mountPoint + "/",
-			targetPath + "/",
+		if logFile != nil {
+			fmt.Fprintf(logFile, "Starting pure Go restore from %s to %s\n", mountPoint, targetPath)
 		}
 
-		// Start rsync process
-		cmd := exec.Command(args[0], args[1:]...)
-		// Removed syscall reference for now
-
-		// For now, we'll simulate the operation
-		// In a real implementation, you'd parse rsync output for progress
-		
-		err = cmd.Run()
+		// Perform pure Go restore
+		err = performPureGoRestore(mountPoint, targetPath, logFile)
 		if err != nil {
 			return ProgressUpdate{Error: err, Done: true}
 		}
 
 		return ProgressUpdate{Percentage: 1.0, Message: "Restore completed successfully!", Done: true}
 	}
+}
+
+// Pure Go restore implementation
+func performPureGoRestore(backupPath, targetPath string, logFile *os.File) error {
+	if logFile != nil {
+		fmt.Fprintf(logFile, "Starting restore: %s -> %s\n", backupPath, targetPath)
+	}
+
+	// Phase 1: Copy all files from backup to target
+	err := syncDirectories(backupPath, targetPath, logFile)
+	if err != nil {
+		if logFile != nil {
+			fmt.Fprintf(logFile, "Error during restore copy: %v\n", err)
+		}
+		return fmt.Errorf("restore copy failed: %v", err)
+	}
+
+	// Phase 2: Delete files that exist in target but not in backup (--delete behavior)
+	err = deleteExtraFiles(backupPath, targetPath, logFile)
+	if err != nil {
+		if logFile != nil {
+			fmt.Fprintf(logFile, "Error during cleanup: %v\n", err)
+		}
+		return fmt.Errorf("restore cleanup failed: %v", err)
+	}
+
+	if logFile != nil {
+		fmt.Fprintf(logFile, "Pure Go restore completed successfully\n")
+	}
+	return nil
+}
+
+// Delete files that exist in target but not in backup (equivalent to rsync --delete)
+func deleteExtraFiles(backupPath, targetPath string, logFile *os.File) error {
+	if logFile != nil {
+		fmt.Fprintf(logFile, "Starting cleanup phase (delete extra files)\n")
+	}
+
+	return filepath.WalkDir(targetPath, func(targetFile string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil // Skip errors
+		}
+
+		// Skip excluded patterns even during restore
+		for _, pattern := range ExcludePatterns {
+			if strings.Contains(targetFile, strings.TrimSuffix(pattern, "/*")) {
+				if d.IsDir() {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+		}
+
+		// Skip special files (BACKUP-INFO.txt, etc.)
+		if strings.Contains(targetFile, "BACKUP-INFO.txt") {
+			return nil
+		}
+
+		// Calculate corresponding backup file path
+		relPath, err := filepath.Rel(targetPath, targetFile)
+		if err != nil {
+			return nil
+		}
+		backupFile := filepath.Join(backupPath, relPath)
+
+		// If file doesn't exist in backup, delete it from target
+		if _, err := os.Stat(backupFile); os.IsNotExist(err) {
+			if logFile != nil {
+				fmt.Fprintf(logFile, "Deleting extra file: %s\n", targetFile)
+			}
+			
+			if d.IsDir() {
+				// Remove directory and all contents
+				os.RemoveAll(targetFile)
+				return filepath.SkipDir
+			} else {
+				// Remove file
+				os.Remove(targetFile)
+			}
+		}
+
+		return nil
+	})
 }
 
 // Create backup info file
