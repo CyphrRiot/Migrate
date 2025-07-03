@@ -2,7 +2,7 @@ package internal
 
 import (
 	"crypto/sha256"
-	"encoding/hex"
+	"encoding/hex" 
 	"encoding/json"
 	"fmt"
 	"io"
@@ -35,6 +35,24 @@ func CancelBackup() {
 // Reset backup cancellation flag
 func resetBackupCancel() {
 	atomic.StoreInt64(&backupCancelFlag, 0)
+}
+
+// FormatNumber adds commas to large numbers for readability
+func FormatNumber(n int) string {
+	str := strconv.Itoa(n)
+	if len(str) <= 3 {
+		return str
+	}
+	
+	// Add commas from right to left
+	var result strings.Builder
+	for i, digit := range str {
+		if i > 0 && (len(str)-i)%3 == 0 {
+			result.WriteRune(',')
+		}
+		result.WriteRune(digit)
+	}
+	return result.String()
 }
 
 // Get log file path in appropriate location
@@ -342,8 +360,6 @@ func syncDirectories(src, dst string, logFile *os.File) error {
 
 	// Counter to periodically check for cancellation and show progress
 	fileCounter := 0
-	skippedCount := 0
-	copiedCount := 0
 
 	// Walk through the source directory efficiently
 	err = filepath.WalkDir(src, func(path string, d os.DirEntry, err error) error {
@@ -413,8 +429,11 @@ func syncDirectories(src, dst string, logFile *os.File) error {
 			return nil
 		}
 
-		// Handle regular files with concurrency
+		// Handle regular files with smart tracking
 		if d.Type().IsRegular() {
+			// Count this file in our totals
+			atomic.AddInt64(&totalFilesFound, 1)
+			
 			// Quick paths for known scenarios
 			if _, err := os.Stat(dstPath); os.IsNotExist(err) {
 				// Destination doesn't exist - definitely need to copy
@@ -422,9 +441,10 @@ func syncDirectories(src, dst string, logFile *os.File) error {
 				if err != nil && logFile != nil {
 					fmt.Fprintf(logFile, "Error copying %s: %v\n", path, err)
 				} else {
-					copiedCount++
-					if logFile != nil && copiedCount%100 == 0 {
-						fmt.Fprintf(logFile, "Copied %d files, skipped %d identical files\n", copiedCount, skippedCount)
+					atomic.AddInt64(&filesCopied, 1)
+					if logFile != nil && filesCopied%100 == 0 {
+						fmt.Fprintf(logFile, "Copied %s files, skipped %s identical files\n", 
+							formatNumber(filesCopied), formatNumber(filesSkipped))
 					}
 				}
 				return nil
@@ -432,9 +452,9 @@ func syncDirectories(src, dst string, logFile *os.File) error {
 
 			// Destination exists - check if identical
 			if filesAreIdentical(path, dstPath) {
-				skippedCount++
-				if logFile != nil && skippedCount%500 == 0 { // Less frequent logging
-					fmt.Fprintf(logFile, "Skipped %d identical files so far...\n", skippedCount)
+				atomic.AddInt64(&filesSkipped, 1)
+				if logFile != nil && filesSkipped%500 == 0 { // Less frequent logging
+					fmt.Fprintf(logFile, "Skipped %s identical files so far...\n", formatNumber(filesSkipped))
 				}
 				return nil
 			}
@@ -444,9 +464,10 @@ func syncDirectories(src, dst string, logFile *os.File) error {
 			if err != nil && logFile != nil {
 				fmt.Fprintf(logFile, "Error copying %s: %v\n", path, err)
 			} else {
-				copiedCount++
-				if logFile != nil && copiedCount%100 == 0 {
-					fmt.Fprintf(logFile, "Copied %d files, skipped %d identical files\n", copiedCount, skippedCount)
+				atomic.AddInt64(&filesCopied, 1)
+				if logFile != nil && filesCopied%100 == 0 {
+					fmt.Fprintf(logFile, "Copied %s files, skipped %s identical files\n", 
+						formatNumber(filesCopied), formatNumber(filesSkipped))
 				}
 			}
 			return nil
@@ -456,9 +477,13 @@ func syncDirectories(src, dst string, logFile *os.File) error {
 		return nil
 	})
 
+	// Mark directory walk as complete
+	directoryWalkComplete = true
+
 	// Log final summary
 	if logFile != nil {
-		fmt.Fprintf(logFile, "Sync completed: copied %d files, skipped %d identical files\n", copiedCount, skippedCount)
+		fmt.Fprintf(logFile, "Sync completed: copied %s files, skipped %s identical files, processed %s total\n", 
+			formatNumber(filesCopied), formatNumber(filesSkipped), formatNumber(totalFilesFound))
 	}
 
 	return err
@@ -696,6 +721,26 @@ func formatBytes(bytes int64) string {
 	return formatted + " " + units[unitIndex]
 }
 
+// Format numbers with comma separators for readability
+func formatNumber(n int64) string {
+	if n < 1000 {
+		return fmt.Sprintf("%d", n)
+	}
+	
+	// Convert to string and add commas
+	str := fmt.Sprintf("%d", n)
+	result := ""
+	
+	for i, char := range str {
+		if i > 0 && (len(str)-i)%3 == 0 {
+			result += ","
+		}
+		result += string(char)
+	}
+	
+	return result
+}
+
 // Delete files from backup that no longer exist in source (--delete equivalent)
 func deleteExtraFilesFromBackup(sourcePath, backupPath string, logFile *os.File) error {
 	if logFile != nil {
@@ -739,6 +784,7 @@ func deleteExtraFilesFromBackup(sourcePath, backupPath string, logFile *os.File)
 		// If file doesn't exist in source, delete it from backup
 		if _, err := os.Stat(sourceFile); os.IsNotExist(err) {
 			deletedCount++
+			atomic.AddInt64(&filesDeleted, 1) // Track deletion for progress
 			
 			if logFile != nil {
 				fmt.Fprintf(logFile, "Deleting: %s (not in source)\n", backupFile)
@@ -988,124 +1034,105 @@ var totalFilesEstimate int64   // New: estimated total files
 var syncPhaseComplete bool     // New: track if sync phase is done
 var deletionPhaseActive bool   // New: track deletion phase
 
-// Calculate actual backup progress - IMPROVED WITH PHASE TRACKING
+// SMART PROGRESS TRACKING - Based on actual work done
+var filesSkipped int64         // Files skipped (identical)
+var filesCopied int64          // Files actually copied  
+var filesDeleted int64         // Files deleted in cleanup
+var totalFilesFound int64      // Total files discovered during walk
+var directoryWalkComplete bool // Directory enumeration finished
+
+// Calculate actual backup progress - SMART FILE-BASED TRACKING
 func calculateRealProgress() (float64, string) {
-	// Get backup drive mount point
-	backupMount, mounted := checkAnyBackupMounted()
-	if !mounted {
-		return 0.01, "Backup drive not mounted..."
-	}
-	
 	// Initialize on first run
 	if backupStartTime.IsZero() {
 		backupStartTime = time.Now()
 		
-		// Get source used space (what we need to copy)
-		var err error
-		sourceUsedSpace, err = getUsedDiskSpace("/")
-		if err != nil {
-			return 0.01, "Error reading source drive"
-		}
-		
-		// Get destination starting used space (baseline)
-		destStartUsedSpace, err = getUsedDiskSpace(backupMount)
-		if err != nil {
-			return 0.01, "Error reading destination drive"
-		}
-		
-		// Reset phase tracking
+		// Reset all counters
+		filesSkipped = 0
+		filesCopied = 0
+		filesDeleted = 0
+		totalFilesFound = 0
+		directoryWalkComplete = false
 		syncPhaseComplete = false
 		deletionPhaseActive = false
-		totalFilesProcessed = 0
 	}
 	
-	// Force filesystem sync and get CURRENT destination usage
-	syscall.Sync()
-	currentDestUsed, err := getUsedDiskSpace(backupMount)
-	if err != nil {
-		return 0.01, "Error reading destination drive"
-	}
-	
-	// Calculate how much was copied in this session
-	copiedThisSession := currentDestUsed - destStartUsedSpace
-
-	// Convert to formatted human-readable sizes
-	currentDestFormatted := formatBytes(currentDestUsed)
-	sourceFormatted := formatBytes(sourceUsedSpace)
-
-	// IMPROVED PROGRESS CALCULATION
+	// SMART PROGRESS CALCULATION BASED ON ACTUAL WORK
 	var progress float64
-	var phaseMessage string
+	var message string
 	
 	if deletionPhaseActive {
-		// During deletion phase, use 85-100% range
-		progress = 0.85 + (0.15 * 0.5) // Assume deletion is roughly halfway
-		phaseMessage = " (Deleting removed files)"
-	} else if syncPhaseComplete {
-		// Sync complete, about to start deletion
-		progress = 0.85
-		phaseMessage = " (Preparing deletion phase)"
-	} else {
-		// During sync phase, use space-based calculation but cap at 85%
-		spaceProgress := float64(currentDestUsed) / float64(sourceUsedSpace)
-		if spaceProgress > 0.85 {
-			spaceProgress = 0.85 // Cap sync phase at 85%
-		}
-		progress = spaceProgress
-		
-		// Calculate time estimation for sync phase only
-		elapsed := time.Since(backupStartTime)
-		var timeStr string
-		
-		if copiedThisSession > 100*1024*1024 && elapsed.Seconds() > 30 {
-			// Estimate time for sync phase only (to 85%)
-			remainingToSync := sourceUsedSpace - currentDestUsed
-			if remainingToSync < 0 {
-				remainingToSync = 0
+		// Deletion phase: base progress on files processed vs estimated cleanup
+		if totalFilesFound > 0 {
+			// 85-100% range for deletion phase
+			baseProgress := 0.85
+			deletionProgress := float64(filesDeleted) / float64(totalFilesFound/10) // Assume ~10% need deletion
+			if deletionProgress > 1.0 {
+				deletionProgress = 1.0
 			}
-			
-			bytesPerSecond := float64(copiedThisSession) / elapsed.Seconds()
-			if bytesPerSecond > 1024*1024 {
-				remainingSeconds := float64(remainingToSync) / bytesPerSecond
-				remaining := time.Duration(remainingSeconds) * time.Second
-				
-				hours := int(remaining.Hours())
-				minutes := int(remaining.Minutes()) % 60
-				
-				if hours < 1000 {
-					timeStr = fmt.Sprintf(" (Est %dh %dm to sync)", hours, minutes)
-				} else {
-					timeStr = " (Calculating...)"
+			progress = baseProgress + (0.15 * deletionProgress)
+		} else {
+			progress = 0.92 // Default deletion progress
+		}
+		
+		message = fmt.Sprintf("Deleting removed files (%s files cleaned up)", formatNumber(filesDeleted))
+		
+	} else if syncPhaseComplete {
+		// Sync complete, starting deletion
+		progress = 0.85
+		message = "Preparing deletion phase..."
+		
+	} else if directoryWalkComplete {
+		// Directory walk done, sync in progress
+		if totalFilesFound > 0 {
+			filesProcessed := filesSkipped + filesCopied
+			syncProgress := float64(filesProcessed) / float64(totalFilesFound)
+			if syncProgress > 1.0 {
+				syncProgress = 1.0
+			}
+			progress = syncProgress * 0.85 // Reserve 15% for deletion
+		} else {
+			progress = 0.50 // Fallback if no file count
+		}
+		
+		// Show meaningful sync status
+		if filesCopied > 0 {
+			message = fmt.Sprintf("Syncing files (%s copied, %s skipped of %s total)", 
+				formatNumber(filesCopied), formatNumber(filesSkipped), formatNumber(totalFilesFound))
+		} else if filesSkipped > 1000 {
+			message = fmt.Sprintf("Skipping identical files (%s of %s processed)", 
+				formatNumber(filesSkipped), formatNumber(totalFilesFound))
+		} else {
+			message = fmt.Sprintf("Processing files (%s of %s)", 
+				formatNumber(filesSkipped+filesCopied), formatNumber(totalFilesFound))
+		}
+		
+	} else {
+		// Still discovering files
+		elapsed := time.Since(backupStartTime)
+		if elapsed.Seconds() < 30 {
+			progress = 0.05
+			message = "Scanning filesystem..."
+		} else {
+			// Base early progress on files found so far
+			estimatedTotal := totalFilesFound * 2 // Rough estimate
+			if estimatedTotal > 0 {
+				progress = float64(filesSkipped+filesCopied) / float64(estimatedTotal) * 0.85
+				if progress > 0.20 {
+					progress = 0.20 // Cap early progress
 				}
 			} else {
-				timeStr = " (Calculating...)"
+				progress = 0.10
 			}
-		} else if copiedThisSession < 1024*1024 && elapsed.Seconds() > 60 {
-			timeStr = " (Mostly skipping identical files)"
-		} else {
-			timeStr = " (Calculating...)"
+			message = fmt.Sprintf("Scanning and processing (%s files found so far)", formatNumber(totalFilesFound))
 		}
-		
-		phaseMessage = timeStr
 	}
 	
+	// Never exceed 100%
 	if progress > 1.0 {
 		progress = 1.0
 	}
 	
-	// Show ACTUAL progress with phase information - CLEANER FORMAT
-	var message string
-	if copiedThisSession < 10*1024*1024 { // Less than 10MB copied this session
-		// Don't show the tiny session progress - it's just annoying
-		message = fmt.Sprintf("Syncing %s / %s%s", 
-			currentDestFormatted, sourceFormatted, phaseMessage)
-	} else {
-		// Only show session progress if it's meaningful (≥10MB)
-		copiedSessionFormatted := formatBytes(copiedThisSession)
-		message = fmt.Sprintf("Syncing %s / %s (+%s this session)%s", 
-			currentDestFormatted, sourceFormatted, copiedSessionFormatted, phaseMessage)
-	}
-		
 	return progress, message
 }
 
