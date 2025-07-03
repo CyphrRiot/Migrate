@@ -1,4 +1,4 @@
-# Migrate v1.0.2
+# Migrate v1.0.4
 <!-- Version is defined in version.go - update there to change everywhere -->
 
 A stunningly beautiful **TUI-only** backup and restore tool built with [Bubble Tea](https://github.com/charmbracelet/bubbletea) and [Lipgloss](https://github.com/charmbracelet/lipgloss), featuring Tokyo Night inspired theming and **pure Go implementation with zero external dependencies**.
@@ -220,18 +220,28 @@ The following paths are automatically excluded for safety:
 
 ## 🏗️ Architecture
 
-### File Structure
+### Improved File Structure (v1.0.3)
 ```
 ├── main.go           # Entry point and TUI initialization
 ├── internal/         # Internal package (prevents external imports)
-│   ├── version.go    # Centralized version management  
-│   ├── backup.go     # Pure Go backup implementation
+│   ├── version.go    # Centralized version management
+│   ├── utils.go      # Utility functions and configuration
+│   ├── filesystem.go # File operations and disk management
+│   ├── drives.go     # Drive detection and mounting
+│   ├── operations.go # Backup and restore orchestration
 │   ├── model.go      # Bubble Tea state management
 │   └── ui.go         # Beautiful interface rendering
 ├── bin/              # Compiled binaries
 │   └── migrate       # Static binary executable
 └── go.mod            # Go module definition
 ```
+
+### Clean Architecture Benefits
+- **Focused responsibilities** - Each file handles a specific domain
+- **Easier maintenance** - Find and modify functionality quickly
+- **Better testing** - Test individual components in isolation
+- **Reduced complexity** - No more massive single files
+- **Improved collaboration** - Multiple developers can work on different areas
 
 ### Pure Go Design
 - **Zero CGO** - Built with `CGO_ENABLED=0`
@@ -272,6 +282,18 @@ require (
 ```
 
 ## 🎯 Recent Achievements
+
+### ✅ Critical Bug Fix (v1.0.4)
+- **FIXED**: Directory contents not being copied when directory creation fails
+- **FIXED**: Changed `os.Mkdir` to `os.MkdirAll` for better reliability
+- **IMPROVED**: Better error logging and recovery - continues processing even if directory creation fails
+- **ENHANCED**: More detailed logging for directory operations
+
+### ✅ Code Reorganization (v1.0.3)
+- Split monolithic backup.go (1,700+ lines) into focused modules
+- Separated utilities, filesystem operations, drive management, and operations
+- Improved maintainability and development experience
+- Better code organization for future features and collaboration
 
 ### ✅ TUI-Only Interface (v1.0.1)
 - Removed all CLI options - beautiful interface always
