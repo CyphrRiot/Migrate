@@ -8,21 +8,104 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// Styles
-var (
-	// Enhanced color palette - Tokyo Night inspired
-	primaryColor    = lipgloss.Color("#7aa2f7") // Tokyo Night blue
-	secondaryColor  = lipgloss.Color("#9ece6a") // Tokyo Night green
-	accentColor     = lipgloss.Color("#f7768e") // Tokyo Night red/pink
-	warningColor    = lipgloss.Color("#e0af68") // Tokyo Night yellow
-	errorColor      = lipgloss.Color("#f7768e") // Tokyo Night red
-	successColor    = lipgloss.Color("#9ece6a") // Tokyo Night green
-	textColor       = lipgloss.Color("#c0caf5") // Tokyo Night foreground
-	dimColor        = lipgloss.Color("#565f89") // Tokyo Night comment
-	backgroundColor = lipgloss.Color("#1a1b26") // Tokyo Night background
-	borderColor     = lipgloss.Color("#414868") // Tokyo Night border
+// Gradient Color System - btop-inspired modern palette
+type GradientColors struct {
+	Start lipgloss.Color
+	End   lipgloss.Color
+}
 
-	// Enhanced base styles
+var (
+	// Modern btop-inspired gradient color palette
+	blueGradient = GradientColors{
+		Start: lipgloss.Color("#4facfe"), // Light blue
+		End:   lipgloss.Color("#00c6ff"), // Bright cyan
+	}
+	
+	purpleGradient = GradientColors{
+		Start: lipgloss.Color("#a855f7"), // Purple
+		End:   lipgloss.Color("#8b5cf6"), // Violet
+	}
+	
+	greenGradient = GradientColors{
+		Start: lipgloss.Color("#10b981"), // Emerald
+		End:   lipgloss.Color("#06b6d4"), // Cyan
+	}
+	
+	orangeGradient = GradientColors{
+		Start: lipgloss.Color("#f59e0b"), // Amber
+		End:   lipgloss.Color("#ef4444"), // Red
+	}
+	
+	tealGradient = GradientColors{
+		Start: lipgloss.Color("#06b6d4"), // Cyan
+		End:   lipgloss.Color("#10b981"), // Emerald
+	}
+
+	// Status-specific gradients
+	successGradient = greenGradient
+	warningGradient = orangeGradient
+	errorGradient = GradientColors{
+		Start: lipgloss.Color("#ef4444"), // Red
+		End:   lipgloss.Color("#dc2626"), // Dark red
+	}
+	infoGradient = blueGradient
+	progressGradient = purpleGradient
+
+	// Base colors (using gradient starts for compatibility)
+	primaryColor    = blueGradient.Start
+	secondaryColor  = greenGradient.Start
+	accentColor     = purpleGradient.Start
+	warningColor    = orangeGradient.Start
+	errorColor      = errorGradient.Start
+	successColor    = successGradient.Start
+	textColor       = lipgloss.Color("#f8fafc") // Modern light text
+	dimColor        = lipgloss.Color("#64748b") // Modern dim text
+	backgroundColor = lipgloss.Color("#0f172a") // Deep dark background
+	borderColor     = lipgloss.Color("#334155") // Modern border
+)
+
+// Gradient helper functions for smooth color transitions
+func (g GradientColors) GetColor(position float64) lipgloss.Color {
+	// Clamp position between 0 and 1
+	if position < 0 {
+		position = 0
+	}
+	if position > 1 {
+		position = 1
+	}
+	
+	// For now, return the start color for 0-0.5 and end color for 0.5-1
+	// This is a simple implementation - could be enhanced with proper color interpolation
+	if position < 0.5 {
+		return g.Start
+	}
+	return g.End
+}
+
+// Get gradient color based on percentage (0-100)
+func (g GradientColors) GetColorFromPercentage(percentage float64) lipgloss.Color {
+	return g.GetColor(percentage / 100.0)
+}
+
+// Get status-appropriate gradient color
+func GetStatusGradient(status string) GradientColors {
+	switch status {
+	case "success", "complete", "done":
+		return successGradient
+	case "warning", "caution":
+		return warningGradient
+	case "error", "failed", "fail":
+		return errorGradient
+	case "info", "information":
+		return infoGradient
+	case "progress", "running", "working":
+		return progressGradient
+	default:
+		return blueGradient
+	}
+}
+
+var (
 	asciiStyle = lipgloss.NewStyle().
 			Foreground(primaryColor).
 			Bold(true).
@@ -40,58 +123,76 @@ var (
 			Align(lipgloss.Center).
 			MarginBottom(1)  // Reduced from 2 to 1
 
-	menuItemStyle = lipgloss.NewStyle().
-			PaddingLeft(2).
-			PaddingRight(2).
-			Foreground(textColor)
+	// Modern Panel System - btop-inspired with visual depth
+	modernPanelStyle = lipgloss.NewStyle().
+				BorderStyle(lipgloss.RoundedBorder()).
+				BorderForeground(blueGradient.Start).
+				Background(lipgloss.Color("#1e293b")).  // Subtle dark background
+				Padding(3, 4).  // More generous padding
+				Margin(1, 2)   // Better spacing
 
-	// Menu selection styles - beautiful borders WITHOUT any margins/shadows!
-	selectedMenuItemStyle = lipgloss.NewStyle().
-				PaddingLeft(2).
-				PaddingRight(2).
-				Background(primaryColor).
-				Foreground(backgroundColor).
-				Bold(true).
-				Border(lipgloss.RoundedBorder()).
-				BorderForeground(primaryColor)
-
-	inactiveMenuItemStyle = menuItemStyle.Copy().
-				Foreground(dimColor)
-
-	// Enhanced border WITHOUT background
+	// Enhanced border system - clean and minimal
 	borderStyle = lipgloss.NewStyle().
 			BorderStyle(lipgloss.RoundedBorder()).
-			BorderForeground(primaryColor).
+			BorderForeground(blueGradient.Start).
 			Padding(2, 3).
 			Margin(1)
 
-	// Enhanced warning with background
+	// Clean info panels 
+	infoBoxStyle = lipgloss.NewStyle().
+			Background(borderColor).   // Subtle background, not intrusive
+			Foreground(textColor).
+			Padding(0, 1).   // Minimal padding
+			Margin(0).       // No margins
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(blueGradient.Start)
+
+	// Clean status styles without excessive padding
 	warningStyle = lipgloss.NewStyle().
 			Foreground(backgroundColor).
-			Background(warningColor).
+			Background(warningGradient.Start).
 			Bold(true).
 			Align(lipgloss.Center).
-			Padding(0, 2).
+			Padding(0, 2).   // Back to minimal padding
 			Border(lipgloss.RoundedBorder()).
-			BorderForeground(warningColor)
+			BorderForeground(warningGradient.End)
 
 	errorStyle = lipgloss.NewStyle().
 			Foreground(backgroundColor).
-			Background(errorColor).
+			Background(errorGradient.Start).
 			Bold(true).
 			Align(lipgloss.Center).
 			Padding(0, 2).
 			Border(lipgloss.RoundedBorder()).
-			BorderForeground(errorColor)
+			BorderForeground(errorGradient.End)
 
 	successStyle = lipgloss.NewStyle().
 			Foreground(backgroundColor).
-			Background(successColor).
+			Background(successGradient.Start).
 			Bold(true).
 			Align(lipgloss.Center).
 			Padding(0, 2).
 			Border(lipgloss.RoundedBorder()).
-			BorderForeground(successColor)
+			BorderForeground(successGradient.End)
+
+	// Clean menu selection - no excessive padding
+	selectedMenuItemStyle = lipgloss.NewStyle().
+				PaddingLeft(2).   // Back to normal padding
+				PaddingRight(2).
+				Background(blueGradient.Start).
+				Foreground(backgroundColor).
+				Bold(true).
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(blueGradient.End)
+
+	// Clean menu items
+	menuItemStyle = lipgloss.NewStyle().
+			PaddingLeft(2).   // Normal padding
+			PaddingRight(2).
+			Foreground(textColor)
+
+	inactiveMenuItemStyle = menuItemStyle.Copy().
+				Foreground(dimColor)
 
 	// Beautiful progress bar
 	progressBarStyle = lipgloss.NewStyle().
@@ -105,15 +206,6 @@ var (
 			Align(lipgloss.Center).
 			Italic(true).
 			MarginTop(2)
-
-	// Info box styles
-	infoBoxStyle = lipgloss.NewStyle().
-			Background(borderColor).
-			Foreground(textColor).
-			Padding(0, 1).
-			Margin(0).
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(dimColor)
 )
 
 // ASCII art for the program name
@@ -363,69 +455,103 @@ func (m Model) renderProgress() string {
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
 }
 
-// Render progress bar with beautiful styling and cylon animation
+// Render gradient progress bar with btop-inspired modern styling
 func (m Model) renderProgressBar() string {
-	width := 50
+	width := 60 // Increased width for better visual impact
 	
 	// Check if this is indeterminate progress (-1)
 	if m.progress < 0 {
-		// Create animated spinner-like progress bar
-		// Use time to create a moving animation
+		// Beautiful animated indeterminate progress with gradient
 		now := time.Now().Unix()
 		pos := int(now/1) % width // Move every second
 		
-		var bar strings.Builder
+		var segments []string
 		for i := 0; i < width; i++ {
-			if i == pos || i == (pos+1)%width || i == (pos+2)%width {
-				bar.WriteString("█")
+			distance := ((pos - i + width) % width)
+			if distance <= 3 { // Create a 4-character moving highlight
+				switch distance {
+				case 0:
+					segments = append(segments, lipgloss.NewStyle().Foreground(progressGradient.End).Render("█"))
+				case 1:
+					segments = append(segments, lipgloss.NewStyle().Foreground(progressGradient.Start).Render("▓"))
+				case 2, 3:
+					segments = append(segments, lipgloss.NewStyle().Foreground(blueGradient.Start).Render("▒"))
+				}
 			} else {
-				bar.WriteString("░")
+				segments = append(segments, lipgloss.NewStyle().Foreground(dimColor).Render("░"))
 			}
 		}
 		
-		// Indeterminate progress shows no percentage
-		progressText := fmt.Sprintf("Progress: [%s] Working...", bar.String())
+		bar := strings.Join(segments, "")
+		progressText := fmt.Sprintf(" %s Working...", bar)
 		
 		return lipgloss.NewStyle().
-			Foreground(primaryColor).
 			Align(lipgloss.Center).
 			Render(progressText)
 	}
 	
-	// Normal percentage-based progress WITH cylon animation overlay
-	percentage := fmt.Sprintf("%.2f%%", m.progress*100)
+	// Beautiful gradient progress bar based on percentage
+	percentage := fmt.Sprintf("%.1f%%", m.progress*100)
 	filled := int(m.progress * float64(width))
 	
-	// Calculate cylon position (sweeps back and forth)
+	// Calculate cylon position (sweeps back and forth) 
 	cylonPos := m.cylonFrame
 	if cylonPos >= 10 {
 		cylonPos = 20 - cylonPos // Reverse direction for second half
 	}
 	cylonPos = cylonPos * width / 10 // Scale to progress bar width
 	
-	var bar strings.Builder
+	// Create gradient segments based on progress
+	var segments []string
 	for i := 0; i < width; i++ {
+		progressPos := float64(i) / float64(width)
+		
 		if i < filled {
-			// Filled portion
-			if i == cylonPos || i == cylonPos+1 {
-				bar.WriteString("▓") // Cylon highlight on filled area
+			// Filled portion - gradient based on progress percentage
+			var segmentColor lipgloss.Color
+			
+			if m.progress < 0.33 {
+				// 0-33%: Blue gradient
+				segmentColor = blueGradient.GetColor(progressPos * 3) // Scale to use full blue range
+			} else if m.progress < 0.66 {
+				// 33-66%: Purple gradient  
+				segmentColor = purpleGradient.GetColor((progressPos - 0.33) * 3)
 			} else {
-				bar.WriteString("█") // Normal filled
+				// 66-100%: Green gradient
+				segmentColor = greenGradient.GetColor((progressPos - 0.66) * 3)
+			}
+			
+			// Cylon overlay effect
+			if i == cylonPos || i == cylonPos+1 {
+				segments = append(segments, lipgloss.NewStyle().Foreground(tealGradient.End).Render("▓"))
+			} else {
+				segments = append(segments, lipgloss.NewStyle().Foreground(segmentColor).Render("█"))
 			}
 		} else {
-			// Empty portion  
+			// Empty portion with subtle cylon highlighting
 			if i == cylonPos || i == cylonPos+1 {
-				bar.WriteString("▒") // Cylon highlight on empty area
+				segments = append(segments, lipgloss.NewStyle().Foreground(blueGradient.Start).Render("▒"))
 			} else {
-				bar.WriteString("░") // Normal empty
+				segments = append(segments, lipgloss.NewStyle().Foreground(dimColor).Render("░"))
 			}
 		}
 	}
 	
-	progressText := fmt.Sprintf("Progress: [%s] %s", bar.String(), percentage)
+	bar := strings.Join(segments, "")
+	
+	// Enhanced progress text with floating percentage
+	var percentageStyle lipgloss.Style
+	if m.progress < 0.33 {
+		percentageStyle = lipgloss.NewStyle().Foreground(blueGradient.End).Bold(true)
+	} else if m.progress < 0.66 {
+		percentageStyle = lipgloss.NewStyle().Foreground(purpleGradient.End).Bold(true)
+	} else {
+		percentageStyle = lipgloss.NewStyle().Foreground(greenGradient.End).Bold(true)
+	}
+	
+	progressText := fmt.Sprintf(" %s %s", bar, percentageStyle.Render(percentage))
 	
 	return lipgloss.NewStyle().
-		Foreground(primaryColor).
 		Align(lipgloss.Center).
 		Render(progressText)
 }
