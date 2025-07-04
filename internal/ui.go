@@ -105,6 +105,106 @@ func GetStatusGradient(status string) GradientColors {
 	}
 }
 
+// Enhanced Data Visualization Functions - btop-inspired
+func formatBytesWithColor(bytes int64, style string) string {
+	formatted := formatBytes(bytes)
+	
+	var colorStyle lipgloss.Style
+	switch style {
+	case "speed":
+		// Color code based on speed ranges
+		if bytes >= 100*1024*1024 { // > 100MB/s
+			colorStyle = lipgloss.NewStyle().Foreground(successGradient.End).Bold(true)
+		} else if bytes >= 10*1024*1024 { // > 10MB/s
+			colorStyle = lipgloss.NewStyle().Foreground(greenGradient.Start)
+		} else if bytes >= 1*1024*1024 { // > 1MB/s
+			colorStyle = lipgloss.NewStyle().Foreground(blueGradient.End)
+		} else {
+			colorStyle = lipgloss.NewStyle().Foreground(dimColor)
+		}
+	case "size":
+		// Color code based on file/data sizes
+		if bytes >= 10*1024*1024*1024 { // > 10GB
+			colorStyle = lipgloss.NewStyle().Foreground(purpleGradient.End).Bold(true)
+		} else if bytes >= 1024*1024*1024 { // > 1GB
+			colorStyle = lipgloss.NewStyle().Foreground(blueGradient.End)
+		} else if bytes >= 100*1024*1024 { // > 100MB
+			colorStyle = lipgloss.NewStyle().Foreground(greenGradient.Start)
+		} else {
+			colorStyle = lipgloss.NewStyle().Foreground(textColor)
+		}
+	default:
+		colorStyle = lipgloss.NewStyle().Foreground(textColor)
+	}
+	
+	return colorStyle.Render(formatted)
+}
+
+func formatNumberWithColor(n int64, significance string) string {
+	formatted := formatNumber(n)
+	
+	var colorStyle lipgloss.Style
+	switch significance {
+	case "high":
+		if n >= 100000 {
+			colorStyle = lipgloss.NewStyle().Foreground(successGradient.End).Bold(true)
+		} else if n >= 10000 {
+			colorStyle = lipgloss.NewStyle().Foreground(blueGradient.End).Bold(true)
+		} else {
+			colorStyle = lipgloss.NewStyle().Foreground(greenGradient.Start)
+		}
+	case "files":
+		if n >= 50000 {
+			colorStyle = lipgloss.NewStyle().Foreground(purpleGradient.End).Bold(true)
+		} else if n >= 10000 {
+			colorStyle = lipgloss.NewStyle().Foreground(blueGradient.End)
+		} else if n >= 1000 {
+			colorStyle = lipgloss.NewStyle().Foreground(greenGradient.Start)
+		} else {
+			colorStyle = lipgloss.NewStyle().Foreground(textColor)
+		}
+	default:
+		colorStyle = lipgloss.NewStyle().Foreground(textColor)
+	}
+	
+	return colorStyle.Render(formatted)
+}
+
+func renderDataMetric(label, value, icon string) string {
+	labelStyle := lipgloss.NewStyle().Foreground(dimColor)
+	iconStyle := lipgloss.NewStyle().Foreground(blueGradient.Start)
+	
+	return fmt.Sprintf("%s %s %s", 
+		iconStyle.Render(icon),
+		labelStyle.Render(label+":"),
+		value)
+}
+
+func renderProgressStats(filesCopied, filesSkipped, totalFiles int64) string {
+	var parts []string
+	
+	if filesCopied > 0 {
+		copiedText := formatNumberWithColor(filesCopied, "files")
+		parts = append(parts, renderDataMetric("Copied", copiedText, "📄"))
+	}
+	
+	if filesSkipped > 0 {
+		skippedText := formatNumberWithColor(filesSkipped, "files") 
+		parts = append(parts, renderDataMetric("Skipped", skippedText, "⚡"))
+	}
+	
+	if totalFiles > 0 {
+		totalText := formatNumberWithColor(totalFiles, "files")
+		parts = append(parts, renderDataMetric("Total", totalText, "📁"))
+	}
+	
+	if len(parts) == 0 {
+		return ""
+	}
+	
+	return strings.Join(parts, " • ")
+}
+
 var (
 	asciiStyle = lipgloss.NewStyle().
 			Foreground(primaryColor).
@@ -313,33 +413,32 @@ func (m Model) renderAbout() string {
 	s.WriteString(ascii + "\n")
 	s.WriteString(titleStyle.Render("ℹ️ About Migrate") + "\n\n")
 
-	// About content
-	about := GetAboutText() + `
-
-Created by ` + AppAuthor + `
-
-🔗 GitHub: https://github.com/CyphrRiot/Migrate
-🐦 X: https://x.com/CyphrRiot
-
-Powered by Bubble Tea & Lipgloss
-
-Features:
-• Pure Go implementation with zero dependencies
-• Beautiful TUI with Tokyo Night theming
-• Complete system or home directory backup
-• Real-time progress with file-based tracking
-• Smart sync with SHA256 deduplication
-• LUKS encrypted drive support
-• rsync --delete equivalent functionality
-• Static binary for maximum portability
-
-Press any key to return to main menu`
+	// About content with enhanced data visualization
+	features := []string{
+		renderDataMetric("Implementation", "Pure Go", "⚡"),
+		renderDataMetric("Dependencies", "Zero external", "🛡️"),  
+		renderDataMetric("UI Framework", "Bubble Tea + Lipgloss", "🎨"),
+		renderDataMetric("Progress Tracking", "Real-time file-based", "📊"),
+		renderDataMetric("Deduplication", "SHA256 checksums", "🔍"),
+		renderDataMetric("Encryption", "LUKS drive support", "🔐"),
+		renderDataMetric("Sync Method", "rsync --delete equivalent", "🔄"),
+		renderDataMetric("Portability", "Static binary", "📦"),
+	}
+	
+	aboutContent := GetAboutText() + "\n\n" +
+		"Created by " + AppAuthor + "\n\n" +
+		"🔗 GitHub: https://github.com/CyphrRiot/Migrate\n" +
+		"🐦 X: https://x.com/CyphrRiot\n\n" +
+		"✨ Modern btop-inspired interface with gradient progress bars\n\n" +
+		"Key Features:\n" + 
+		strings.Join(features, "\n") + "\n\n" +
+		"Press any key to return to main menu"
 
 	info := lipgloss.NewStyle().
 		Foreground(textColor).
 		Margin(0, 2).
 		Align(lipgloss.Left).
-		Render(about)
+		Render(aboutContent)
 
 	s.WriteString(info)
 
