@@ -88,19 +88,13 @@ func main() {
 	// Ensure lock file is removed on exit
 	defer removeInstanceLock()
 
-	fmt.Println("🚀 Starting " + internal.GetAppTitle())
-	fmt.Println("🔍 Checking system dependencies...")
-
-	// Check required system programs
+	// Check required system programs (silently)
 	if err := checkSystemDependencies(); err != nil {
 		fmt.Printf("❌ Dependency check failed: %v\n", err)
 		fmt.Println()
 		fmt.Println("💡 Install missing dependencies and try again.")
 		os.Exit(1)
 	}
-
-	fmt.Println("✅ All dependencies available!")
-	fmt.Println()
 
 	// Set up signal handling for clean exit
 	c := make(chan os.Signal, 1)
