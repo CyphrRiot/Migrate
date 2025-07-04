@@ -357,7 +357,7 @@ func calculateRealProgress() (float64, string) {
 }
 
 // Start restore operation - TUI ONLY (Pure Go)
-func startRestore(targetPath string) tea.Cmd {
+func startRestore(sourcePath, targetPath string) tea.Cmd {
 	return func() tea.Msg {
 		// Setup logging in appropriate directory
 		logPath := getLogFilePath()
@@ -368,24 +368,18 @@ func startRestore(targetPath string) tea.Cmd {
 			defer logFile.Close()
 		}
 
-		// Check if backup drive is already mounted (user should mount via TUI first)
-		mountPoint, mounted := checkAnyBackupMounted()
-		if !mounted {
-			return ProgressUpdate{Error: fmt.Errorf("no backup drive mounted - please mount a backup drive first through the main menu")}
-		}
-
-		// Check if backup exists
-		backupInfo := filepath.Join(mountPoint, "BACKUP-INFO.txt")
+		// Use provided source path instead of auto-detecting
+		backupInfo := filepath.Join(sourcePath, "BACKUP-INFO.txt")
 		if _, err := os.Stat(backupInfo); os.IsNotExist(err) {
-			return ProgressUpdate{Error: fmt.Errorf("no valid backup found at %s", mountPoint)}
+			return ProgressUpdate{Error: fmt.Errorf("no valid backup found at %s", sourcePath)}
 		}
 
 		if logFile != nil {
-			fmt.Fprintf(logFile, "Starting pure Go restore from %s to %s\n", mountPoint, targetPath)
+			fmt.Fprintf(logFile, "Starting pure Go restore from %s to %s\n", sourcePath, targetPath)
 		}
 
 		// Perform pure Go restore
-		err = performPureGoRestore(mountPoint, targetPath, logFile)
+		err = performPureGoRestore(sourcePath, targetPath, logFile)
 		if err != nil {
 			return ProgressUpdate{Error: err, Done: true}
 		}

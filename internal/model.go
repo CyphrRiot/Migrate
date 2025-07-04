@@ -50,7 +50,7 @@ type Model struct {
 func InitialModel() Model {
 	return Model{
 		screen:   screenMain,
-		choices:  []string{"🚀 Backup System", "🔄 Restore System", "💾 Mount External Drive", "ℹ️ About", "❌ Exit"},
+		choices:  []string{"🚀 Backup System", "🔄 Restore System", "ℹ️ About", "❌ Exit"},  // Removed "💾 Mount External Drive"
 		selected: make(map[int]struct{}),
 		width:    100,
 		height:   30,
@@ -130,15 +130,28 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				})
 			}
 		} else {
-			// Drive successfully mounted, confirm backup
-			backupTypeDesc := "ENTIRE SYSTEM (1:1)"
-			if m.operation == "home_backup" {
-				backupTypeDesc = "HOME DIRECTORY"
+			// Drive successfully mounted, confirm operation
+			if strings.Contains(m.operation, "backup") {
+				// Backup confirmation
+				backupTypeDesc := "ENTIRE SYSTEM (1:1)"
+				if m.operation == "home_backup" {
+					backupTypeDesc = "HOME DIRECTORY"
+				}
+				
+				m.confirmation = fmt.Sprintf("Ready to backup %s\n\nDrive: %s (%s)\nType: %s\nMounted at: %s\n\nProceed with backup?", 
+					backupTypeDesc, msg.drivePath, msg.driveSize, msg.driveType, msg.mountPoint)
+			} else if strings.Contains(m.operation, "restore") {
+				// Restore confirmation
+				restoreTypeDesc := "ENTIRE SYSTEM"
+				if m.operation == "custom_restore" {
+					restoreTypeDesc = "CUSTOM PATH"
+				}
+				
+				m.confirmation = fmt.Sprintf("Ready to restore %s\n\nSource: %s (%s)\nType: %s\nMounted at: %s\n\n⚠️ This will OVERWRITE existing files!\n\nProceed with restore?", 
+					restoreTypeDesc, msg.drivePath, msg.driveSize, msg.driveType, msg.mountPoint)
 			}
 			
-			m.confirmation = fmt.Sprintf("Ready to backup %s\n\nDrive: %s (%s)\nType: %s\nMounted at: %s\n\nProceed with backup?", 
-				backupTypeDesc, msg.drivePath, msg.driveSize, msg.driveType, msg.mountPoint)
-			m.selectedDrive = msg.mountPoint // Store mount point for backup
+			m.selectedDrive = msg.mountPoint // Store mount point for operation
 			m.screen = screenConfirm
 			m.cursor = 0
 			return m, nil
@@ -230,7 +243,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.screen = screenMain
 			m.message = ""
 			m.cursor = 0
-			m.choices = []string{"🚀 Backup System", "🔄 Restore System", "💾 Mount External Drive", "ℹ️ About", "❌ Exit"}
+			m.choices = []string{"🚀 Backup System", "🔄 Restore System", "ℹ️ About", "❌ Exit"}
 			return m, nil
 		}
 		
@@ -251,7 +264,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Go back to main menu from other screens
 			m.screen = screenMain
 			m.cursor = 0
-			m.choices = []string{"🚀 Backup System", "🔄 Restore System", "💾 Mount External Drive", "ℹ️ About", "❌ Exit"}
+			m.choices = []string{"🚀 Backup System", "🔄 Restore System", "ℹ️ About", "❌ Exit"}
 			return m, nil
 
 		case "esc":
@@ -266,7 +279,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				resetBackupState()
 				m.screen = screenMain
 				m.cursor = 0
-				m.choices = []string{"🚀 Backup System", "🔄 Restore System", "💾 Mount External Drive", "ℹ️ About", "❌ Exit"}
+				m.choices = []string{"🚀 Backup System", "🔄 Restore System", "ℹ️ About", "❌ Exit"}
 			}
 			return m, nil
 
@@ -311,14 +324,9 @@ func (m Model) handleSelection() (tea.Model, tea.Cmd) {
 			m.screen = screenRestore
 			m.choices = []string{"🔄 Restore to Current System", "📂 Restore to Custom Path", "⬅️ Back"}
 			m.cursor = 0
-		case 2: // Mount External Drive
-			m.screen = screenDriveSelect
-			m.cursor = 0
-			// Load available drives
-			return m, LoadDrives()
-		case 3: // About
+		case 2: // About (was case 3, now case 2)
 			m.screen = screenAbout
-		case 4: // Exit
+		case 3: // Exit (was case 4, now case 3)
 			return m, tea.Quit
 		}
 	case screenBackup:
@@ -337,22 +345,27 @@ func (m Model) handleSelection() (tea.Model, tea.Cmd) {
 			return m, LoadDrives()
 		case 2: // Back
 			m.screen = screenMain
-			m.choices = []string{"🚀 Backup System", "🔄 Restore System", "💾 Mount External Drive", "ℹ️ About", "❌ Exit"}
+			m.choices = []string{"🚀 Backup System", "🔄 Restore System", "ℹ️ About", "❌ Exit"}
 			m.cursor = 0
 		}
 	case screenRestore:
 		switch m.cursor {
-		case 0: // Restore to Current System
-			m.confirmation = "This will OVERWRITE your current system with the backup. Continue?"
+		case 0: // Restore to Current System  
 			m.operation = "system_restore"
-			m.screen = screenConfirm
+			// Go to drive selection like backup does
+			m.screen = screenDriveSelect
+			m.cursor = 0
+			return m, LoadDrives()
 		case 1: // Restore to Custom Path
-			m.message = "Custom path restore not implemented yet"
-			// TODO: Implement custom path selection
+			m.operation = "custom_restore"
+			// Go to drive selection for source backup
+			m.screen = screenDriveSelect  
+			m.cursor = 0
+			return m, LoadDrives()
 		case 2: // Back
 			resetBackupState() // Reset state when going back to main from restore menu
 			m.screen = screenMain
-			m.choices = []string{"🚀 Backup System", "🔄 Restore System", "💾 Mount External Drive", "ℹ️ About", "❌ Exit"}
+			m.choices = []string{"🚀 Backup System", "🔄 Restore System", "ℹ️ About", "❌ Exit"}
 			m.cursor = 0
 		}
 	case screenConfirm:
@@ -388,7 +401,13 @@ func (m Model) handleSelection() (tea.Model, tea.Cmd) {
 				// Unmount the backup drive
 				return m, PerformBackupUnmount()
 			case "system_restore":
-				return m, startRestore("/")
+				return m, startRestore(m.selectedDrive, "/")
+			case "custom_restore":
+				// TODO: Ask for custom destination path
+				m.message = "Custom restore path selection not implemented yet"
+				return m, tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
+					return tea.KeyMsg{Type: tea.KeyEsc}
+				})
 			default:
 				return m, startActualBackup(m.operation, m.selectedDrive)
 			}
@@ -403,7 +422,7 @@ func (m Model) handleSelection() (tea.Model, tea.Cmd) {
 			m.selectedDrive = ""
 			m.progress = 0
 			m.screen = screenMain
-			m.choices = []string{"🚀 Backup System", "🔄 Restore System", "💾 Mount External Drive", "ℹ️ About", "❌ Exit"}
+			m.choices = []string{"🚀 Backup System", "🔄 Restore System", "ℹ️ About", "❌ Exit"}
 			m.cursor = 0
 			
 			// Set appropriate message
@@ -416,19 +435,22 @@ func (m Model) handleSelection() (tea.Model, tea.Cmd) {
 	case screenAbout:
 		resetBackupState() // Reset state when returning from about screen
 		m.screen = screenMain
-		m.choices = []string{"🚀 Backup System", "🔄 Restore System", "💾 Mount External Drive", "ℹ️ About", "❌ Exit"}
+		m.choices = []string{"🚀 Backup System", "🔄 Restore System", "ℹ️ About", "❌ Exit"}
 		m.cursor = 0
 	case screenDriveSelect:
 		if m.cursor < len(m.drives) {
 			selectedDrive := m.drives[m.cursor]
 			m.selectedDrive = selectedDrive.Device
 			
-			// Check if this is for backup or just mounting
+			// Check the operation type
 			if strings.Contains(m.operation, "backup") {
-				// For backup: mount drive first, then confirm backup
+				// For backup: mount drive for destination
 				return m, mountDriveForBackup(selectedDrive)
+			} else if strings.Contains(m.operation, "restore") {
+				// For restore: mount drive for source backup
+				return m, mountDriveForRestore(selectedDrive)
 			} else {
-				// For regular mounting: just mount the drive
+				// Fallback: regular mounting
 				return m, mountSelectedDrive(selectedDrive)
 			}
 		} else {
@@ -437,10 +459,14 @@ func (m Model) handleSelection() (tea.Model, tea.Cmd) {
 				// Go back to backup menu
 				m.screen = screenBackup
 				m.choices = []string{"📁 Complete System Backup", "🏠 Home Directory Only", "⬅️ Back"}
+			} else if strings.Contains(m.operation, "restore") {
+				// Go back to restore menu  
+				m.screen = screenRestore
+				m.choices = []string{"🔄 Restore to Current System", "📂 Restore to Custom Path", "⬅️ Back"}
 			} else {
 				// Go back to main menu
 				m.screen = screenMain
-				m.choices = []string{"🚀 Backup System", "🔄 Restore System", "💾 Mount External Drive", "ℹ️ About", "❌ Exit"}
+				m.choices = []string{"🚀 Backup System", "🔄 Restore System", "ℹ️ About", "❌ Exit"}
 			}
 			m.cursor = 0
 		}
