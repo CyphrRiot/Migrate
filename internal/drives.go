@@ -476,6 +476,68 @@ func mountDriveForBackup(drive DriveInfo) tea.Cmd {
 	}
 }
 
+// Mount any external drive for restore (same logic as backup, but for restore confirmation)
+func mountDriveForRestore(drive DriveInfo) tea.Cmd {
+	return func() tea.Msg {
+		// Check if this is a locked LUKS drive
+		if drive.Encrypted {
+			// Check if it's already unlocked by looking for the mapper device
+			mapperName := "luks-" + drive.UUID
+			mapperPath := "/dev/mapper/" + mapperName
+			
+			if _, err := os.Stat(mapperPath); os.IsNotExist(err) {
+				// LUKS drive is locked - show helpful error
+				return BackupDriveStatus{
+					error: fmt.Errorf("❌ LUKS drive is locked\n\nTo unlock manually:\nsudo cryptsetup luksOpen %s %s\nsudo udisksctl mount -b %s\n\nThen restart migrate.", drive.Device, mapperName, mapperPath),
+				}
+			}
+			
+			// LUKS drive is unlocked, try to mount the mapper device
+			mountPoint, err := mountRegularDrive(DriveInfo{
+				Device: mapperPath,
+				Size: drive.Size,
+				Label: drive.Label,
+				UUID: drive.UUID,
+				Filesystem: drive.Filesystem,
+				Encrypted: false, // Treat unlocked LUKS as regular drive
+			})
+			
+			if err != nil {
+				return BackupDriveStatus{
+					error: fmt.Errorf("Failed to mount unlocked LUKS drive %s: %v", mapperPath, err),
+				}
+			}
+
+			// Successfully mounted LUKS drive - now ask for restore confirmation
+			return BackupDriveStatus{
+				drivePath:  drive.Device,
+				driveSize:  drive.Size,
+				driveType:  fmt.Sprintf("%s [LUKS]", drive.Label),
+				mountPoint: mountPoint,
+				needsMount: false,
+				error:      nil,
+			}
+		}
+
+		// Regular drive mounting
+		mountPoint, err := mountRegularDrive(drive)
+		if err != nil {
+			return BackupDriveStatus{
+				error: fmt.Errorf("Failed to mount %s: %v", drive.Device, err),
+			}
+		}
+
+		return BackupDriveStatus{
+			drivePath:  drive.Device,
+			driveSize:  drive.Size,
+			driveType:  fmt.Sprintf("%s [%s]", drive.Label, drive.Filesystem),
+			mountPoint: mountPoint,
+			needsMount: false,
+			error:      nil,
+		}
+	}
+}
+
 // Handle password input outside TUI
 func handlePasswordInput(msg PasswordRequiredMsg, originalOp string) tea.Cmd {
 	return func() tea.Msg {
