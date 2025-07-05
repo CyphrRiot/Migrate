@@ -294,13 +294,13 @@ func calculateRealProgress() (float64, string) {
 
 		// Show meaningful sync status with enhanced formatting
 		if filesCopied > 0 {
-			message = fmt.Sprintf("Syncing files  •  %s copied, %s skipped  •  %s total",
+			message = fmt.Sprintf("Syncing files • %s copied, %s skipped • %s total",
 				formatNumber(filesCopied), formatNumber(filesSkipped), formatNumber(totalFilesFound))
 		} else if filesSkipped > 1000 {
-			message = fmt.Sprintf("Comparing files  •  %s identical  •  %s total processed",
+			message = fmt.Sprintf("Comparing files • %s identical • %s total processed",
 				formatNumber(filesSkipped), formatNumber(totalFilesFound))
 		} else {
-			message = fmt.Sprintf("Processing files  •  %s of %s analyzed",
+			message = fmt.Sprintf("Processing files • %s of %s analyzed",
 				formatNumber(filesSkipped+filesCopied), formatNumber(totalFilesFound))
 		}
 
@@ -320,10 +320,10 @@ func calculateRealProgress() (float64, string) {
 			// First 10 seconds: show immediate discovery progress
 			progress = 0.01 + (elapsed.Seconds() / 60.0) * 0.04 // 1% to 5% over first minute
 			if fileDiscoveryRate > 0 {
-				message = fmt.Sprintf("Scanning filesystem  •  %s files found  •  %s files/sec", 
+				message = fmt.Sprintf("Scanning filesystem • %s files found • %s files/sec", 
 					formatNumber(totalFilesFound), formatNumber(int64(fileDiscoveryRate)))
 			} else {
-				message = fmt.Sprintf("Scanning filesystem  •  %s files found", formatNumber(totalFilesFound))
+				message = fmt.Sprintf("Scanning filesystem • %s files found", formatNumber(totalFilesFound))
 			}
 		} else {
 			// After 10 seconds: show more detailed progress
@@ -338,10 +338,10 @@ func calculateRealProgress() (float64, string) {
 				
 				// Show discovery progress with rate
 				if currentDirectory != "" {
-					message = fmt.Sprintf("Scanning: %s  •  %s files found", 
+					message = fmt.Sprintf("Scanning: %s • %s files found", 
 						currentDirectory, formatNumber(totalFilesFound))
 				} else {
-					message = fmt.Sprintf("Discovering files  •  %s files found  •  %s files/sec", 
+					message = fmt.Sprintf("Discovering files • %s files found • %s files/sec", 
 						formatNumber(totalFilesFound), formatNumber(int64(fileDiscoveryRate)))
 				}
 			} else {
@@ -364,13 +364,13 @@ func calculateRealProgress() (float64, string) {
 				
 				// Show detailed processing information
 				if filesCopied > 0 {
-					message = fmt.Sprintf("Processing files  •  %s copied, %s skipped  •  %s total found",
+					message = fmt.Sprintf("Processing files • %s copied, %s skipped • %s total found",
 						formatNumber(filesCopied), formatNumber(filesSkipped), formatNumber(totalFilesFound))
 				} else if filesSkipped > 100 {
-					message = fmt.Sprintf("Comparing files  •  %s identical, %s total found",
+					message = fmt.Sprintf("Comparing files • %s identical, %s total found",
 						formatNumber(filesSkipped), formatNumber(totalFilesFound))
 				} else {
-					message = fmt.Sprintf("Analyzing files  •  %s processed of %s found",
+					message = fmt.Sprintf("Analyzing files • %s processed of %s found",
 						formatNumber(filesProcessed), formatNumber(totalFilesFound))
 				}
 			}
