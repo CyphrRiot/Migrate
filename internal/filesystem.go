@@ -156,6 +156,10 @@ func syncDirectories(src, dst string, logFile *os.File) error {
 					fmt.Fprintf(logFile, "Error copying %s: %v\n", path, err)
 				} else {
 					atomic.AddInt64(&filesCopied, 1)
+					// Track copied files for verification (thread-safe)
+					copiedFilesListMutex.Lock()
+					copiedFilesList = append(copiedFilesList, path)
+					copiedFilesListMutex.Unlock()
 					if logFile != nil && filesCopied%1000 == 0 { // Log every 1000 files instead of 100
 						fmt.Fprintf(logFile, "Copied %s files, skipped %s identical files\n",
 							formatNumber(filesCopied), formatNumber(filesSkipped))
@@ -179,6 +183,10 @@ func syncDirectories(src, dst string, logFile *os.File) error {
 				fmt.Fprintf(logFile, "Error copying %s: %v\n", path, err)
 			} else {
 				atomic.AddInt64(&filesCopied, 1)
+				// Track copied files for verification (thread-safe)
+				copiedFilesListMutex.Lock()
+				copiedFilesList = append(copiedFilesList, path)
+				copiedFilesListMutex.Unlock()
 				if logFile != nil && filesCopied%100 == 0 {
 					fmt.Fprintf(logFile, "Copied %s files, skipped %s identical files\n",
 						formatNumber(filesCopied), formatNumber(filesSkipped))

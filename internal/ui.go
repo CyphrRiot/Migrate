@@ -22,13 +22,13 @@ var (
 	}
 	
 	purpleGradient = GradientColors{
-		Start: lipgloss.Color("#6366f1"), // Indigo - closer to blue but darker
-		End:   lipgloss.Color("#4f46e5"), // Dark indigo
+		Start: lipgloss.Color("#8b5cf6"), // Lighter violet - better readability
+		End:   lipgloss.Color("#7c3aed"), // Medium purple
 	}
 	
 	greenGradient = GradientColors{
-		Start: lipgloss.Color("#22c55e"), // True green
-		End:   lipgloss.Color("#16a34a"), // Dark green - no cyan!
+		Start: lipgloss.Color("#10b981"), // Muted emerald green
+		End:   lipgloss.Color("#059669"), // Darker muted green
 	}
 	
 	orangeGradient = GradientColors{
@@ -42,7 +42,7 @@ var (
 	}
 
 	// Status-specific gradients
-	successGradient = greenGradient
+	successGradient = greenGradient  // Use the muted green for success too
 	warningGradient = orangeGradient
 	errorGradient = GradientColors{
 		Start: lipgloss.Color("#ef4444"), // Red
@@ -222,6 +222,12 @@ var (
 			Foreground(textColor).
 			Align(lipgloss.Center).
 			MarginBottom(1)  // Reduced from 2 to 1
+
+	// Subdued style for version/author info
+	versionStyle = lipgloss.NewStyle().
+			Foreground(dimColor).  // Much darker and less prominent
+			Align(lipgloss.Center).
+			MarginBottom(1)
 
 	// Modern Panel System - btop-inspired with visual depth
 	modernPanelStyle = lipgloss.NewStyle().
@@ -492,28 +498,43 @@ func (m Model) renderProgress() string {
 	s.WriteString(ascii + "\n")
 	title := titleStyle.Render(AppDesc)
 	s.WriteString(title + "\n")
-	subtitle := subtitleStyle.Render(GetSubtitle())
-	s.WriteString(subtitle + "\n\n")
+	version := versionStyle.Render(GetSubtitle())  // Use dimmer versionStyle instead of subtitleStyle
+	s.WriteString(version + "\n\n")
 
 	// Operation title
 	if m.canceling {
 		s.WriteString(titleStyle.Render("🛑 Canceling Operation") + "\n\n")
 	} else {
-		s.WriteString(titleStyle.Render("🔄 Operation in Progress") + "\n\n")
+		// Make title specific to the operation type
+		var operationTitle string
+		if strings.Contains(m.operation, "backup") {
+			operationTitle = "💾 Backup in Progress"
+		} else if strings.Contains(m.operation, "restore") {
+			operationTitle = "🔄 Restore in Progress"
+		} else {
+			operationTitle = "⚙️ Operation in Progress"
+		}
+		s.WriteString(titleStyle.Render(operationTitle) + "\n\n")
 	}
 
-	// Operation info - show source and destination drives with proper alignment
+	// Operation info - show source and destination drives with proper styling
 	logPath := getLogFilePath() // Get log path for display
 	if m.operation == "system_backup" {
-		s.WriteString("📁 Backup Type:    Complete System (1:1)\n")
-		s.WriteString("📂 Source:         / (Internal Drive)\n")
-		s.WriteString("💾 Destination:    " + m.selectedDrive + " (External Drive)\n")
-		s.WriteString("📋 Log:            " + logPath + "\n\n")
+		backupTypeStyle := lipgloss.NewStyle().Foreground(greenGradient.Start).Bold(true) // Slightly highlighted
+		logStyle := lipgloss.NewStyle().Foreground(dimColor) // Darker/subdued
+		
+		s.WriteString(backupTypeStyle.Render("📁 Backup Type:    Complete System") + "\n")
+		s.WriteString("📂 Source:         /\n")
+		s.WriteString("💾 Destination:    " + m.selectedDrive + "\n")
+		s.WriteString(logStyle.Render("📋 Log:            " + logPath) + "\n\n")
 	} else if m.operation == "home_backup" {
-		s.WriteString("📁 Backup Type:    Home Directory Only\n")
-		s.WriteString("📂 Source:         ~/ (Home Directory)\n")  
-		s.WriteString("💾 Destination:    " + m.selectedDrive + " (External Drive)\n")
-		s.WriteString("📋 Log:            " + logPath + "\n\n")
+		backupTypeStyle := lipgloss.NewStyle().Foreground(greenGradient.Start).Bold(true) // Slightly highlighted
+		logStyle := lipgloss.NewStyle().Foreground(dimColor) // Darker/subdued
+		
+		s.WriteString(backupTypeStyle.Render("📁 Backup Type:    Home Directory Only") + "\n")
+		s.WriteString("📂 Source:         ~/\n")  
+		s.WriteString("💾 Destination:    " + m.selectedDrive + "\n")
+		s.WriteString(logStyle.Render("📋 Log:            " + logPath) + "\n\n")
 	} else {
 		opInfo := fmt.Sprintf("Running: %s", m.operation)
 		s.WriteString(subtitleStyle.Render(opInfo) + "\n")
@@ -643,17 +664,18 @@ func (m Model) renderProgressBarWithMessage(message string) string {
 		progressPos := float64(i) / float64(width)
 		
 		if i < filled {
-			// Filled portion - gradient based on progress percentage
+			// Filled portion - rainbow gradient based on BAR POSITION (not overall progress)
+			// This ensures smooth color transitions regardless of progress jumps
 			var segmentColor lipgloss.Color
 			
-			if m.progress < 0.33 {
-				// 0-33%: Blue gradient
+			if progressPos < 0.33 {
+				// 0-33% of bar: Blue gradient
 				segmentColor = blueGradient.GetColor(progressPos * 3) // Scale to use full blue range
-			} else if m.progress < 0.66 {
-				// 33-66%: Purple gradient  
+			} else if progressPos < 0.66 {
+				// 33-66% of bar: Purple gradient  
 				segmentColor = purpleGradient.GetColor((progressPos - 0.33) * 3)
 			} else {
-				// 66-100%: Green gradient
+				// 66-100% of bar: Green gradient
 				segmentColor = greenGradient.GetColor((progressPos - 0.66) * 3)
 			}
 			
@@ -697,9 +719,9 @@ func (m Model) renderProgressBarWithMessage(message string) string {
 func (m Model) renderHeader() string {
 	ascii := asciiStyle.Render(MigrateASCII)
 	title := titleStyle.Render(AppDesc)
-	subtitle := subtitleStyle.Render(GetSubtitle())
+	version := versionStyle.Render(GetSubtitle())  // Use dimmer versionStyle instead of subtitleStyle
 	
-	return ascii + "\n" + title + "\n" + subtitle
+	return ascii + "\n" + title + "\n" + version
 }
 
 // Render drive selection screen
@@ -763,15 +785,100 @@ func (m Model) renderHelp() string {
 func (m Model) renderError() string {
 	var s strings.Builder
 
+	// Parse error message for better formatting
+	errorText := m.message
+	
+	// Remove "Error: " prefix if present
+	if strings.HasPrefix(errorText, "Error: ") {
+		errorText = strings.TrimPrefix(errorText, "Error: ")
+	}
+	
+	// Parse the nested error structure
+	var displayLines []string
+	
+	if strings.Contains(errorText, "backup failed: verification phase failed: verification of new files failed:") {
+		// Verification error - format nicely
+		displayLines = []string{
+			"🔍 Verification Error:",
+			"Backup completed but file verification failed",
+			"",
+		}
+		
+		// Extract the specific error details - find everything after the last ":"
+		lastColonIndex := strings.LastIndex(errorText, ":")
+		if lastColonIndex != -1 && lastColonIndex < len(errorText)-1 {
+			details := strings.TrimSpace(errorText[lastColonIndex+1:])
+			if details != "" {
+				displayLines = append(displayLines, details)
+			}
+		}
+	} else if strings.Contains(errorText, "verification") {
+		// Other verification errors
+		displayLines = []string{
+			"🔍 Verification Error:",
+			"",
+			errorText,
+		}
+	} else if strings.Contains(errorText, ":") {
+		// Other structured error - break on colons
+		parts := strings.Split(errorText, ":")
+		if len(parts) >= 2 {
+			displayLines = []string{
+				"❌ " + strings.TrimSpace(parts[0]) + ":",
+				"",
+			}
+			for i := 1; i < len(parts); i++ {
+				part := strings.TrimSpace(parts[i])
+				if part != "" {
+					displayLines = append(displayLines, part)
+				}
+			}
+		} else {
+			displayLines = []string{
+				"❌ Error:",
+				"",
+				errorText,
+			}
+		}
+	} else {
+		// Simple error
+		displayLines = []string{
+			"❌ Error:",
+			"",
+			errorText,
+		}
+	}
+	
+	// Ensure we have at least some content
+	if len(displayLines) == 0 || (len(displayLines) == 1 && displayLines[0] == "") {
+		displayLines = []string{
+			"❌ Error:",
+			"",
+			"An unknown error occurred",
+			"Original message: " + m.message,
+		}
+	}
+	
 	// Header
 	s.WriteString(titleStyle.Render("❌ Error") + "\n\n")
 
-	// Error message with enhanced styling
-	errorMsg := errorStyle.Render(m.message)
-	s.WriteString(errorMsg + "\n\n")
+	// Format error message with proper line breaks
+	for i, line := range displayLines {
+		if i == 0 {
+			// First line in red/bold
+			s.WriteString(lipgloss.NewStyle().Foreground(errorColor).Bold(true).Render(line) + "\n")
+		} else if line == "" {
+			s.WriteString("\n")
+		} else {
+			// Other lines in normal text
+			s.WriteString(lipgloss.NewStyle().Foreground(textColor).Render(line) + "\n")
+		}
+	}
+	
+	s.WriteString("\n")
 
 	// Help text - emphasize manual dismissal
-	help := helpStyle.Render("📖 Please read the instructions above • Press ESC or any key when ready to continue")
+	help := helpStyle.Render("📖 Please read the error details above • Press ESC or any key when ready to continue")
 	s.WriteString(help)
 
 	// Center the content with beautiful border

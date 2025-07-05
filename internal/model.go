@@ -159,9 +159,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case ProgressUpdate:
 		if msg.Error != nil {
-			m.message = fmt.Sprintf("Error: %v", msg.Error)
-			m.progress = 0
-			m.canceling = false // Reset canceling state on error
+			// Check if this is a critical error that needs manual dismissal
+			errorMsg := fmt.Sprintf("Error: %v", msg.Error)
+			if strings.Contains(errorMsg, "verification") || 
+			   strings.Contains(errorMsg, "critical") || 
+			   strings.Contains(errorMsg, "failed") ||
+			   strings.Contains(errorMsg, "error 32") {
+				// Critical error - needs manual dismissal
+				m.message = errorMsg
+				m.errorRequiresManualDismissal = true
+				m.lastScreen = m.screen
+				m.screen = screenError
+				m.progress = 0
+				m.canceling = false
+				return m, nil
+			} else {
+				// Regular error - show but continue normal flow
+				m.message = errorMsg
+				m.progress = 0
+				m.canceling = false // Reset canceling state on error
+			}
 		} else {
 			// Only update progress if we're not canceling
 			if !m.canceling {
@@ -197,10 +214,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.screen = screenComplete
 				return m, nil
 			} else {
-				// Operation completed with error - auto-dismiss after 3 seconds
-				return m, tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
-					return tea.KeyMsg{Type: tea.KeyEsc}
-				})
+				// Operation completed with error - check if critical
+				errorMsg := fmt.Sprintf("Error: %v", msg.Error)
+				if strings.Contains(errorMsg, "verification") || 
+				   strings.Contains(errorMsg, "critical") || 
+				   strings.Contains(errorMsg, "failed") ||
+				   strings.Contains(errorMsg, "error 32") {
+					// Critical error - needs manual dismissal
+					m.message = errorMsg
+					m.errorRequiresManualDismissal = true
+					m.lastScreen = m.screen
+					m.screen = screenError
+					return m, nil
+				} else {
+					// Regular error - auto-dismiss after 3 seconds
+					return m, tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
+						return tea.KeyMsg{Type: tea.KeyEsc}
+					})
+				}
 			}
 		} else {
 			// NOT DONE - Schedule next progress update (unless canceling)
@@ -229,9 +260,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		// Handle error screen dismissal first
 		if m.screen == screenError {
-			// Any key press dismisses the error screen
-			m.screen = m.lastScreen
+			// Any key press dismisses the error screen and returns to main menu
+			resetBackupState()
+			m.screen = screenMain
 			m.message = ""
+			m.cursor = 0
+			m.choices = []string{"🚀 Backup System", "🔄 Restore System", "ℹ️ About", "❌ Exit"}
 			m.errorRequiresManualDismissal = false
 			return m, nil
 		}
@@ -269,9 +303,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "esc":
 			if m.screen == screenError {
-				// Return to previous screen from error
-				m.screen = m.lastScreen
+				// Return to main menu from error
+				resetBackupState()
+				m.screen = screenMain
 				m.message = ""
+				m.cursor = 0
+				m.choices = []string{"🚀 Backup System", "🔄 Restore System", "ℹ️ About", "❌ Exit"}
 				m.errorRequiresManualDismissal = false
 				return m, nil
 			} else if m.screen != screenMain {
