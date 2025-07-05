@@ -22,8 +22,8 @@ var (
 	}
 	
 	purpleGradient = GradientColors{
-		Start: lipgloss.Color("#a855f7"), // Purple
-		End:   lipgloss.Color("#8b5cf6"), // Violet
+		Start: lipgloss.Color("#7c3aed"), // Deep purple
+		End:   lipgloss.Color("#5b21b6"), // Dark violet
 	}
 	
 	greenGradient = GradientColors{
@@ -502,22 +502,22 @@ func (m Model) renderProgress() string {
 		s.WriteString(titleStyle.Render("🔄 Operation in Progress") + "\n\n")
 	}
 
-	// Operation info - show source and destination drives  
+	// Operation info - show source and destination drives with proper alignment
 	logPath := getLogFilePath() // Get log path for display
 	if m.operation == "system_backup" {
-		s.WriteString("📁 Backup Type: Complete System (1:1)\n")
-		s.WriteString("📂 Source: / (Internal Drive)\n")
-		s.WriteString("💾 Destination: " + m.selectedDrive + " (External Drive)\n")
-		s.WriteString("📋 Log: " + logPath + "\n\n")
+		s.WriteString("📁 Backup Type:    Complete System (1:1)\n")
+		s.WriteString("📂 Source:         / (Internal Drive)\n")
+		s.WriteString("💾 Destination:    " + m.selectedDrive + " (External Drive)\n")
+		s.WriteString("📋 Log:            " + logPath + "\n\n")
 	} else if m.operation == "home_backup" {
-		s.WriteString("📁 Backup Type: Home Directory Only\n")
-		s.WriteString("📂 Source: ~/ (Home Directory)\n")  
-		s.WriteString("💾 Destination: " + m.selectedDrive + " (External Drive)\n")
-		s.WriteString("📋 Log: " + logPath + "\n\n")
+		s.WriteString("📁 Backup Type:    Home Directory Only\n")
+		s.WriteString("📂 Source:         ~/ (Home Directory)\n")  
+		s.WriteString("💾 Destination:    " + m.selectedDrive + " (External Drive)\n")
+		s.WriteString("📋 Log:            " + logPath + "\n\n")
 	} else {
 		opInfo := fmt.Sprintf("Running: %s", m.operation)
 		s.WriteString(subtitleStyle.Render(opInfo) + "\n")
-		s.WriteString("📋 Log: " + logPath + "\n\n")
+		s.WriteString("📋 Log:            " + logPath + "\n\n")
 	}
 
 	// Progress bar (only show if not canceling)
@@ -582,7 +582,7 @@ func (m Model) renderProgressBar() string {
 		}
 		
 		bar := strings.Join(segments, "")
-		progressText := fmt.Sprintf(" %s Working...", bar)
+		progressText := fmt.Sprintf("📊 %s Working...", bar)
 		
 		return lipgloss.NewStyle().
 			Align(lipgloss.Center).
@@ -648,7 +648,7 @@ func (m Model) renderProgressBar() string {
 		percentageStyle = lipgloss.NewStyle().Foreground(greenGradient.End).Bold(true)
 	}
 	
-	progressText := fmt.Sprintf(" %s %s", bar, percentageStyle.Render(percentage))
+	progressText := fmt.Sprintf("📊 %s %s", bar, percentageStyle.Render(percentage))
 	
 	return lipgloss.NewStyle().
 		Align(lipgloss.Center).
