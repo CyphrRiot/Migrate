@@ -7,9 +7,9 @@ package internal
 
 const (
 	AppName    = "Migrate"
-	AppVersion = "1.0.12"  // ⬅️ CHANGE VERSION HERE ONLY
+	AppVersion = "1.0.14"  // ⬅️ CHANGE VERSION HERE ONLY
 	AppAuthor  = "Cypher Riot"
-	AppDesc    = "A Beautiful Live Backup & Restore"
+	AppDesc    = "Beautiful Live System Backup & Restore"
 )
 
 // GetVersionString returns the formatted version string for display
