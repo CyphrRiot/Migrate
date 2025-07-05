@@ -76,7 +76,7 @@ func getLogFilePath() string {
 }
 
 // Format bytes into human readable size with proper units and formatting
-func formatBytes(bytes int64) string {
+func FormatBytes(bytes int64) string {
 	const unit = 1024
 	if bytes < unit {
 		return strconv.FormatInt(bytes, 10) + " B"
@@ -123,6 +123,11 @@ func formatBytes(bytes int64) string {
 	}
 
 	return formatted + " " + units[unitIndex]
+}
+
+// Internal version for backward compatibility
+func formatBytes(bytes int64) string {
+	return FormatBytes(bytes)
 }
 
 // Format numbers with comma separators for readability

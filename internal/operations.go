@@ -18,6 +18,10 @@ type BackupConfig struct {
 	DestinationPath string
 	ExcludePatterns []string
 	BackupType      string
+	// NEW: Selective backup support
+	IsSelectiveBackup bool
+	SelectedFolders   map[string]bool  // folder -> selected state
+	HomeFolders       []HomeFolderInfo // folder information
 }
 
 // VerificationConfig holds verification settings
@@ -182,7 +186,7 @@ func runBackupSilently(config BackupConfig) {
 	}
 	
 	// Run synchronously instead of in goroutine to fix execution bug
-	err = performPureGoBackup(config.SourcePath, config.DestinationPath, logFile)
+	err = performPureGoBackup(config, logFile)
 	if err != nil {
 		if logFile != nil {
 			fmt.Fprintf(logFile, "PURE GO ERROR: %v\n", err)
@@ -204,14 +208,14 @@ func runBackupSilently(config BackupConfig) {
 }
 
 // Pure Go backup implementation (no external dependencies)
-func performPureGoBackup(sourcePath, destPath string, logFile *os.File) error {
+func performPureGoBackup(config BackupConfig, logFile *os.File) error {
 	if logFile != nil {
 		fmt.Fprintf(logFile, "Starting pure Go backup (zero external dependencies)\n")
-		fmt.Fprintf(logFile, "Source: %s -> Dest: %s\n", sourcePath, destPath)
+		fmt.Fprintf(logFile, "Source: %s -> Dest: %s\n", config.SourcePath, config.DestinationPath)
 	}
 
-	// Create backup info file first
-	err := createBackupInfo(destPath, "System Backup")
+	// Create backup info file first with CORRECT backup type
+	err := createBackupInfo(config.DestinationPath, config.BackupType) // Use actual backup type, not hardcoded
 	if err != nil {
 		if logFile != nil {
 			fmt.Fprintf(logFile, "Failed to create backup info: %v\n", err)
@@ -219,8 +223,49 @@ func performPureGoBackup(sourcePath, destPath string, logFile *os.File) error {
 		return fmt.Errorf("failed to create backup info: %v", err)
 	}
 
-	// Phase 1: Sync directories (copy/update files from source to dest)
-	err = syncDirectories(sourcePath, destPath, logFile)
+	// SELECTIVE BACKUP: Handle folder-specific backup
+	if config.IsSelectiveBackup {
+		if logFile != nil {
+			fmt.Fprintf(logFile, "=== SELECTIVE BACKUP MODE ===\n")
+			fmt.Fprintf(logFile, "Selected folders: %+v\n", config.SelectedFolders)
+			fmt.Fprintf(logFile, "DEBUG: Folder selection details:\n")
+			for folderPath, isSelected := range config.SelectedFolders {
+				fmt.Fprintf(logFile, "  Folder: '%s' -> Selected: %t\n", folderPath, isSelected)
+			}
+		}
+		
+		// SIMPLE APPROACH: Do full backup but with exclusions for unselected folders
+		// Build exclusion patterns for unselected folders
+		enhancedExcludes := make([]string, len(config.ExcludePatterns))
+		copy(enhancedExcludes, config.ExcludePatterns)
+		
+		// Add unselected folders to exclusion patterns
+		for folderPath, isSelected := range config.SelectedFolders {
+			if !isSelected {
+				// folderPath is already absolute path like "/home/grendel/Videos" 
+				// Don't join with homeDir again - use it directly
+				enhancedExcludes = append(enhancedExcludes, folderPath)
+				if logFile != nil {
+					fmt.Fprintf(logFile, "EXCLUDING unselected folder: %s\n", folderPath)
+				}
+			} else {
+				if logFile != nil {
+					fmt.Fprintf(logFile, "INCLUDING selected folder: %s\n", folderPath)
+				}
+			}
+		}
+		
+		// Update config with enhanced exclusions
+		config.ExcludePatterns = enhancedExcludes
+		if logFile != nil {
+			fmt.Fprintf(logFile, "Enhanced exclusion patterns: %v\n", enhancedExcludes)
+		}
+		
+		// Now run NORMAL backup with enhanced exclusions - SAME AS FULL BACKUP
+	}
+
+	// REGULAR BACKUP: Sync entire source directory
+	err = syncDirectoriesWithExclusions(config.SourcePath, config.DestinationPath, config.ExcludePatterns, logFile)
 	if err != nil {
 		if logFile != nil {
 			fmt.Fprintf(logFile, "ERROR during sync: %v\n", err)
@@ -239,7 +284,7 @@ func performPureGoBackup(sourcePath, destPath string, logFile *os.File) error {
 	// Mark deletion phase as active
 	deletionPhaseActive = true
 
-	err = deleteExtraFilesFromBackup(sourcePath, destPath, logFile)
+	err = deleteExtraFilesFromBackupWithExclusions(config.SourcePath, config.DestinationPath, config.ExcludePatterns, logFile)
 	if err != nil {
 		if logFile != nil {
 			fmt.Fprintf(logFile, "ERROR during deletion: %v\n", err)
@@ -261,7 +306,7 @@ func performPureGoBackup(sourcePath, destPath string, logFile *os.File) error {
 			fmt.Fprintf(logFile, "Verification skipped (disabled for debugging)\n")
 		}
 	} else {
-		err = performBackupVerification(sourcePath, destPath, logFile)
+		err = performBackupVerification(config.SourcePath, config.DestinationPath, logFile)
 		if err != nil {
 			if logFile != nil {
 				fmt.Fprintf(logFile, "ERROR during verification: %v\n", err)
@@ -376,93 +421,91 @@ func calculateRealProgress() (float64, string) {
 			filesProcessed := filesSkipped + filesCopied
 			
 			if directoryWalkComplete {
-				// Directory walk done - pure file progress (40% to 95%)
+				// Directory walk done - file progress from 1% to 95%
 				syncProgress := float64(filesProcessed) / float64(totalFilesFound)
 				if syncProgress > 1.0 {
 					syncProgress = 1.0
 				}
-				progress = 0.40 + (syncProgress * 0.55) // 40% to 95% range
+				progress = 0.01 + (syncProgress * 0.94) // 1% to 95% range (94% span)
 				
 				// Show sync status
 				if filesCopied > 0 {
-					message = fmt.Sprintf("Syncing files • %s copied, %s skipped • %s total",
+					message = fmt.Sprintf("📁 Syncing files • %s copied, %s skipped • %s total",
 						formatNumber(filesCopied), formatNumber(filesSkipped), formatNumber(totalFilesFound))
 				} else if filesSkipped > 1000 {
-					message = fmt.Sprintf("Comparing files • %s identical • %s total processed",
+					message = fmt.Sprintf("⚡ Comparing files • %s identical • %s total processed",
 						formatNumber(filesSkipped), formatNumber(totalFilesFound))
 				} else {
-					message = fmt.Sprintf("Processing files • %s of %s analyzed",
+					message = fmt.Sprintf("🔄 Processing files • %s of %s analyzed",
 						formatNumber(filesProcessed), formatNumber(totalFilesFound))
 				}
+				
+				// Add current directory info if available - FIXED WIDTH with truncation
+				if currentDirectory != "" {
+					// Clean up the path - remove /home/grendel prefix and show just the relative folder
+					displayPath := currentDirectory
+					if strings.HasPrefix(displayPath, "/home/grendel/") {
+						displayPath = strings.TrimPrefix(displayPath, "/home/grendel/")
+					}
+					if displayPath == "" {
+						displayPath = "~"
+					}
+					// Truncate if too long
+					if len(displayPath) > 57 {
+						displayPath = displayPath[:57] + "..."
+					}
+					message = fmt.Sprintf("%s\n📁 %s", message, displayPath)
+				}
 			} else {
-				// Directory walk still in progress - show scanning progress
+				// Directory walk still in progress - scanning only (0% to 1%)
 				elapsed := time.Since(backupStartTime)
 				
-				if filesProcessed > 0 {
-					// Files being processed during scan - blend scanning and processing progress
-					
-					// Base scanning progress (0% to 15% based on time and files found)
-					var scanProgress float64
-					if elapsed.Seconds() < 10 {
-						scanProgress = 0.01 + (float64(totalFilesFound) / 200000) * 0.12 // 1% to 13% based on files found
-						if scanProgress > 0.13 {
-							scanProgress = 0.13
-						}
-					} else {
-						scanProgress = 0.13 + (elapsed.Seconds() - 10) / 300 * 0.02 // 13% to 15% over 5 minutes
-						if scanProgress > 0.15 {
-							scanProgress = 0.15
-						}
-					}
-					
-					// Processing progress bonus (add up to 35% more based on files processed) 
-					processingProgress := float64(filesProcessed) / float64(totalFilesFound) * 0.25
-					if processingProgress > 0.25 {
-						processingProgress = 0.25
-					}
-					
-					progress = scanProgress + processingProgress // Max 40% (15% + 25%)
-					
-					// Show scanning + processing status
-					if filesCopied > 0 {
-						message = fmt.Sprintf("Scanning & copying • %s copied, %s skipped • %s found",
-							formatNumber(filesCopied), formatNumber(filesSkipped), formatNumber(totalFilesFound))
-					} else {
-						message = fmt.Sprintf("Scanning & comparing • %s identical • %s found",
-							formatNumber(filesSkipped), formatNumber(totalFilesFound))
+				// Scanning phase: 0% to 1% only
+				if elapsed.Seconds() < 10 {
+					progress = 0.001 + (float64(totalFilesFound) / 500000) * 0.009 // 0.1% to 1% based on files found
+					if progress > 0.01 {
+						progress = 0.01 // Cap at 1%
 					}
 				} else {
-					// Pure scanning phase - progress based on files discovered (0% to 15%)
-					
-					// Show scanning progress based on discovery rate and time
-					if elapsed.Seconds() < 10 {
-						progress = 0.01 + (float64(totalFilesFound) / 200000) * 0.12 // 1% to 13% based on files found
-						if progress > 0.13 {
-							progress = 0.13
-						}
-					} else {
-						progress = 0.13 + (elapsed.Seconds() - 10) / 300 * 0.02 // 13% to 15% over 5 minutes
-						if progress > 0.15 {
-							progress = 0.15
-						}
+					// After 10 seconds of scanning, approach 1% gradually
+					progress = 0.005 + (elapsed.Seconds() - 10) / 300 * 0.005 // 0.5% to 1% over 5 minutes
+					if progress > 0.01 {
+						progress = 0.01 // Still cap at 1%
 					}
-					
-					// Calculate discovery rate
-					fileDiscoveryRate := 0.0
-					if elapsed.Seconds() > 1.0 {
-						fileDiscoveryRate = float64(totalFilesFound) / elapsed.Seconds()
+				}
+				
+				// Calculate discovery rate
+				fileDiscoveryRate := 0.0
+				if elapsed.Seconds() > 1.0 {
+					fileDiscoveryRate = float64(totalFilesFound) / elapsed.Seconds()
+				}
+				
+				if fileDiscoveryRate > 0 {
+					message = fmt.Sprintf("🔍 Scanning filesystem • %s files found • %s files/sec", 
+						formatNumber(totalFilesFound), formatNumber(int64(fileDiscoveryRate)))
+				} else {
+					message = fmt.Sprintf("🔍 Scanning filesystem • %s files found", formatNumber(totalFilesFound))
+				}
+				
+				// Add current directory info if available - FIXED WIDTH with truncation
+				if currentDirectory != "" {
+					// Clean up the path - remove /home/grendel prefix and show just the relative folder
+					displayPath := currentDirectory
+					if strings.HasPrefix(displayPath, "/home/grendel/") {
+						displayPath = strings.TrimPrefix(displayPath, "/home/grendel/")
 					}
-					
-					if fileDiscoveryRate > 0 {
-						message = fmt.Sprintf("Scanning filesystem • %s files found • %s files/sec", 
-							formatNumber(totalFilesFound), formatNumber(int64(fileDiscoveryRate)))
-					} else {
-						message = fmt.Sprintf("Scanning filesystem • %s files found", formatNumber(totalFilesFound))
+					if displayPath == "" {
+						displayPath = "~"
 					}
+					// Truncate if too long
+					if len(displayPath) > 57 {
+						displayPath = displayPath[:57] + "..."
+					}
+					message = fmt.Sprintf("%s\n📁 %s", message, displayPath)
 				}
 			}
 		} else {
-			// Very beginning - no files found yet
+			// Very beginning - no files found yet (0%)
 			progress = 0.0
 			message = "Initializing filesystem scan..."
 		}
@@ -476,35 +519,82 @@ func calculateRealProgress() (float64, string) {
 	return progress, message
 }
 
-// Start restore operation - TUI ONLY (Pure Go)
+// Start smart restore operation - detects backup type and auto-targets appropriately
 func startRestore(sourcePath, targetPath string) tea.Cmd {
 	return func() tea.Msg {
 		// Setup logging in appropriate directory
 		logPath := getLogFilePath()
 		logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 		if err == nil {
-			fmt.Fprintf(logFile, "\n=== PURE GO RESTORE STARTED: %s ===\n", time.Now().Format(time.RFC3339))
+			fmt.Fprintf(logFile, "\n=== SMART RESTORE STARTED: %s ===\n", time.Now().Format(time.RFC3339))
 			fmt.Fprintf(logFile, "Log file: %s\n", logPath)
 			defer logFile.Close()
 		}
 
-		// Use provided source path instead of auto-detecting
+		// Check if valid backup exists
 		backupInfo := filepath.Join(sourcePath, "BACKUP-INFO.txt")
 		if _, err := os.Stat(backupInfo); os.IsNotExist(err) {
 			return ProgressUpdate{Error: fmt.Errorf("no valid backup found at %s", sourcePath)}
 		}
 
-		if logFile != nil {
-			fmt.Fprintf(logFile, "Starting pure Go restore from %s to %s\n", sourcePath, targetPath)
+		// CRITICAL: Detect backup type for safety
+		backupType, err := detectBackupType(sourcePath)
+		if err != nil {
+			return ProgressUpdate{Error: fmt.Errorf("cannot determine backup type: %v", err)}
 		}
 
-		// Perform pure Go restore
-		err = performPureGoRestore(sourcePath, targetPath, logFile)
+		// SMART TARGETING: Auto-determine restore destination based on backup type
+		var actualTargetPath string
+		var operationDesc string
+		
+		switch backupType {
+		case "system":
+			if targetPath == "/" {
+				// System backup → system restore (safe)
+				actualTargetPath = "/"
+				operationDesc = "SYSTEM RESTORE (Complete System)"
+			} else {
+				// System backup → custom path (dangerous but allowed with warning)
+				actualTargetPath = targetPath
+				operationDesc = fmt.Sprintf("CUSTOM RESTORE (System backup to %s)", targetPath)
+				if logFile != nil {
+					fmt.Fprintf(logFile, "WARNING: Restoring system backup to custom path: %s\n", targetPath)
+				}
+			}
+			
+		case "home":
+			if targetPath == "/" {
+				// Home backup → auto-target home directory
+				username := getCurrentUser()
+				actualTargetPath = "/home/" + username
+				operationDesc = fmt.Sprintf("HOME RESTORE (Home backup to /home/%s)", username)
+				if logFile != nil {
+					fmt.Fprintf(logFile, "Auto-targeting home backup to /home/%s\n", username)
+				}
+			} else {
+				// Home backup → custom path (user specified)
+				actualTargetPath = targetPath
+				operationDesc = fmt.Sprintf("CUSTOM RESTORE (Home backup to %s)", targetPath)
+			}
+			
+		default:
+			return ProgressUpdate{Error: fmt.Errorf("unknown backup type: %s", backupType)}
+		}
+
+		if logFile != nil {
+			fmt.Fprintf(logFile, "Backup type detected: %s\n", backupType)
+			fmt.Fprintf(logFile, "Restore target: %s\n", actualTargetPath)
+			fmt.Fprintf(logFile, "Operation: %s\n", operationDesc)
+			fmt.Fprintf(logFile, "Starting restore from %s to %s\n", sourcePath, actualTargetPath)
+		}
+
+		// Perform the actual restore
+		err = performPureGoRestore(sourcePath, actualTargetPath, logFile)
 		if err != nil {
 			return ProgressUpdate{Error: err, Done: true}
 		}
 
-		return ProgressUpdate{Percentage: 1.0, Message: "Restore completed successfully!", Done: true}
+		return ProgressUpdate{Percentage: 1.0, Message: fmt.Sprintf("%s completed successfully!", operationDesc), Done: true}
 	}
 }
 
@@ -536,6 +626,49 @@ func performPureGoRestore(backupPath, targetPath string, logFile *os.File) error
 		fmt.Fprintf(logFile, "Pure Go restore completed successfully\n")
 	}
 	return nil
+}
+
+// Detect backup type from BACKUP-INFO.txt file
+func detectBackupType(backupPath string) (string, error) {
+	infoPath := filepath.Join(backupPath, "BACKUP-INFO.txt")
+	content, err := os.ReadFile(infoPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to read backup info: %v", err)
+	}
+	
+	contentStr := string(content)
+	if strings.Contains(contentStr, "Backup Type: Complete System") {
+		return "system", nil
+	} else if strings.Contains(contentStr, "Backup Type: Home Directory") {
+		return "home", nil
+	}
+	
+	// Fallback: try to detect from folder structure
+	if _, err := os.Stat(filepath.Join(backupPath, "etc")); err == nil {
+		// Has /etc directory - likely system backup
+		return "system", nil
+	} else if _, err := os.Stat(filepath.Join(backupPath, ".config")); err == nil {
+		// Has .config directory - likely home backup
+		return "home", nil
+	}
+	
+	return "unknown", fmt.Errorf("cannot determine backup type from %s", backupPath)
+}
+
+// Get current username (handles sudo properly)
+func getCurrentUser() string {
+	// If running under sudo, get the original user
+	if sudoUser := os.Getenv("SUDO_USER"); sudoUser != "" {
+		return sudoUser
+	}
+	
+	// Otherwise get current user
+	if user := os.Getenv("USER"); user != "" {
+		return user
+	}
+	
+	// Fallback
+	return "unknown"
 }
 
 // Create backup info file
@@ -585,17 +718,64 @@ func startActualBackup(operationType, mountPoint string) tea.Cmd {
 				DestinationPath: mountPoint,
 				ExcludePatterns: ExcludePatterns,
 				BackupType:      "Complete System",
+				IsSelectiveBackup: false,
 			}
 		case "home_backup":
-			homeDir, _ := os.UserHomeDir()
+			// Handle SUDO_USER properly - get the actual user's home directory
+			var homeDir string
+			if sudoUser := os.Getenv("SUDO_USER"); sudoUser != "" {
+				homeDir = "/home/" + sudoUser
+			} else {
+				homeDir, _ = os.UserHomeDir()
+			}
+			
 			config = BackupConfig{
 				SourcePath:      homeDir,
 				DestinationPath: mountPoint,
 				ExcludePatterns: []string{".cache/*", ".local/share/Trash/*"},
 				BackupType:      "Home Directory",
+				IsSelectiveBackup: false, // Regular home backup
 			}
 		default:
 			return ProgressUpdate{Error: fmt.Errorf("unknown backup type: %s", operationType)}
+		}
+
+		// Start the backup
+		cmd := startBackup(config)
+		return cmd()
+	}
+}
+
+// Start selective home backup with user-selected folders
+func startSelectiveHomeBackup(mountPoint string, homeFolders []HomeFolderInfo, selectedFolders map[string]bool) tea.Cmd {
+	return func() tea.Msg {
+		// Handle SUDO_USER properly - get the actual user's home directory
+		var homeDir string
+		if sudoUser := os.Getenv("SUDO_USER"); sudoUser != "" {
+			homeDir = "/home/" + sudoUser
+		} else {
+			homeDir, _ = os.UserHomeDir()
+		}
+		
+		config := BackupConfig{
+			SourcePath:        homeDir,
+			DestinationPath:   mountPoint,
+			ExcludePatterns:   []string{
+				".cache/*", 
+				".local/share/Trash/*",
+				".local/share/Steam/*",
+				".cache/yay/*",
+				".cache/paru/*", 
+				".cache/mozilla/*",
+				".cache/google-chrome/*",
+				".cache/chromium/*",
+				".local/share/flatpak/*",
+				".local/share/containers/*",
+			},
+			BackupType:        "Home Directory",
+			IsSelectiveBackup: true,
+			SelectedFolders:   selectedFolders,
+			HomeFolders:       homeFolders,
 		}
 
 		// Start the backup

@@ -24,6 +24,7 @@ const (
 	screenDriveSelect
 	screenError     // For errors that require manual dismissal
 	screenComplete  // For completion messages that require manual dismissal
+	screenHomeFolderSelect  // New: selective home folder backup
 )
 
 // Model represents the application state
@@ -44,6 +45,11 @@ type Model struct {
 	cylonFrame   int          // Animation frame for cylon effect
 	canceling    bool         // Flag to indicate operation is being canceled
 	errorRequiresManualDismissal bool  // Flag for errors that need manual dismissal
+	
+	// Home folder selection fields
+	homeFolders    []HomeFolderInfo  // Available home folders
+	selectedFolders map[string]bool   // User selections (by folder path)
+	totalBackupSize int64            // Total size of selected folders (including hidden)
 }
 
 // InitialModel creates a new model
@@ -52,6 +58,7 @@ func InitialModel() Model {
 		screen:   screenMain,
 		choices:  []string{"🚀 Backup System", "🔄 Restore System", "ℹ️ About", "❌ Exit"},  // Removed "💾 Mount External Drive"
 		selected: make(map[int]struct{}),
+		selectedFolders: make(map[string]bool),
 		width:    100,
 		height:   30,
 	}
@@ -77,6 +84,29 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.choices[i] = fmt.Sprintf("💾 %s (%s) - %s", drive.Device, drive.Size, drive.Label)
 		}
 		m.choices[len(m.drives)] = "⬅️ Back"
+		return m, nil
+
+	case HomeFoldersDiscovered:
+		if msg.error != nil {
+			m.message = fmt.Sprintf("Failed to scan home directory: %v", msg.error)
+			return m, tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
+				return tea.KeyMsg{Type: tea.KeyEsc}
+			})
+		}
+		
+		m.homeFolders = msg.folders
+		
+		// Initialize selected folders - all visible folders selected by default
+		m.selectedFolders = make(map[string]bool)
+		for _, folder := range m.homeFolders {
+			if folder.IsVisible {
+				m.selectedFolders[folder.Path] = true
+			}
+		}
+		
+		// Calculate initial total backup size
+		m.calculateTotalBackupSize()
+		
 		return m, nil
 
 	case PasswordRequiredMsg:
@@ -112,18 +142,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case BackupDriveStatus:
 		if msg.error != nil {
-			// Check if this is a LUKS error that needs manual dismissal
+			// Check if this is a space requirement error (INSUFFICIENT SPACE) or LUKS error
 			errorMsg := msg.error.Error()
 			if strings.Contains(errorMsg, "LUKS drive is locked") || 
-			   strings.Contains(errorMsg, "cryptsetup luksOpen") {
-				// LUKS error - needs manual dismissal
+			   strings.Contains(errorMsg, "cryptsetup luksOpen") ||
+			   strings.Contains(errorMsg, "INSUFFICIENT SPACE") ||
+			   strings.Contains(errorMsg, "too small") ||
+			   strings.Contains(errorMsg, "backup") {
+				// Critical errors that need manual dismissal
 				m.message = errorMsg
 				m.errorRequiresManualDismissal = true
 				m.lastScreen = m.screen
 				m.screen = screenError
 				return m, nil
 			} else {
-				// Regular error - auto-dismiss after 3 seconds
+				// Other errors - auto-dismiss after 3 seconds
 				m.message = errorMsg
 				return m, tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
 					return tea.KeyMsg{Type: tea.KeyEsc}
@@ -332,6 +365,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				} else {
 					m.cursor = len(m.choices) - 1 // Wrap to bottom
 				}
+			} else if m.screen == screenHomeFolderSelect {
+				// Home folder selection: NEW LAYOUT with controls at top
+				// Cursor 0-1: Controls (Continue, Back)
+				// Cursor 2+: Folders (non-empty only)
+				numControls := 2
+				visibleFolders := m.getVisibleFoldersNonEmpty()
+				maxCursor := numControls + len(visibleFolders) - 1
+				if m.cursor > 0 {
+					m.cursor--
+				} else {
+					m.cursor = maxCursor // Wrap to bottom
+				}
 			} else if m.cursor > 0 {
 				m.cursor--
 			}
@@ -349,6 +394,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				} else {
 					m.cursor = 0 // Wrap to top
 				}
+			} else if m.screen == screenHomeFolderSelect {
+				// Home folder selection: NEW LAYOUT with controls at top
+				// Cursor 0-1: Controls (Continue, Back)
+				// Cursor 2+: Folders (non-empty only)
+				numControls := 2
+				visibleFolders := m.getVisibleFoldersNonEmpty()
+				maxCursor := numControls + len(visibleFolders) - 1
+				if m.cursor < maxCursor {
+					m.cursor++
+				} else {
+					m.cursor = 0 // Wrap to top
+				}
 			} else if m.cursor < len(m.choices)-1 {
 				m.cursor++
 			}
@@ -356,6 +413,28 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "enter", " ":
 			return m.handleSelection()
+			
+		case "a", "A":
+			if m.screen == screenHomeFolderSelect {
+				// Select all visible NON-EMPTY folders
+				visibleFolders := m.getVisibleFoldersNonEmpty()
+				for _, folder := range visibleFolders {
+					m.selectedFolders[folder.Path] = true
+				}
+				m.calculateTotalBackupSize()
+			}
+			return m, nil
+			
+		case "n", "N", "x", "X":
+			if m.screen == screenHomeFolderSelect {
+				// Deselect all visible NON-EMPTY folders
+				visibleFolders := m.getVisibleFoldersNonEmpty()
+				for _, folder := range visibleFolders {
+					m.selectedFolders[folder.Path] = false
+				}
+				m.calculateTotalBackupSize()
+			}
+			return m, nil
 		}
 	}
 
@@ -390,10 +469,10 @@ func (m Model) handleSelection() (tea.Model, tea.Cmd) {
 			return m, LoadDrives()
 		case 1: // Home Directory Only
 			m.operation = "home_backup"
-			// Go to drive selection instead of hardcoded drive checking
-			m.screen = screenDriveSelect
+			// Go to home folder selection instead of directly to drive selection
+			m.screen = screenHomeFolderSelect
 			m.cursor = 0
-			return m, LoadDrives()
+			return m, DiscoverHomeFoldersCmd()
 		case 2: // Back
 			m.screen = screenMain
 			m.choices = []string{"🚀 Backup System", "🔄 Restore System", "ℹ️ About", "❌ Exit"}
@@ -435,10 +514,19 @@ func (m Model) handleSelection() (tea.Model, tea.Cmd) {
 				
 				// Start the actual operation
 				switch m.operation {
-				case "system_backup", "home_backup":
-					// Start backup with progress monitoring AND cylon animation
+				case "system_backup":
+					// System backup - use regular backup
 					return m, tea.Batch(
 						startActualBackup(m.operation, m.selectedDrive),
+						CheckTUIBackupProgress(),
+						tea.Tick(100*time.Millisecond, func(t time.Time) tea.Msg {
+							return cylonAnimateMsg{}
+						}),
+					)
+				case "home_backup":
+					// CRITICAL FIX: Use selective backup for home directory
+					return m, tea.Batch(
+						startSelectiveHomeBackup(m.selectedDrive, m.homeFolders, m.selectedFolders),
 						CheckTUIBackupProgress(),
 						tea.Tick(100*time.Millisecond, func(t time.Time) tea.Msg {
 							return cylonAnimateMsg{}
@@ -482,15 +570,53 @@ func (m Model) handleSelection() (tea.Model, tea.Cmd) {
 		m.screen = screenMain
 		m.choices = []string{"🚀 Backup System", "🔄 Restore System", "ℹ️ About", "❌ Exit"}
 		m.cursor = 0
+	case screenHomeFolderSelect:
+		// NEW LAYOUT: Controls first (0-1), then folders (2+)
+		numControls := 2
+		
+		if m.cursor < numControls {
+			// Handle control selection
+			switch m.cursor {
+			case 0: // "Continue" option - go to drive selection
+				m.screen = screenDriveSelect
+				m.cursor = 0
+				return m, LoadDrives()
+			case 1: // "Back" option
+				m.screen = screenBackup
+				m.choices = []string{"📁 Complete System Backup", "🏠 Home Directory Only", "⬅️ Back"}
+				m.cursor = 0
+			}
+		} else {
+			// Handle folder selection (cursor >= 2)
+			folderIndex := m.cursor - numControls
+			visibleFolders := m.getVisibleFoldersNonEmpty()
+			
+			if folderIndex < len(visibleFolders) {
+				// Toggle folder selection
+				folder := visibleFolders[folderIndex]
+				m.selectedFolders[folder.Path] = !m.selectedFolders[folder.Path]
+				
+				// Recalculate total backup size
+				m.calculateTotalBackupSize()
+			}
+		}
 	case screenDriveSelect:
 		if m.cursor < len(m.drives) {
 			selectedDrive := m.drives[m.cursor]
 			m.selectedDrive = selectedDrive.Device
 			
+			// IMMEDIATE FEEDBACK: Show mounting message
+			m.message = "🔧 Mounting drive and checking space..."
+			
 			// Check the operation type
 			if strings.Contains(m.operation, "backup") {
-				// For backup: mount drive for destination
-				return m, mountDriveForBackup(selectedDrive)
+				// For backup: mount drive for destination with appropriate space check
+				if m.operation == "home_backup" {
+					// FIXED: Pass selected folders for accurate space checking
+					return m, mountDriveForSelectiveHomeBackup(selectedDrive, m.homeFolders, m.selectedFolders)
+				} else {
+					return m, mountDriveForBackup(selectedDrive)
+				}
 			} else if strings.Contains(m.operation, "restore") {
 				// For restore: mount drive for source backup
 				return m, mountDriveForRestore(selectedDrive)
@@ -519,6 +645,43 @@ func (m Model) handleSelection() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// Calculate total backup size for selected folders (including all hidden folders)
+func (m *Model) calculateTotalBackupSize() {
+	m.totalBackupSize = 0
+	
+	for _, folder := range m.homeFolders {
+		if folder.AlwaysInclude {
+			// Hidden folders are always included
+			m.totalBackupSize += folder.Size
+		} else if m.selectedFolders[folder.Path] {
+			// Visible folders only if selected
+			m.totalBackupSize += folder.Size
+		}
+	}
+}
+
+// Get visible folders (helper for navigation)
+func (m Model) getVisibleFolders() []HomeFolderInfo {
+	visibleFolders := make([]HomeFolderInfo, 0)
+	for _, folder := range m.homeFolders {
+		if folder.IsVisible {
+			visibleFolders = append(visibleFolders, folder)
+		}
+	}
+	return visibleFolders
+}
+
+// Get visible non-empty folders (helper for navigation and UI)
+func (m Model) getVisibleFoldersNonEmpty() []HomeFolderInfo {
+	visibleFolders := make([]HomeFolderInfo, 0)
+	for _, folder := range m.homeFolders {
+		if folder.IsVisible && folder.Size > 0 { // Only show non-empty visible folders
+			visibleFolders = append(visibleFolders, folder)
+		}
+	}
+	return visibleFolders
+}
+
 // View renders the UI
 func (m Model) View() string {
 	switch m.screen {
@@ -534,6 +697,8 @@ func (m Model) View() string {
 		return m.renderConfirmation()
 	case screenProgress:
 		return m.renderProgress()
+	case screenHomeFolderSelect:
+		return m.renderHomeFolderSelect()
 	case screenDriveSelect:
 		return m.renderDriveSelect()
 	case screenError:

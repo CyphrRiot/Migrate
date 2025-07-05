@@ -5,8 +5,6 @@ go 1.24.4
 require (
 	github.com/charmbracelet/bubbletea v1.3.5
 	github.com/charmbracelet/lipgloss v1.1.0
-	github.com/rivo/tview v0.0.0-20241227133733-17b7edb88c57
-	github.com/shirou/gopsutil/v3 v3.24.5
 )
 
 require (
@@ -27,5 +25,5 @@ require (
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
 	golang.org/x/sync v0.13.0 // indirect
 	golang.org/x/sys v0.32.0 // indirect
-	golang.org/x/text v0.3.8 // indirect
+	golang.org/x/text v0.14.0 // indirect
 )

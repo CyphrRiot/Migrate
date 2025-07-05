@@ -570,8 +570,7 @@ func (m Model) renderProgress() string {
 			}
 			
 			statusStyle = lipgloss.NewStyle().
-				Foreground(progressColor).
-				Align(lipgloss.Center)
+				Foreground(progressColor)
 		}
 		statusMsg := statusStyle.Render(m.message)
 		s.WriteString(statusMsg + "\n")
@@ -899,6 +898,139 @@ func (m Model) renderComplete() string {
 
 	// Help text - emphasize manual dismissal
 	help := helpStyle.Render("🎉 Operation completed successfully • Press any key to continue")
+	s.WriteString(help)
+
+	// Center the content with beautiful border
+	content := borderStyle.Width(m.width - 8).Render(s.String())
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
+}
+
+// Render home folder selection screen
+func (m Model) renderHomeFolderSelect() string {
+	var s strings.Builder
+
+	// MUCH SMALLER header to save vertical space
+	s.WriteString(titleStyle.Render("📁 Select Backup Folders") + "\n")
+
+	// If still loading
+	if len(m.homeFolders) == 0 {
+		s.WriteString(infoBoxStyle.Render("🔍 Scanning home directory...") + "\n")
+		help := helpStyle.Render("Please wait...")
+		s.WriteString("\n" + help)
+		content := borderStyle.Width(m.width - 8).Render(s.String())
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
+	}
+
+	// Compact instructions
+	s.WriteString("Choose folders to backup:\n\n")
+
+	// Get visible folders for display (filter out 0 B folders)
+	visibleFolders := make([]HomeFolderInfo, 0)
+	for _, folder := range m.homeFolders {
+		if folder.IsVisible && folder.Size > 0 { // Only show non-empty visible folders
+			visibleFolders = append(visibleFolders, folder)
+		}
+	}
+	
+	// Calculate layout with controls at TOP
+	numFolders := len(visibleFolders)
+	
+	// Controls FIRST
+	controls := []string{
+		"➡️ Continue",
+		"⬅️ Back", 
+	}
+	
+	for i, control := range controls {
+		if m.cursor == i {
+			s.WriteString(selectedMenuItemStyle.Render("❯ "+control) + "\n")
+		} else {
+			s.WriteString(menuItemStyle.Render("  "+control) + "\n")
+		}
+	}
+	
+	s.WriteString("\n") // Line between controls and folders
+	
+	// Then folders in two columns
+	rowCount := (numFolders + 1) / 2 // Number of rows needed
+
+	// TWO-COLUMN LAYOUT - COMPLETELY REWRITTEN to fix ANSI styling issues
+	for row := 0; row < rowCount; row++ {
+		var leftText, rightText string
+		var leftStyled, rightStyled string
+		
+		// Left column: items 0, 1, 2, 3, 4, 5, ... (first half)
+		leftIndex := row
+		if leftIndex < numFolders {
+			folder := visibleFolders[leftIndex]
+			checkbox := "[ ]"
+			if m.selectedFolders[folder.Path] {
+				checkbox = "[✓]"
+			}
+			sizeText := FormatBytes(folder.Size)
+			leftText = fmt.Sprintf("%s %s (%s)", checkbox, folder.Name, sizeText)
+			
+			// Adjust cursor for controls offset
+			folderCursor := leftIndex + len(controls)
+			if m.cursor == folderCursor {
+				leftStyled = selectedMenuItemStyle.Render("❯ "+leftText)
+			} else {
+				leftStyled = menuItemStyle.Render("  "+leftText)
+			}
+		}
+		
+		// Right column: items 6, 7, 8, 9, 10, 11 (second half)
+		rightIndex := row + rowCount
+		if rightIndex < numFolders {
+			folder := visibleFolders[rightIndex]
+			checkbox := "[ ]"
+			if m.selectedFolders[folder.Path] {
+				checkbox = "[✓]"
+			}
+			sizeText := FormatBytes(folder.Size)
+			rightText = fmt.Sprintf("%s %s (%s)", checkbox, folder.Name, sizeText)
+			
+			// Adjust cursor for controls offset
+			folderCursor := rightIndex + len(controls)
+			if m.cursor == folderCursor {
+				rightStyled = selectedMenuItemStyle.Render("❯ "+rightText)
+			} else {
+				rightStyled = menuItemStyle.Render("  "+rightText)
+			}
+		}
+		
+		// Build the final line using lipgloss.JoinHorizontal for proper alignment
+		if rightStyled != "" {
+			line := lipgloss.JoinHorizontal(lipgloss.Left, 
+				lipgloss.NewStyle().Width(50).Render(leftStyled),
+				rightStyled,
+			)
+			s.WriteString(line + "\n")
+		} else {
+			s.WriteString(leftStyled + "\n")
+		}
+	}
+
+	s.WriteString("\n") // Line after folders
+
+	// Control options (REMOVED - now at top)
+
+	s.WriteString("\n")
+
+	// Proper total backup size display (restored)
+	totalSizeText := fmt.Sprintf("Total Backup Size: %s", FormatBytes(m.totalBackupSize))
+	totalSizeStyle := lipgloss.NewStyle().
+		Foreground(blueGradient.End).
+		Bold(true).
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(blueGradient.Start).
+		Padding(0, 2).
+		Align(lipgloss.Center)
+	
+	s.WriteString(totalSizeStyle.Render(totalSizeText) + "\n\n")
+
+	// Compact help text
+	help := helpStyle.Render("↑/↓: navigate • space: toggle • A: all • X: none")
 	s.WriteString(help)
 
 	// Center the content with beautiful border
