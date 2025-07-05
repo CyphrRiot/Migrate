@@ -102,21 +102,7 @@ When you select **"🏠 Home Directory"** backup:
 5. **Smart Continue** - Hit "Continue" immediately for full backup, or customize selection
 
 ### 🎯 User Interface
-
-```
-┌── 📁 Home Directory Selection ────────────────────────────┐
-│                                                           │
-│  🚀 Continue with selected folders (1.45 TB)             │
-│  🔙 Back to main menu                                     │
-│                                                           │
-│  📂 Desktop              [✓]     📂 Downloads         [✓] │
-│  📂 Documents            [✓]     📂 Pictures          [✓] │
-│  📂 Videos               [✓]     📂 Music             [✓] │
-│  📂 Code                 [✓]     📂 Games             [✓] │ 
-│                                                           │
-│  💡 A: select all  X: deselect all  SPACE: toggle        │
-└───────────────────────────────────────────────────────────┘
-```
+![Home Directory Selection Interface](images/home.png)
 
 ### 🎪 Advanced Features
 - **Hidden Folders** - Always includes `.config`, `.ssh`, `.gnupg`, dotfiles
