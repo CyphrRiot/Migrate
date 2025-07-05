@@ -526,14 +526,30 @@ func (m Model) renderProgress() string {
 		s.WriteString(progressBar + "\n\n")
 	}
 
-	// Status message
+	// Status message with gradient-matching styling
 	if m.message != "" {
 		var statusStyle lipgloss.Style
 		if m.canceling || strings.Contains(m.message, "Cancel") {
 			statusStyle = warningStyle
-		} else {
+		} else if strings.Contains(m.message, "Deleting") || strings.Contains(m.message, "deletion") {
+			// Deletion messages in deep purple/red
 			statusStyle = lipgloss.NewStyle().
-				Foreground(secondaryColor).
+				Foreground(errorGradient.End).  // Deep red
+				Bold(true).
+				Align(lipgloss.Center)
+		} else {
+			// Match the progress bar gradient colors
+			var progressColor lipgloss.Color
+			if m.progress < 0.33 {
+				progressColor = blueGradient.End
+			} else if m.progress < 0.66 {
+				progressColor = purpleGradient.End
+			} else {
+				progressColor = greenGradient.End
+			}
+			
+			statusStyle = lipgloss.NewStyle().
+				Foreground(progressColor).
 				Align(lipgloss.Center)
 		}
 		statusMsg := statusStyle.Render(m.message)
@@ -582,7 +598,7 @@ func (m Model) renderProgressBar() string {
 		}
 		
 		bar := strings.Join(segments, "")
-		progressText := fmt.Sprintf("📊 %s Working...", bar)
+		progressText := fmt.Sprintf("💫 %s Working...", bar)
 		
 		return lipgloss.NewStyle().
 			Align(lipgloss.Center).
@@ -648,7 +664,7 @@ func (m Model) renderProgressBar() string {
 		percentageStyle = lipgloss.NewStyle().Foreground(greenGradient.End).Bold(true)
 	}
 	
-	progressText := fmt.Sprintf("📊 %s %s", bar, percentageStyle.Render(percentage))
+	progressText := fmt.Sprintf("💫 %s %s", bar, percentageStyle.Render(percentage))
 	
 	return lipgloss.NewStyle().
 		Align(lipgloss.Center).
