@@ -102,6 +102,7 @@ When you select **"🏠 Home Directory"** backup:
 5. **Smart Continue** - Hit "Continue" immediately for full backup, or customize selection
 
 ### 🎯 User Interface
+
 ```
 ┌── 📁 Home Directory Selection ────────────────────────────┐
 │                                                           │
@@ -111,7 +112,7 @@ When you select **"🏠 Home Directory"** backup:
 │  📂 Desktop              [✓]     📂 Downloads         [✓] │
 │  📂 Documents            [✓]     📂 Pictures          [✓] │
 │  📂 Videos               [✓]     📂 Music             [✓] │
-│  📂 Code                 [✓]     📂 Games             [✓] │
+│  📂 Code                 [✓]     📂 Games             [✓] │ 
 │                                                           │
 │  💡 A: select all  X: deselect all  SPACE: toggle        │
 └───────────────────────────────────────────────────────────┘
