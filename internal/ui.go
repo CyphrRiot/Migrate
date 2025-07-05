@@ -22,13 +22,13 @@ var (
 	}
 	
 	purpleGradient = GradientColors{
-		Start: lipgloss.Color("#7c3aed"), // Deep purple
-		End:   lipgloss.Color("#5b21b6"), // Dark violet
+		Start: lipgloss.Color("#6366f1"), // Indigo - closer to blue but darker
+		End:   lipgloss.Color("#4f46e5"), // Dark indigo
 	}
 	
 	greenGradient = GradientColors{
-		Start: lipgloss.Color("#10b981"), // Emerald
-		End:   lipgloss.Color("#06b6d4"), // Cyan
+		Start: lipgloss.Color("#22c55e"), // True green
+		End:   lipgloss.Color("#16a34a"), // Dark green - no cyan!
 	}
 	
 	orangeGradient = GradientColors{
