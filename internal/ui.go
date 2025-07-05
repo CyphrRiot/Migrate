@@ -522,7 +522,7 @@ func (m Model) renderProgress() string {
 
 	// Progress bar (only show if not canceling)
 	if !m.canceling {
-		progressBar := m.renderProgressBar()
+		progressBar := m.renderProgressBarWithMessage(m.message)
 		s.WriteString(progressBar + "\n\n")
 	}
 
@@ -570,8 +570,28 @@ func (m Model) renderProgress() string {
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
 }
 
+// Get appropriate progress emoji based on operation phase
+func getProgressEmoji(message string, progress float64) string {
+	// Check message content for specific operations
+	if strings.Contains(message, "Scanning") || strings.Contains(message, "Scan") {
+		return "🔍" // Magnifying glass for scanning
+	}
+	if strings.Contains(message, "Deleting") || strings.Contains(message, "deletion") {
+		return "🗑️"  // Trash can for deletion
+	}
+	if strings.Contains(message, "cleaned up") {
+		return "🗑️"  // Trash can for cleanup
+	}
+	if strings.Contains(message, "Preparing") {
+		return "⏳" // Hourglass for preparation
+	}
+	
+	// Default to processing/working for active operations
+	return "💫" // Dizzy for processing/working
+}
+
 // Render gradient progress bar with btop-inspired modern styling
-func (m Model) renderProgressBar() string {
+func (m Model) renderProgressBarWithMessage(message string) string {
 	width := 60 // Increased width for better visual impact
 	
 	// Check if this is indeterminate progress (-1)
@@ -598,7 +618,8 @@ func (m Model) renderProgressBar() string {
 		}
 		
 		bar := strings.Join(segments, "")
-		progressText := fmt.Sprintf("💫 %s Working...", bar)
+		emoji := getProgressEmoji(message, -1)
+		progressText := fmt.Sprintf("%s %s Working...", emoji, bar)
 		
 		return lipgloss.NewStyle().
 			Align(lipgloss.Center).
@@ -664,7 +685,8 @@ func (m Model) renderProgressBar() string {
 		percentageStyle = lipgloss.NewStyle().Foreground(greenGradient.End).Bold(true)
 	}
 	
-	progressText := fmt.Sprintf("💫 %s %s", bar, percentageStyle.Render(percentage))
+	emoji := getProgressEmoji(message, m.progress)
+	progressText := fmt.Sprintf("%s %s %s", emoji, bar, percentageStyle.Render(percentage))
 	
 	return lipgloss.NewStyle().
 		Align(lipgloss.Center).
