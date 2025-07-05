@@ -308,11 +308,11 @@ var (
 			MarginTop(2)
 )
 
-// ASCII art for the program name
-const asciiArt = `▖  ▖▘      ▗   
-▛▖▞▌▌▛▌▛▘▀▌▜▘█▌
-▌▝ ▌▌▙▌▌ █▌▐▖▙▖
-     ▄▌        `
+// ASCII art for the program name with author - sleek design
+const MigrateASCII = `▖  ▖▘      ▗     ▐▘▄▖    ▗      ▜ 
+▛▖▞▌▌▛▌▛▘▀▌▜▘█▌  ▐ ▚ ▌▌▛▘▜▘█▌▛▛▌▐ 
+▌▝ ▌▌▙▌▌ █▌▐▖▙▖  ▐ ▄▌▙▌▄▌▐▖▙▖▌▌▌▐ 
+     ▄▌          ▝▘  ▄▌         ▀ `
 
 // Render the main menu
 func (m Model) renderMainMenu() string {
@@ -345,7 +345,7 @@ func (m Model) renderBackupMenu() string {
 	var s strings.Builder
 
 	// Header with ASCII art
-	ascii := asciiStyle.Render(asciiArt)
+	ascii := asciiStyle.Render(MigrateASCII)
 	s.WriteString(ascii + "\n")
 	s.WriteString(titleStyle.Render("🚀 Backup Options") + "\n\n")
 
@@ -378,7 +378,7 @@ func (m Model) renderRestoreMenu() string {
 	var s strings.Builder
 
 	// Header with ASCII art (same as backup menu)
-	ascii := asciiStyle.Render(asciiArt)
+	ascii := asciiStyle.Render(MigrateASCII)
 	s.WriteString(ascii + "\n")
 	s.WriteString(titleStyle.Render("🔄 Restore Options") + "\n\n")
 
@@ -409,7 +409,7 @@ func (m Model) renderAbout() string {
 	var s strings.Builder
 
 	// Header with ASCII art (consistent with other screens)
-	ascii := asciiStyle.Render(asciiArt)
+	ascii := asciiStyle.Render(MigrateASCII)
 	s.WriteString(ascii + "\n")
 	s.WriteString(titleStyle.Render("ℹ️ About Migrate") + "\n\n")
 
@@ -488,7 +488,7 @@ func (m Model) renderProgress() string {
 	var s strings.Builder
 
 	// App branding header
-	ascii := asciiStyle.Render(asciiArt)
+	ascii := asciiStyle.Render(MigrateASCII)
 	s.WriteString(ascii + "\n")
 	title := titleStyle.Render(AppDesc)
 	s.WriteString(title + "\n")
@@ -695,7 +695,7 @@ func (m Model) renderProgressBarWithMessage(message string) string {
 
 // Render header with beautiful ASCII art
 func (m Model) renderHeader() string {
-	ascii := asciiStyle.Render(asciiArt)
+	ascii := asciiStyle.Render(MigrateASCII)
 	title := titleStyle.Render(AppDesc)
 	subtitle := subtitleStyle.Render(GetSubtitle())
 	
