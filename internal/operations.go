@@ -320,8 +320,8 @@ func calculateRealProgress() (float64, string) {
 			// First 10 seconds: show immediate discovery progress
 			progress = 0.01 + (elapsed.Seconds() / 60.0) * 0.04 // 1% to 5% over first minute
 			if fileDiscoveryRate > 0 {
-				message = fmt.Sprintf("Scanning filesystem  •  %s files found  •  %d files/sec", 
-					formatNumber(totalFilesFound), int(fileDiscoveryRate))
+				message = fmt.Sprintf("Scanning filesystem  •  %s files found  •  %s files/sec", 
+					formatNumber(totalFilesFound), formatNumber(int64(fileDiscoveryRate)))
 			} else {
 				message = fmt.Sprintf("Scanning filesystem  •  %s files found", formatNumber(totalFilesFound))
 			}
@@ -341,8 +341,8 @@ func calculateRealProgress() (float64, string) {
 					message = fmt.Sprintf("Scanning: %s  •  %s files found", 
 						currentDirectory, formatNumber(totalFilesFound))
 				} else {
-					message = fmt.Sprintf("Discovering files  •  %s files found  •  %d files/sec", 
-						formatNumber(totalFilesFound), int(fileDiscoveryRate))
+					message = fmt.Sprintf("Discovering files  •  %s files found  •  %s files/sec", 
+						formatNumber(totalFilesFound), formatNumber(int64(fileDiscoveryRate)))
 				}
 			} else {
 				// We're processing files - use a hybrid approach
