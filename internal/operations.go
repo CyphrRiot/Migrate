@@ -251,22 +251,22 @@ func calculateRealProgress() (float64, string) {
 	if deletionPhaseActive {
 		// Deletion phase: base progress on files processed vs estimated cleanup
 		if totalFilesFound > 0 {
-			// 85-100% range for deletion phase
-			baseProgress := 0.85
+			// 90-100% range for deletion phase
+			baseProgress := 0.90
 			deletionProgress := float64(filesDeleted) / float64(totalFilesFound/10) // Assume ~10% need deletion
 			if deletionProgress > 1.0 {
 				deletionProgress = 1.0
 			}
-			progress = baseProgress + (0.15 * deletionProgress)
+			progress = baseProgress + (0.10 * deletionProgress)
 		} else {
-			progress = 0.92 // Default deletion progress
+			progress = 0.95 // Default deletion progress
 		}
 
 		message = fmt.Sprintf("Deleting removed files (%s files cleaned up)", formatNumber(filesDeleted))
 
 	} else if syncPhaseComplete {
 		// Sync complete, starting deletion
-		progress = 0.85
+		progress = 0.90
 		message = "Preparing deletion phase..."
 
 	} else if directoryWalkComplete {
@@ -277,7 +277,7 @@ func calculateRealProgress() (float64, string) {
 			if syncProgress > 1.0 {
 				syncProgress = 1.0
 			}
-			progress = syncProgress * 0.85 // Reserve 15% for deletion
+			progress = syncProgress * 0.90 // Reserve 10% for deletion
 		} else {
 			progress = 0.50 // Fallback if no file count
 		}
@@ -333,8 +333,8 @@ func calculateRealProgress() (float64, string) {
 				}
 				
 				progress = baseProgress
-				if progress > 0.75 {
-					progress = 0.75 // Still cap at 75% until walk completes
+				if progress > 0.85 {
+					progress = 0.85 // Still cap at 85% until walk completes
 				}
 				
 				if filesCopied > 0 {
