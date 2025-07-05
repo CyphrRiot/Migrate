@@ -4,6 +4,18 @@ A stunningly beautiful **Terminal** backup and restore tool built with [Bubble T
 
 ![Migrate Beautiful Interface](images/interface.gif)
 
+## 🔥 **Live System Backup & Restore**
+
+**The game changer:** Migrate backs up and restores **running live systems** - no downtime required.
+
+Unlike traditional tools that require booting from external media (looking at you, CloneZilla), Migrate works seamlessly on your **active, running OS**. When you're ready to restore, simply:
+
+1. **Fresh install** your OS 
+2. **Run the restore** 
+3. **💥 You're back up and running** - exactly as you left it
+
+**No external boot disks. No system downtime. Just pure magic.** ✨
+
 > ⚠️ **Testing Recommended**: While extensively tested, please test backup and restore operations in non-critical environments first.
 
 ## ✨ Features
