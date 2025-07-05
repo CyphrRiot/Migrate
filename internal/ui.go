@@ -17,8 +17,8 @@ type GradientColors struct {
 var (
 	// Modern btop-inspired gradient color palette
 	blueGradient = GradientColors{
-		Start: lipgloss.Color("#4facfe"), // Light blue
-		End:   lipgloss.Color("#00c6ff"), // Bright cyan
+		Start: lipgloss.Color("#60a5fa"), // Light blue
+		End:   lipgloss.Color("#3b82f6"), // True blue - no cyan!
 	}
 	
 	purpleGradient = GradientColors{
@@ -635,7 +635,7 @@ func (m Model) renderProgressBarWithMessage(message string) string {
 	if cylonPos >= 10 {
 		cylonPos = 20 - cylonPos // Reverse direction for second half
 	}
-	cylonPos = cylonPos * width / 10 // Scale to progress bar width
+	cylonPos = cylonPos * (width - 1) / 10 // Scale to full progress bar width (0 to width-1)
 	
 	// Create gradient segments based on progress
 	var segments []string
@@ -657,9 +657,9 @@ func (m Model) renderProgressBarWithMessage(message string) string {
 				segmentColor = greenGradient.GetColor((progressPos - 0.66) * 3)
 			}
 			
-			// Cylon overlay effect
+			// Cylon overlay effect with neutral highlight
 			if i == cylonPos || i == cylonPos+1 {
-				segments = append(segments, lipgloss.NewStyle().Foreground(tealGradient.End).Render("▓"))
+				segments = append(segments, lipgloss.NewStyle().Foreground(lipgloss.Color("#ffffff")).Render("▓"))
 			} else {
 				segments = append(segments, lipgloss.NewStyle().Foreground(segmentColor).Render("█"))
 			}
