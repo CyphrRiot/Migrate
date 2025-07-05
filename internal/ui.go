@@ -8,60 +8,67 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// Gradient Color System - btop-inspired modern palette
+// Tokyo Night Gradient Color System - authentic theme palette
 type GradientColors struct {
 	Start lipgloss.Color
 	End   lipgloss.Color
 }
 
 var (
-	// Modern btop-inspired gradient color palette
+	// 🌃 AUTHENTIC TOKYO NIGHT COLOR PALETTE 🌃
+	// Based on the official Tokyo Night theme specification
+	
+	// Tokyo Night Blue - Primary brand color
 	blueGradient = GradientColors{
-		Start: lipgloss.Color("#60a5fa"), // Light blue
-		End:   lipgloss.Color("#3b82f6"), // True blue - no cyan!
+		Start: lipgloss.Color("#7aa2f7"), // Tokyo Night blue (primary)
+		End:   lipgloss.Color("#3d59a1"), // Tokyo Night blue dark
 	}
 	
+	// Tokyo Night Purple - Accent and keywords
 	purpleGradient = GradientColors{
-		Start: lipgloss.Color("#8b5cf6"), // Lighter violet - better readability
-		End:   lipgloss.Color("#7c3aed"), // Medium purple
+		Start: lipgloss.Color("#bb9af7"), // Tokyo Night purple (bright)
+		End:   lipgloss.Color("#9d7cd8"), // Tokyo Night purple (medium)
 	}
 	
+	// Tokyo Night Green - Success and strings  
 	greenGradient = GradientColors{
-		Start: lipgloss.Color("#10b981"), // Muted emerald green
-		End:   lipgloss.Color("#059669"), // Darker muted green
+		Start: lipgloss.Color("#9ece6a"), // Tokyo Night green (primary)
+		End:   lipgloss.Color("#73b957"), // Tokyo Night green dark
 	}
 	
+	// Tokyo Night Orange/Red - Warnings and errors
 	orangeGradient = GradientColors{
-		Start: lipgloss.Color("#f59e0b"), // Amber
-		End:   lipgloss.Color("#ef4444"), // Red
+		Start: lipgloss.Color("#e0af68"), // Tokyo Night orange (warm)
+		End:   lipgloss.Color("#f7768e"), // Tokyo Night red/pink
 	}
 	
+	// Tokyo Night Cyan - Special highlights
 	tealGradient = GradientColors{
-		Start: lipgloss.Color("#06b6d4"), // Cyan
-		End:   lipgloss.Color("#10b981"), // Emerald
+		Start: lipgloss.Color("#73daca"), // Tokyo Night cyan (bright)
+		End:   lipgloss.Color("#2ac3de"), // Tokyo Night cyan dark
 	}
 
-	// Status-specific gradients
-	successGradient = greenGradient  // Use the muted green for success too
-	warningGradient = orangeGradient
+	// Status-specific gradients using authentic Tokyo Night colors
+	successGradient = greenGradient    // Tokyo Night green for success
+	warningGradient = orangeGradient   // Tokyo Night orange for warnings  
 	errorGradient = GradientColors{
-		Start: lipgloss.Color("#ef4444"), // Red
-		End:   lipgloss.Color("#dc2626"), // Dark red
+		Start: lipgloss.Color("#f7768e"), // Tokyo Night red/pink
+		End:   lipgloss.Color("#ff5555"), // Tokyo Night red intense
 	}
-	infoGradient = blueGradient
-	progressGradient = purpleGradient
+	infoGradient = blueGradient        // Tokyo Night blue for info
+	progressGradient = purpleGradient  // Tokyo Night purple for progress
 
-	// Base colors (using gradient starts for compatibility)
-	primaryColor    = blueGradient.Start
-	secondaryColor  = greenGradient.Start
-	accentColor     = purpleGradient.Start
-	warningColor    = orangeGradient.Start
-	errorColor      = errorGradient.Start
-	successColor    = successGradient.Start
-	textColor       = lipgloss.Color("#f8fafc") // Modern light text
-	dimColor        = lipgloss.Color("#64748b") // Modern dim text
-	backgroundColor = lipgloss.Color("#0f172a") // Deep dark background
-	borderColor     = lipgloss.Color("#334155") // Modern border
+	// Base Tokyo Night colors - authentic theme foundation
+	primaryColor    = lipgloss.Color("#7aa2f7") // Tokyo Night blue
+	secondaryColor  = lipgloss.Color("#9ece6a") // Tokyo Night green  
+	accentColor     = lipgloss.Color("#bb9af7") // Tokyo Night purple
+	warningColor    = lipgloss.Color("#e0af68") // Tokyo Night orange
+	errorColor      = lipgloss.Color("#f7768e") // Tokyo Night red/pink
+	successColor    = lipgloss.Color("#9ece6a") // Tokyo Night green
+	textColor       = lipgloss.Color("#c0caf5") // Tokyo Night foreground
+	dimColor        = lipgloss.Color("#565f89") // Tokyo Night comment/dim
+	backgroundColor = lipgloss.Color("#1a1b26") // Tokyo Night background  
+	borderColor     = lipgloss.Color("#414868") // Tokyo Night border/line
 )
 
 // Gradient helper functions for smooth color transitions
@@ -105,7 +112,7 @@ func GetStatusGradient(status string) GradientColors {
 	}
 }
 
-// Enhanced Data Visualization Functions - btop-inspired
+// Enhanced Data Visualization Functions - Tokyo Night themed
 func formatBytesWithColor(bytes int64, style string) string {
 	formatted := formatBytes(bytes)
 	
@@ -229,29 +236,29 @@ var (
 			Align(lipgloss.Center).
 			MarginBottom(1)
 
-	// Modern Panel System - btop-inspired with visual depth
+	// Modern Panel System - authentic Tokyo Night styling
 	modernPanelStyle = lipgloss.NewStyle().
 				BorderStyle(lipgloss.RoundedBorder()).
-				BorderForeground(blueGradient.Start).
-				Background(lipgloss.Color("#1e293b")).  // Subtle dark background
+				BorderForeground(borderColor).  // Tokyo Night border
+				Background(lipgloss.Color("#24283b")).  // Tokyo Night dark panel bg
 				Padding(3, 4).  // More generous padding
 				Margin(1, 2)   // Better spacing
 
-	// Enhanced border system - clean and minimal
+	// Enhanced border system - Tokyo Night themed
 	borderStyle = lipgloss.NewStyle().
 			BorderStyle(lipgloss.RoundedBorder()).
-			BorderForeground(blueGradient.Start).
+			BorderForeground(borderColor).  // Tokyo Night border color
 			Padding(2, 3).
 			Margin(1)
 
-	// Clean info panels 
+	// Clean info panels with Tokyo Night colors
 	infoBoxStyle = lipgloss.NewStyle().
-			Background(borderColor).   // Subtle background, not intrusive
+			Background(lipgloss.Color("#24283b")).   // Tokyo Night panel bg
 			Foreground(textColor).
 			Padding(0, 1).   // Minimal padding
 			Margin(0).       // No margins
 			Border(lipgloss.RoundedBorder()).
-			BorderForeground(blueGradient.Start)
+			BorderForeground(borderColor)  // Tokyo Night border
 
 	// Clean status styles without excessive padding
 	warningStyle = lipgloss.NewStyle().
@@ -281,15 +288,15 @@ var (
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(successGradient.End)
 
-	// Clean menu selection - no excessive padding
+	// Tokyo Night menu selection styling
 	selectedMenuItemStyle = lipgloss.NewStyle().
 				PaddingLeft(2).   // Back to normal padding
 				PaddingRight(2).
-				Background(blueGradient.Start).
-				Foreground(backgroundColor).
+				Background(primaryColor).  // Tokyo Night blue
+				Foreground(backgroundColor).  // Tokyo Night dark bg as text
 				Bold(true).
 				Border(lipgloss.RoundedBorder()).
-				BorderForeground(blueGradient.End)
+				BorderForeground(blueGradient.End)  // Deeper Tokyo Night blue border
 
 	// Clean menu items
 	menuItemStyle = lipgloss.NewStyle().
@@ -435,7 +442,7 @@ func (m Model) renderAbout() string {
 		"Created by " + AppAuthor + "\n\n" +
 		"🔗 GitHub: https://github.com/CyphrRiot/Migrate\n" +
 		"🐦 X: https://x.com/CyphrRiot\n\n" +
-		"✨ Modern btop-inspired interface with gradient progress bars\n\n" +
+		"✨ Authentic Tokyo Night interface with neon gradient progress bars\n\n" +
 		"Key Features:\n" + 
 		strings.Join(features, "\n") + "\n\n" +
 		"Press any key to return to main menu"
@@ -547,26 +554,28 @@ func (m Model) renderProgress() string {
 		s.WriteString(progressBar + "\n\n")
 	}
 
-	// Status message with gradient-matching styling
+	// Status message with Tokyo Night gradient-matching styling
 	if m.message != "" {
 		var statusStyle lipgloss.Style
 		if m.canceling || strings.Contains(m.message, "Cancel") {
 			statusStyle = warningStyle
 		} else if strings.Contains(m.message, "Deleting") || strings.Contains(m.message, "deletion") {
-			// Deletion messages in deep purple/red
+			// Deletion messages in Tokyo Night red/pink
 			statusStyle = lipgloss.NewStyle().
-				Foreground(errorGradient.End).  // Deep red
+				Foreground(errorColor).  // Tokyo Night red/pink
 				Bold(true).
 				Align(lipgloss.Center)
 		} else {
-			// Match the progress bar gradient colors
+			// Match the Tokyo Night progress bar colors
 			var progressColor lipgloss.Color
-			if m.progress < 0.33 {
-				progressColor = blueGradient.End
-			} else if m.progress < 0.66 {
-				progressColor = purpleGradient.End
+			if m.progress < 0.25 {
+				progressColor = blueGradient.Start
+			} else if m.progress < 0.50 {
+				progressColor = purpleGradient.Start
+			} else if m.progress < 0.75 {
+				progressColor = tealGradient.Start
 			} else {
-				progressColor = greenGradient.End
+				progressColor = greenGradient.Start
 			}
 			
 			statusStyle = lipgloss.NewStyle().
@@ -610,30 +619,32 @@ func getProgressEmoji(message string, progress float64) string {
 	return "💫" // Dizzy for processing/working
 }
 
-// Render gradient progress bar with btop-inspired modern styling
+// Render gradient progress bar with authentic Tokyo Night styling
 func (m Model) renderProgressBarWithMessage(message string) string {
 	width := 60 // Increased width for better visual impact
 	
 	// Check if this is indeterminate progress (-1)
 	if m.progress < 0 {
-		// Beautiful animated indeterminate progress with gradient
+		// Beautiful Tokyo Night animated indeterminate progress
 		now := time.Now().Unix()
 		pos := int(now/1) % width // Move every second
 		
 		var segments []string
 		for i := 0; i < width; i++ {
 			distance := ((pos - i + width) % width)
-			if distance <= 3 { // Create a 4-character moving highlight
+			if distance <= 3 { // Create a 4-character moving Tokyo Night highlight
 				switch distance {
 				case 0:
-					segments = append(segments, lipgloss.NewStyle().Foreground(progressGradient.End).Render("█"))
+					segments = append(segments, lipgloss.NewStyle().Foreground(purpleGradient.Start).Render("█"))
 				case 1:
-					segments = append(segments, lipgloss.NewStyle().Foreground(progressGradient.Start).Render("▓"))
-				case 2, 3:
-					segments = append(segments, lipgloss.NewStyle().Foreground(blueGradient.Start).Render("▒"))
+					segments = append(segments, lipgloss.NewStyle().Foreground(blueGradient.Start).Render("▓"))
+				case 2:
+					segments = append(segments, lipgloss.NewStyle().Foreground(tealGradient.Start).Render("▒"))
+				case 3:
+					segments = append(segments, lipgloss.NewStyle().Foreground(dimColor).Render("░"))
 				}
 			} else {
-				segments = append(segments, lipgloss.NewStyle().Foreground(dimColor).Render("░"))
+				segments = append(segments, lipgloss.NewStyle().Foreground(backgroundColor).Render("░"))
 			}
 		}
 		
@@ -657,53 +668,62 @@ func (m Model) renderProgressBarWithMessage(message string) string {
 	}
 	cylonPos = cylonPos * (width - 1) / 10 // Scale to full progress bar width (0 to width-1)
 	
-	// Create gradient segments based on progress
+	// Create authentic Tokyo Night gradient segments based on progress
 	var segments []string
 	for i := 0; i < width; i++ {
 		progressPos := float64(i) / float64(width)
 		
 		if i < filled {
-			// Filled portion - rainbow gradient based on BAR POSITION (not overall progress)
-			// This ensures smooth color transitions regardless of progress jumps
+			// Filled portion - Tokyo Night rainbow gradient
+			// This creates the signature Tokyo Night color progression
 			var segmentColor lipgloss.Color
 			
-			if progressPos < 0.33 {
-				// 0-33% of bar: Blue gradient
-				segmentColor = blueGradient.GetColor(progressPos * 3) // Scale to use full blue range
-			} else if progressPos < 0.66 {
-				// 33-66% of bar: Purple gradient  
-				segmentColor = purpleGradient.GetColor((progressPos - 0.33) * 3)
+			if progressPos < 0.25 {
+				// 0-25% of bar: Tokyo Night Blue → Deep Blue
+				ratio := progressPos * 4 // Scale to 0-1 for this segment
+				segmentColor = blueGradient.GetColor(ratio)
+			} else if progressPos < 0.50 {
+				// 25-50% of bar: Tokyo Night Purple spectrum
+				ratio := (progressPos - 0.25) * 4
+				segmentColor = purpleGradient.GetColor(ratio)
+			} else if progressPos < 0.75 {
+				// 50-75% of bar: Tokyo Night Cyan spectrum  
+				ratio := (progressPos - 0.50) * 4
+				segmentColor = tealGradient.GetColor(ratio)
 			} else {
-				// 66-100% of bar: Green gradient
-				segmentColor = greenGradient.GetColor((progressPos - 0.66) * 3)
+				// 75-100% of bar: Tokyo Night Green spectrum (success!)
+				ratio := (progressPos - 0.75) * 4
+				segmentColor = greenGradient.GetColor(ratio)
 			}
 			
-			// Cylon overlay effect with neutral highlight
+			// Cylon overlay effect with Tokyo Night accent
 			if i == cylonPos || i == cylonPos+1 {
-				segments = append(segments, lipgloss.NewStyle().Foreground(lipgloss.Color("#ffffff")).Render("▓"))
+				segments = append(segments, lipgloss.NewStyle().Foreground(lipgloss.Color("#c0caf5")).Render("▓"))
 			} else {
 				segments = append(segments, lipgloss.NewStyle().Foreground(segmentColor).Render("█"))
 			}
 		} else {
-			// Empty portion with subtle cylon highlighting
+			// Empty portion with subtle Tokyo Night cylon highlighting
 			if i == cylonPos || i == cylonPos+1 {
-				segments = append(segments, lipgloss.NewStyle().Foreground(blueGradient.Start).Render("▒"))
+				segments = append(segments, lipgloss.NewStyle().Foreground(dimColor).Render("▒"))
 			} else {
-				segments = append(segments, lipgloss.NewStyle().Foreground(dimColor).Render("░"))
+				segments = append(segments, lipgloss.NewStyle().Foreground(backgroundColor).Render("░"))
 			}
 		}
 	}
 	
 	bar := strings.Join(segments, "")
 	
-	// Enhanced progress text with floating percentage
+	// Enhanced progress text with Tokyo Night percentage styling
 	var percentageStyle lipgloss.Style
-	if m.progress < 0.33 {
-		percentageStyle = lipgloss.NewStyle().Foreground(blueGradient.End).Bold(true)
-	} else if m.progress < 0.66 {
-		percentageStyle = lipgloss.NewStyle().Foreground(purpleGradient.End).Bold(true)
+	if m.progress < 0.25 {
+		percentageStyle = lipgloss.NewStyle().Foreground(blueGradient.Start).Bold(true)
+	} else if m.progress < 0.50 {
+		percentageStyle = lipgloss.NewStyle().Foreground(purpleGradient.Start).Bold(true)
+	} else if m.progress < 0.75 {
+		percentageStyle = lipgloss.NewStyle().Foreground(tealGradient.Start).Bold(true)
 	} else {
-		percentageStyle = lipgloss.NewStyle().Foreground(greenGradient.End).Bold(true)
+		percentageStyle = lipgloss.NewStyle().Foreground(greenGradient.Start).Bold(true)
 	}
 	
 	emoji := getProgressEmoji(message, m.progress)

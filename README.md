@@ -166,11 +166,16 @@ Recent testing on production systems shows excellent performance:
 - **Error resilient** - Continues operation when individual files fail
 - **Fast updates** - Progress refreshes every 200ms
 
-## 🎨 Tokyo Night Theme
+## 🎨 Authentic Tokyo Night Theme
 
-Beautiful color palette designed for readability:
-- **Primary**: `#7aa2f7` (Blue) - **Secondary**: `#9ece6a` (Green)
-- **Accent**: `#f7768e` (Red) - **Text**: `#c0caf5` (Foreground)
+Celebrate the neon lights of Downtown Tokyo with the authentic color palette:
+- **Primary Blue**: `#7aa2f7` - **Deep Blue**: `#3d59a1`  
+- **Purple**: `#bb9af7` - **Green**: `#9ece6a`
+- **Cyan**: `#73daca` - **Orange**: `#e0af68`
+- **Red/Pink**: `#f7768e` - **Background**: `#1a1b26`
+- **Text**: `#c0caf5` - **Dim**: `#565f89`
+
+Beautiful gradient progress bars flow through the full Tokyo Night spectrum: Blue → Purple → Cyan → Green, creating the signature neon-soaked aesthetic of Japan's capital at night.
 
 ## 🔧 Development
 
