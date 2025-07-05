@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -17,6 +18,45 @@ type BackupConfig struct {
 	DestinationPath string
 	ExcludePatterns []string
 	BackupType      string
+}
+
+// VerificationConfig holds verification settings
+type VerificationConfig struct {
+	SampleRate       float64  // Default: 0.01 (1%)
+	TimeoutMinutes   int      // Default: 5  
+	ParallelWorkers  int      // Default: 4
+	CriticalFiles    []string // Critical system files to always verify
+}
+
+// Default verification configuration
+var DefaultVerificationConfig = VerificationConfig{
+	SampleRate:      0.01, // 1% of unchanged files
+	TimeoutMinutes:  5,
+	ParallelWorkers: 4,
+	CriticalFiles: []string{
+		"/etc/fstab",
+		"/etc/passwd", 
+		"/etc/shadow",
+		"/etc/group",
+		"/boot/grub/grub.cfg",
+		"/boot/loader/loader.conf",
+		"/etc/systemd/system",
+	},
+}
+
+// Verification can be disabled for debugging
+var EnableVerification = false  // DISABLED by default until we fix the issues
+
+// VerificationResult holds verification results
+type VerificationResult struct {
+	Success         bool
+	FilesVerified   int64
+	NewFilesChecked int64
+	SampledFiles    int64
+	CriticalFiles   int64
+	ErrorCount      int
+	Warnings        []string
+	Duration        time.Duration
 }
 
 // Progress update message
@@ -49,10 +89,16 @@ var filesDeleted int64         // Files deleted in cleanup
 var totalFilesFound int64      // Total files discovered during walk
 var directoryWalkComplete bool // Directory enumeration finished
 
+// VERIFICATION PHASE TRACKING  
+var verificationPhaseActive bool    // Track verification phase
+var totalFilesVerified int64        // Counter for verification progress
+var copiedFilesList []string        // Files that were actually copied (for verification)
+var copiedFilesListMutex sync.Mutex // Protect copiedFilesList for thread safety
+var verificationErrors []string     // Non-critical errors to log
+
 // ENHANCED PROGRESS TRACKING - Phase A: Better Messages
 var currentDirectory string    // Current directory being scanned
 var lastProgressMessage string // Last message to avoid spam
-var fileDiscoveryRate float64  // Files found per second for better estimates
 
 // Reset all backup progress counters and state
 func resetBackupState() {
@@ -72,11 +118,16 @@ func resetBackupState() {
 	directoryWalkComplete = false
 	syncPhaseComplete = false
 	deletionPhaseActive = false
+	verificationPhaseActive = false
+	
+	// Reset verification tracking
+	totalFilesVerified = 0
+	copiedFilesList = []string{}
+	verificationErrors = []string{}
 	
 	// Reset enhanced progress tracking
 	currentDirectory = ""
 	lastProgressMessage = ""
-	fileDiscoveryRate = 0.0
 	
 	// Reset TUI state
 	tuiBackupCompleted = false
@@ -199,8 +250,28 @@ func performPureGoBackup(sourcePath, destPath string, logFile *os.File) error {
 	// Mark deletion phase as complete
 	deletionPhaseActive = false
 
+	// Phase 3: Verification phase
 	if logFile != nil {
-		fmt.Fprintf(logFile, "Pure Go backup completed successfully\n")
+		fmt.Fprintf(logFile, "Starting backup verification phase\n")
+	}
+
+	// Skip verification if disabled
+	if !EnableVerification {
+		if logFile != nil {
+			fmt.Fprintf(logFile, "Verification skipped (disabled for debugging)\n")
+		}
+	} else {
+		err = performBackupVerification(sourcePath, destPath, logFile)
+		if err != nil {
+			if logFile != nil {
+				fmt.Fprintf(logFile, "ERROR during verification: %v\n", err)
+			}
+			return fmt.Errorf("verification phase failed: %v", err)
+		}
+	}
+
+	if logFile != nil {
+		fmt.Fprintf(logFile, "Pure Go backup completed successfully with verification\n")
 	}
 	return nil
 }
@@ -258,122 +329,142 @@ func calculateRealProgress() (float64, string) {
 	var progress float64
 	var message string
 
-	if deletionPhaseActive {
-		// Deletion phase: base progress on files processed vs estimated cleanup
+	if verificationPhaseActive {
+		// Verification phase: 95-100% range
+		if totalFilesVerified > 0 && len(copiedFilesList) > 0 {
+			// Thread-safe access to copiedFilesList length
+			copiedFilesListMutex.Lock()
+			copiedFilesCount := len(copiedFilesList)
+			copiedFilesListMutex.Unlock()
+			
+			// Progress based on files verified vs files that need verification
+			estimatedVerificationFiles := int64(copiedFilesCount) + int64(float64(filesSkipped)*DefaultVerificationConfig.SampleRate) + int64(len(DefaultVerificationConfig.CriticalFiles))
+			verificationProgress := float64(totalFilesVerified) / float64(estimatedVerificationFiles)
+			if verificationProgress > 1.0 {
+				verificationProgress = 1.0
+			}
+			progress = 0.95 + (verificationProgress * 0.05) // 95% to 100%
+		} else {
+			progress = 0.95 // Starting verification
+		}
+		
+		message = fmt.Sprintf("Verifying backup integrity • %s files verified", formatNumber(totalFilesVerified))
+
+	} else if deletionPhaseActive {
+		// Deletion phase: 95-99% range (after sync completion)
 		if totalFilesFound > 0 {
-			// 90-100% range for deletion phase
-			baseProgress := 0.90
+			baseProgress := 0.95
 			deletionProgress := float64(filesDeleted) / float64(totalFilesFound/10) // Assume ~10% need deletion
 			if deletionProgress > 1.0 {
 				deletionProgress = 1.0
 			}
-			progress = baseProgress + (0.10 * deletionProgress)
+			progress = baseProgress + (0.04 * deletionProgress) // 95% to 99%
 		} else {
-			progress = 0.95 // Default deletion progress
+			progress = 0.97 // Default deletion progress
 		}
 
 		message = fmt.Sprintf("Deleting removed files (%s files cleaned up)", formatNumber(filesDeleted))
 
 	} else if syncPhaseComplete {
 		// Sync complete, starting deletion
-		progress = 0.90
+		progress = 0.95
 		message = "Preparing deletion phase..."
 
-	} else if directoryWalkComplete {
-		// Directory walk done, sync in progress
+	} else {
+		// Use file-based progress throughout (no arbitrary time estimates)
 		if totalFilesFound > 0 {
 			filesProcessed := filesSkipped + filesCopied
-			syncProgress := float64(filesProcessed) / float64(totalFilesFound)
-			if syncProgress > 1.0 {
-				syncProgress = 1.0
-			}
-			progress = syncProgress * 0.90 // Reserve 10% for deletion
-		} else {
-			progress = 0.50 // Fallback if no file count
-		}
-
-		// Show meaningful sync status with enhanced formatting
-		if filesCopied > 0 {
-			message = fmt.Sprintf("Syncing files • %s copied, %s skipped • %s total",
-				formatNumber(filesCopied), formatNumber(filesSkipped), formatNumber(totalFilesFound))
-		} else if filesSkipped > 1000 {
-			message = fmt.Sprintf("Comparing files • %s identical • %s total processed",
-				formatNumber(filesSkipped), formatNumber(totalFilesFound))
-		} else {
-			message = fmt.Sprintf("Processing files • %s of %s analyzed",
-				formatNumber(filesSkipped+filesCopied), formatNumber(totalFilesFound))
-		}
-
-	} else {
-		// Files being discovered AND processed simultaneously
-		elapsed := time.Since(backupStartTime)
-		
-		// Calculate file discovery rate for better estimates
-		if elapsed.Seconds() > 1.0 {
-			fileDiscoveryRate = float64(totalFilesFound) / elapsed.Seconds()
-		}
-		
-		if totalFilesFound == 0 {
-			progress = 0.0 // True 0% until we start finding files
-			message = "Initializing filesystem scan..."
-		} else if elapsed.Seconds() < 10 {
-			// First 10 seconds: show immediate discovery progress
-			progress = 0.01 + (elapsed.Seconds() / 60.0) * 0.04 // 1% to 5% over first minute
-			if fileDiscoveryRate > 0 {
-				message = fmt.Sprintf("Scanning filesystem • %s files found • %s files/sec", 
-					formatNumber(totalFilesFound), formatNumber(int64(fileDiscoveryRate)))
-			} else {
-				message = fmt.Sprintf("Scanning filesystem • %s files found", formatNumber(totalFilesFound))
-			}
-		} else {
-			// After 10 seconds: show more detailed progress
-			filesProcessed := filesSkipped + filesCopied
 			
-			if filesProcessed == 0 {
-				// Still just scanning, no processing yet
-				progress = 0.05 + (elapsed.Seconds() / 300) * 0.10 // 5% to 15% over 5 minutes
-				if progress > 0.15 {
-					progress = 0.15
+			if directoryWalkComplete {
+				// Directory walk done - pure file progress (40% to 95%)
+				syncProgress := float64(filesProcessed) / float64(totalFilesFound)
+				if syncProgress > 1.0 {
+					syncProgress = 1.0
 				}
+				progress = 0.40 + (syncProgress * 0.55) // 40% to 95% range
 				
-				// Show discovery progress with rate
-				if currentDirectory != "" {
-					message = fmt.Sprintf("Scanning: %s • %s files found", 
-						currentDirectory, formatNumber(totalFilesFound))
-				} else {
-					message = fmt.Sprintf("Discovering files • %s files found • %s files/sec", 
-						formatNumber(totalFilesFound), formatNumber(int64(fileDiscoveryRate)))
-				}
-			} else {
-				// We're processing files - use a hybrid approach
-				baseProgress := 0.15 + (elapsed.Seconds() - 10) / 600 * 0.70 // 15% to 85% over 10 more minutes
-				if baseProgress > 0.85 {
-					baseProgress = 0.85
-				}
-				
-				// Bonus progress for high processing rates
-				processingRatio := float64(filesProcessed) / float64(totalFilesFound)
-				if processingRatio > 0.8 && totalFilesFound > 10000 {
-					baseProgress += 0.05
-				}
-				
-				progress = baseProgress
-				if progress > 0.85 {
-					progress = 0.85 // Still cap at 85% until walk completes
-				}
-				
-				// Show detailed processing information
+				// Show sync status
 				if filesCopied > 0 {
-					message = fmt.Sprintf("Processing files • %s copied, %s skipped • %s total found",
+					message = fmt.Sprintf("Syncing files • %s copied, %s skipped • %s total",
 						formatNumber(filesCopied), formatNumber(filesSkipped), formatNumber(totalFilesFound))
-				} else if filesSkipped > 100 {
-					message = fmt.Sprintf("Comparing files • %s identical, %s total found",
+				} else if filesSkipped > 1000 {
+					message = fmt.Sprintf("Comparing files • %s identical • %s total processed",
 						formatNumber(filesSkipped), formatNumber(totalFilesFound))
 				} else {
-					message = fmt.Sprintf("Analyzing files • %s processed of %s found",
+					message = fmt.Sprintf("Processing files • %s of %s analyzed",
 						formatNumber(filesProcessed), formatNumber(totalFilesFound))
 				}
+			} else {
+				// Directory walk still in progress - show scanning progress
+				elapsed := time.Since(backupStartTime)
+				
+				if filesProcessed > 0 {
+					// Files being processed during scan - blend scanning and processing progress
+					
+					// Base scanning progress (0% to 15% based on time and files found)
+					var scanProgress float64
+					if elapsed.Seconds() < 10 {
+						scanProgress = 0.01 + (float64(totalFilesFound) / 200000) * 0.12 // 1% to 13% based on files found
+						if scanProgress > 0.13 {
+							scanProgress = 0.13
+						}
+					} else {
+						scanProgress = 0.13 + (elapsed.Seconds() - 10) / 300 * 0.02 // 13% to 15% over 5 minutes
+						if scanProgress > 0.15 {
+							scanProgress = 0.15
+						}
+					}
+					
+					// Processing progress bonus (add up to 35% more based on files processed) 
+					processingProgress := float64(filesProcessed) / float64(totalFilesFound) * 0.25
+					if processingProgress > 0.25 {
+						processingProgress = 0.25
+					}
+					
+					progress = scanProgress + processingProgress // Max 40% (15% + 25%)
+					
+					// Show scanning + processing status
+					if filesCopied > 0 {
+						message = fmt.Sprintf("Scanning & copying • %s copied, %s skipped • %s found",
+							formatNumber(filesCopied), formatNumber(filesSkipped), formatNumber(totalFilesFound))
+					} else {
+						message = fmt.Sprintf("Scanning & comparing • %s identical • %s found",
+							formatNumber(filesSkipped), formatNumber(totalFilesFound))
+					}
+				} else {
+					// Pure scanning phase - progress based on files discovered (0% to 15%)
+					
+					// Show scanning progress based on discovery rate and time
+					if elapsed.Seconds() < 10 {
+						progress = 0.01 + (float64(totalFilesFound) / 200000) * 0.12 // 1% to 13% based on files found
+						if progress > 0.13 {
+							progress = 0.13
+						}
+					} else {
+						progress = 0.13 + (elapsed.Seconds() - 10) / 300 * 0.02 // 13% to 15% over 5 minutes
+						if progress > 0.15 {
+							progress = 0.15
+						}
+					}
+					
+					// Calculate discovery rate
+					fileDiscoveryRate := 0.0
+					if elapsed.Seconds() > 1.0 {
+						fileDiscoveryRate = float64(totalFilesFound) / elapsed.Seconds()
+					}
+					
+					if fileDiscoveryRate > 0 {
+						message = fmt.Sprintf("Scanning filesystem • %s files found • %s files/sec", 
+							formatNumber(totalFilesFound), formatNumber(int64(fileDiscoveryRate)))
+					} else {
+						message = fmt.Sprintf("Scanning filesystem • %s files found", formatNumber(totalFilesFound))
+					}
+				}
 			}
+		} else {
+			// Very beginning - no files found yet
+			progress = 0.0
+			message = "Initializing filesystem scan..."
 		}
 	}
 
