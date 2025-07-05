@@ -288,6 +288,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.cursor > 0 {
 					m.cursor--
 				}
+			} else if m.screen == screenMain {
+				// Main menu: wrap around navigation
+				if m.cursor > 0 {
+					m.cursor--
+				} else {
+					m.cursor = len(m.choices) - 1 // Wrap to bottom
+				}
 			} else if m.cursor > 0 {
 				m.cursor--
 			}
@@ -297,6 +304,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.screen == screenConfirm {
 				if m.cursor < 1 {
 					m.cursor++
+				}
+			} else if m.screen == screenMain {
+				// Main menu: wrap around navigation
+				if m.cursor < len(m.choices)-1 {
+					m.cursor++
+				} else {
+					m.cursor = 0 // Wrap to top
 				}
 			} else if m.cursor < len(m.choices)-1 {
 				m.cursor++
@@ -371,45 +385,39 @@ func (m Model) handleSelection() (tea.Model, tea.Cmd) {
 	case screenConfirm:
 		switch m.cursor {
 		case 0: // Yes
-			// Clear all state and transition to progress
-			m.screen = screenProgress
-			m.progress = 0
-			m.message = "Starting operation..."
-			m.confirmation = "" // Clear confirmation text
-			
-			// Start the actual operation
 			switch m.operation {
-			case "mount_for_backup":
-				// This is no longer used - we handle backup confirmation differently now
-				return m, startActualBackup(m.operation, m.selectedDrive)
-			case "proceed_backup":
-				// Start the actual backup with progress checking
-				return m, tea.Batch(
-					startActualBackup(m.operation, m.selectedDrive),
-					CheckTUIBackupProgress(),
-				)
-			case "system_backup", "home_backup":
-				// Start backup with progress monitoring AND cylon animation
-				return m, tea.Batch(
-					startActualBackup(m.operation, m.selectedDrive),
-					CheckTUIBackupProgress(),
-					tea.Tick(100*time.Millisecond, func(t time.Time) tea.Msg {
-						return cylonAnimateMsg{}
-					}),
-				)
 			case "unmount_backup":
-				// Unmount the backup drive
+				// For unmount, don't transition to progress screen - handle the response directly
 				return m, PerformBackupUnmount()
-			case "system_restore":
-				return m, startRestore(m.selectedDrive, "/")
-			case "custom_restore":
-				// TODO: Ask for custom destination path
-				m.message = "Custom restore path selection not implemented yet"
-				return m, tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
-					return tea.KeyMsg{Type: tea.KeyEsc}
-				})
 			default:
-				return m, startActualBackup(m.operation, m.selectedDrive)
+				// Clear all state and transition to progress for other operations
+				m.screen = screenProgress
+				m.progress = 0
+				m.message = "Starting operation..."
+				m.confirmation = "" // Clear confirmation text
+				
+				// Start the actual operation
+				switch m.operation {
+				case "system_backup", "home_backup":
+					// Start backup with progress monitoring AND cylon animation
+					return m, tea.Batch(
+						startActualBackup(m.operation, m.selectedDrive),
+						CheckTUIBackupProgress(),
+						tea.Tick(100*time.Millisecond, func(t time.Time) tea.Msg {
+							return cylonAnimateMsg{}
+						}),
+					)
+				case "system_restore":
+					return m, startRestore(m.selectedDrive, "/")
+				case "custom_restore":
+					// TODO: Ask for custom destination path
+					m.message = "Custom restore path selection not implemented yet"
+					return m, tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
+						return tea.KeyMsg{Type: tea.KeyEsc}
+					})
+				default:
+					return m, startActualBackup(m.operation, m.selectedDrive)
+				}
 			}
 		case 1: // No
 			// Store the operation type before clearing
