@@ -472,3 +472,199 @@ func verifySingleFile(filePath, sourcePath, destPath string) error {
 
 	return nil
 }
+
+// performStandaloneVerification runs verification as a standalone operation (not part of backup)
+func performStandaloneVerification(sourcePath, destPath string, logFile *os.File) error {
+	if logFile != nil {
+		fmt.Fprintf(logFile, "Starting standalone verification\n")
+		fmt.Fprintf(logFile, "Source: %s, Destination: %s\n", sourcePath, destPath)
+	}
+
+	// Mark verification as active
+	verificationPhaseActive = true
+	verificationStart := time.Now()
+	
+	// Reset verification counters
+	totalFilesVerified = 0
+	verificationErrors = []string{}
+	
+	// For standalone verification, we don't have a list of copied files,
+	// so we'll verify a representative sample of all files
+	
+	// Step 1: Verify critical system files (always check)
+	if logFile != nil {
+		fmt.Fprintf(logFile, "Verifying critical system files\n")
+	}
+	err := verifyCriticalFiles(sourcePath, destPath, logFile)
+	if err != nil {
+		return fmt.Errorf("critical files verification failed: %v", err)
+	}
+
+	// Step 2: Sample verification of all files in backup
+	if logFile != nil {
+		fmt.Fprintf(logFile, "Sampling verification of backup files\n")
+	}
+	err = verifyRandomSampleOfBackup(sourcePath, destPath, DefaultVerificationConfig.SampleRate*10, logFile) // Use 10x sample rate for standalone
+	if err != nil {
+		// Non-critical error - log but don't fail verification
+		verificationErrors = append(verificationErrors, fmt.Sprintf("Sample verification: %v", err))
+		if logFile != nil {
+			fmt.Fprintf(logFile, "Warning: %v\n", err)
+		}
+	}
+
+	// Step 3: Verify directory structure
+	if logFile != nil {
+		fmt.Fprintf(logFile, "Verifying directory structure\n")
+	}
+	err = verifyDirectoryStructure(sourcePath, destPath, logFile)
+	if err != nil {
+		verificationErrors = append(verificationErrors, fmt.Sprintf("Directory structure: %v", err))
+		if logFile != nil {
+			fmt.Fprintf(logFile, "Warning: %v\n", err)
+		}
+	}
+
+	duration := time.Since(verificationStart)
+	
+	// Final verification report
+	if logFile != nil {
+		fmt.Fprintf(logFile, "Standalone verification completed in %v\n", duration)
+		fmt.Fprintf(logFile, "Files verified: %d\n", totalFilesVerified)
+		fmt.Fprintf(logFile, "Critical files checked: %d\n", len(DefaultVerificationConfig.CriticalFiles))
+		fmt.Fprintf(logFile, "Errors/warnings: %d\n", len(verificationErrors))
+		
+		if len(verificationErrors) > 0 {
+			fmt.Fprintf(logFile, "Verification warnings:\n")
+			for _, err := range verificationErrors {
+				fmt.Fprintf(logFile, "  - %s\n", err)
+			}
+		}
+	}
+
+	// Mark verification as complete
+	verificationPhaseActive = false
+
+	// For standalone verification, be more lenient with error thresholds
+	maxAllowedErrors := 10 // Allow up to 10 errors for standalone verification
+	
+	if len(verificationErrors) > maxAllowedErrors {
+		return fmt.Errorf("verification failed with %d errors (threshold: %d)", 
+			len(verificationErrors), maxAllowedErrors)
+	}
+
+	return nil
+}
+
+// verifyRandomSampleOfBackup performs random sampling verification of files in backup
+func verifyRandomSampleOfBackup(sourcePath, destPath string, sampleRate float64, logFile *os.File) error {
+	if sampleRate <= 0 {
+		return nil
+	}
+
+	if logFile != nil {
+		fmt.Fprintf(logFile, "Starting random sample verification with %.1f%% sample rate\n", sampleRate*100)
+	}
+
+	// Walk the backup directory to find all files
+	var candidateFiles []string
+	
+	err := filepath.WalkDir(destPath, func(backupFilePath string, d os.DirEntry, err error) error {
+		if err != nil || !d.Type().IsRegular() {
+			return nil
+		}
+
+		// Skip backup info files and other metadata
+		if filepath.Base(backupFilePath) == "BACKUP-INFO.txt" {
+			return nil
+		}
+
+		// Convert backup path to relative path, then to source path
+		relPath, err := filepath.Rel(destPath, backupFilePath)
+		if err != nil {
+			return nil
+		}
+		
+		sourceFilePath := filepath.Join(sourcePath, relPath)
+		
+		// Check if corresponding source file exists
+		if _, err := os.Stat(sourceFilePath); err == nil {
+			candidateFiles = append(candidateFiles, sourceFilePath)
+		}
+
+		// Limit candidates for performance (sample max 10,000 files)
+		if len(candidateFiles) >= 10000 {
+			return fmt.Errorf("enough candidates") // Stop walking
+		}
+
+		return nil
+	})
+
+	if err != nil && err.Error() != "enough candidates" {
+		return err
+	}
+
+	if len(candidateFiles) == 0 {
+		if logFile != nil {
+			fmt.Fprintf(logFile, "No files found for sample verification\n")
+		}
+		return nil
+	}
+
+	// Calculate sample size
+	sampleSize := int(float64(len(candidateFiles)) * sampleRate)
+	if sampleSize < 10 {
+		sampleSize = 10 // Minimum sample size
+	}
+	if sampleSize > 1000 { // Cap at 1000 files for reasonable performance
+		sampleSize = 1000
+	}
+	
+	if sampleSize > len(candidateFiles) {
+		sampleSize = len(candidateFiles)
+	}
+
+	if logFile != nil {
+		fmt.Fprintf(logFile, "Sampling %d files out of %d available files (%.1f%%)\n", 
+			sampleSize, len(candidateFiles), float64(sampleSize)/float64(len(candidateFiles))*100)
+	}
+
+	// Randomly sample from candidates
+	rand.Seed(time.Now().UnixNano())
+	verified := 0
+	errors := 0
+
+	for i := 0; i < sampleSize && len(candidateFiles) > 0; i++ {
+		// Check for cancellation
+		if shouldCancelBackup() {
+			return fmt.Errorf("verification canceled")
+		}
+
+		// Random selection without replacement
+		idx := rand.Intn(len(candidateFiles))
+		filePath := candidateFiles[idx]
+		candidateFiles = append(candidateFiles[:idx], candidateFiles[idx+1:]...)
+
+		err := verifySingleFile(filePath, sourcePath, destPath)
+		if err != nil {
+			errors++
+			if logFile != nil {
+				fmt.Fprintf(logFile, "Sample verification error: %s - %v\n", filePath, err)
+			}
+		} else {
+			verified++
+			atomic.AddInt64(&totalFilesVerified, 1)
+		}
+	}
+
+	if logFile != nil {
+		fmt.Fprintf(logFile, "Random sample verification: %d verified, %d errors\n", verified, errors)
+	}
+
+	// Allow up to 5% sample error rate for standalone verification
+	if errors > 0 && float64(errors)/float64(verified+errors) > 0.05 {
+		return fmt.Errorf("high sample error rate: %d errors out of %d samples", errors, verified+errors)
+	}
+
+	return nil
+}

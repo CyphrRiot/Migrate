@@ -18,6 +18,7 @@ const (
 	screenMain screen = iota
 	screenBackup
 	screenRestore
+	screenVerify    // New: verify backup
 	screenAbout
 	screenConfirm
 	screenProgress
@@ -56,7 +57,7 @@ type Model struct {
 func InitialModel() Model {
 	return Model{
 		screen:   screenMain,
-		choices:  []string{"🚀 Backup System", "🔄 Restore System", "ℹ️ About", "❌ Exit"},  // Removed "💾 Mount External Drive"
+		choices:  []string{"🚀 Backup System", "🔄 Restore System", "🔍 Verify Backup", "ℹ️ About", "❌ Exit"},
 		selected: make(map[int]struct{}),
 		selectedFolders: make(map[string]bool),
 		width:    100,
@@ -182,6 +183,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				
 				m.confirmation = fmt.Sprintf("Ready to restore %s\n\nSource: %s (%s)\nType: %s\nMounted at: %s\n\n⚠️ This will OVERWRITE existing files!\n\nProceed with restore?", 
 					restoreTypeDesc, msg.drivePath, msg.driveSize, msg.driveType, msg.mountPoint)
+			} else if strings.Contains(m.operation, "verify") {
+				// Verification confirmation
+				verifyTypeDesc := "ENTIRE SYSTEM"
+				if m.operation == "home_verify" {
+					verifyTypeDesc = "HOME DIRECTORY"
+				}
+				
+				m.confirmation = fmt.Sprintf("Ready to verify %s backup\n\nBackup Source: %s (%s)\nType: %s\nMounted at: %s\n\n🔍 This will compare backup files with your current system\n\nProceed with verification?", 
+					verifyTypeDesc, msg.drivePath, msg.driveSize, msg.driveType, msg.mountPoint)
 			}
 			
 			m.selectedDrive = msg.mountPoint // Store mount point for operation
@@ -298,7 +308,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.screen = screenMain
 			m.message = ""
 			m.cursor = 0
-			m.choices = []string{"🚀 Backup System", "🔄 Restore System", "ℹ️ About", "❌ Exit"}
+			m.choices = []string{"🚀 Backup System", "🔄 Restore System", "🔍 Verify Backup", "ℹ️ About", "❌ Exit"}
 			m.errorRequiresManualDismissal = false
 			return m, nil
 		}
@@ -310,7 +320,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.screen = screenMain
 			m.message = ""
 			m.cursor = 0
-			m.choices = []string{"🚀 Backup System", "🔄 Restore System", "ℹ️ About", "❌ Exit"}
+			m.choices = []string{"🚀 Backup System", "🔄 Restore System", "🔍 Verify Backup", "ℹ️ About", "❌ Exit"}
 			return m, nil
 		}
 		
@@ -331,7 +341,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Go back to main menu from other screens
 			m.screen = screenMain
 			m.cursor = 0
-			m.choices = []string{"🚀 Backup System", "🔄 Restore System", "ℹ️ About", "❌ Exit"}
+			m.choices = []string{"🚀 Backup System", "🔄 Restore System", "🔍 Verify Backup", "ℹ️ About", "❌ Exit"}
 			return m, nil
 
 		case "esc":
@@ -341,7 +351,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.screen = screenMain
 				m.message = ""
 				m.cursor = 0
-				m.choices = []string{"🚀 Backup System", "🔄 Restore System", "ℹ️ About", "❌ Exit"}
+				m.choices = []string{"🚀 Backup System", "🔄 Restore System", "🔍 Verify Backup", "ℹ️ About", "❌ Exit"}
 				m.errorRequiresManualDismissal = false
 				return m, nil
 			} else if m.screen != screenMain {
@@ -349,7 +359,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				resetBackupState()
 				m.screen = screenMain
 				m.cursor = 0
-				m.choices = []string{"🚀 Backup System", "🔄 Restore System", "ℹ️ About", "❌ Exit"}
+				m.choices = []string{"🚀 Backup System", "🔄 Restore System", "🔍 Verify Backup", "ℹ️ About", "❌ Exit"}
 			}
 			return m, nil
 
@@ -454,9 +464,13 @@ func (m Model) handleSelection() (tea.Model, tea.Cmd) {
 			m.screen = screenRestore
 			m.choices = []string{"🔄 Restore to Current System", "📂 Restore to Custom Path", "⬅️ Back"}
 			m.cursor = 0
-		case 2: // About (was case 3, now case 2)
+		case 2: // Verify Backup
+			m.screen = screenVerify
+			m.choices = []string{"🔍 Verify Complete System", "🏠 Verify Home Directory", "⬅️ Back"}
+			m.cursor = 0
+		case 3: // About
 			m.screen = screenAbout
-		case 3: // Exit (was case 4, now case 3)
+		case 4: // Exit
 			return m, tea.Quit
 		}
 	case screenBackup:
@@ -475,7 +489,7 @@ func (m Model) handleSelection() (tea.Model, tea.Cmd) {
 			return m, DiscoverHomeFoldersCmd()
 		case 2: // Back
 			m.screen = screenMain
-			m.choices = []string{"🚀 Backup System", "🔄 Restore System", "ℹ️ About", "❌ Exit"}
+			m.choices = []string{"🚀 Backup System", "🔄 Restore System", "🔍 Verify Backup", "ℹ️ About", "❌ Exit"}
 			m.cursor = 0
 		}
 	case screenRestore:
@@ -495,7 +509,26 @@ func (m Model) handleSelection() (tea.Model, tea.Cmd) {
 		case 2: // Back
 			resetBackupState() // Reset state when going back to main from restore menu
 			m.screen = screenMain
-			m.choices = []string{"🚀 Backup System", "🔄 Restore System", "ℹ️ About", "❌ Exit"}
+			m.choices = []string{"🚀 Backup System", "🔄 Restore System", "🔍 Verify Backup", "ℹ️ About", "❌ Exit"}
+			m.cursor = 0
+		}
+	case screenVerify:
+		switch m.cursor {
+		case 0: // Verify Complete System
+			m.operation = "system_verify"
+			// Go to drive selection for backup source
+			m.screen = screenDriveSelect
+			m.cursor = 0
+			return m, LoadDrives()
+		case 1: // Verify Home Directory
+			m.operation = "home_verify"
+			// Go to drive selection for backup source
+			m.screen = screenDriveSelect
+			m.cursor = 0
+			return m, LoadDrives()
+		case 2: // Back
+			m.screen = screenMain
+			m.choices = []string{"🚀 Backup System", "🔄 Restore System", "🔍 Verify Backup", "ℹ️ About", "❌ Exit"}
 			m.cursor = 0
 		}
 	case screenConfirm:
@@ -540,6 +573,24 @@ func (m Model) handleSelection() (tea.Model, tea.Cmd) {
 					return m, tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
 						return tea.KeyMsg{Type: tea.KeyEsc}
 					})
+				case "system_verify":
+					// System verification
+					return m, tea.Batch(
+						startVerification(m.operation, m.selectedDrive),
+						CheckTUIBackupProgress(),
+						tea.Tick(100*time.Millisecond, func(t time.Time) tea.Msg {
+							return cylonAnimateMsg{}
+						}),
+					)
+				case "home_verify":
+					// Home directory verification
+					return m, tea.Batch(
+						startVerification(m.operation, m.selectedDrive),
+						CheckTUIBackupProgress(),
+						tea.Tick(100*time.Millisecond, func(t time.Time) tea.Msg {
+							return cylonAnimateMsg{}
+						}),
+					)
 				default:
 					return m, startActualBackup(m.operation, m.selectedDrive)
 				}
@@ -555,7 +606,7 @@ func (m Model) handleSelection() (tea.Model, tea.Cmd) {
 			m.selectedDrive = ""
 			m.progress = 0
 			m.screen = screenMain
-			m.choices = []string{"🚀 Backup System", "🔄 Restore System", "ℹ️ About", "❌ Exit"}
+			m.choices = []string{"🚀 Backup System", "🔄 Restore System", "🔍 Verify Backup", "ℹ️ About", "❌ Exit"}
 			m.cursor = 0
 			
 			// Set appropriate message
@@ -568,7 +619,7 @@ func (m Model) handleSelection() (tea.Model, tea.Cmd) {
 	case screenAbout:
 		resetBackupState() // Reset state when returning from about screen
 		m.screen = screenMain
-		m.choices = []string{"🚀 Backup System", "🔄 Restore System", "ℹ️ About", "❌ Exit"}
+		m.choices = []string{"🚀 Backup System", "🔄 Restore System", "🔍 Verify Backup", "ℹ️ About", "❌ Exit"}
 		m.cursor = 0
 	case screenHomeFolderSelect:
 		// NEW LAYOUT: Controls first (0-1), then folders (2+)
@@ -620,6 +671,9 @@ func (m Model) handleSelection() (tea.Model, tea.Cmd) {
 			} else if strings.Contains(m.operation, "restore") {
 				// For restore: mount drive for source backup
 				return m, mountDriveForRestore(selectedDrive)
+			} else if strings.Contains(m.operation, "verify") {
+				// For verify: mount drive for source backup (read-only)
+				return m, mountDriveForVerification(selectedDrive)
 			} else {
 				// Fallback: regular mounting
 				return m, mountSelectedDrive(selectedDrive)
@@ -634,10 +688,14 @@ func (m Model) handleSelection() (tea.Model, tea.Cmd) {
 				// Go back to restore menu  
 				m.screen = screenRestore
 				m.choices = []string{"🔄 Restore to Current System", "📂 Restore to Custom Path", "⬅️ Back"}
+			} else if strings.Contains(m.operation, "verify") {
+				// Go back to verify menu
+				m.screen = screenVerify
+				m.choices = []string{"🔍 Verify Complete System", "🏠 Verify Home Directory", "⬅️ Back"}
 			} else {
 				// Go back to main menu
 				m.screen = screenMain
-				m.choices = []string{"🚀 Backup System", "🔄 Restore System", "ℹ️ About", "❌ Exit"}
+				m.choices = []string{"🚀 Backup System", "🔄 Restore System", "🔍 Verify Backup", "ℹ️ About", "❌ Exit"}
 			}
 			m.cursor = 0
 		}
@@ -691,6 +749,8 @@ func (m Model) View() string {
 		return m.renderBackupMenu()
 	case screenRestore:
 		return m.renderRestoreMenu()
+	case screenVerify:
+		return m.renderVerifyMenu()
 	case screenAbout:
 		return m.renderAbout()
 	case screenConfirm:

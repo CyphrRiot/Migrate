@@ -427,6 +427,43 @@ func (m Model) renderRestoreMenu() string {
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
 }
 
+// Render verify menu
+func (m Model) renderVerifyMenu() string {
+	var s strings.Builder
+
+	// Header with ASCII art (consistent with other screens)
+	ascii := asciiStyle.Render(MigrateASCII)
+	s.WriteString(ascii + "\n")
+	s.WriteString(titleStyle.Render("🔍 Verify Options") + "\n\n")
+
+	// Menu options with beautiful styling
+	for i, choice := range m.choices {
+		if m.cursor == i {
+			s.WriteString(selectedMenuItemStyle.Render("❯ "+choice) + "\n")
+		} else {
+			s.WriteString(menuItemStyle.Render("  "+choice) + "\n")
+		}
+	}
+
+	// Enhanced info box
+	info := infoBoxStyle.Render(`🔍 Complete System:  Verify entire system backup integrity
+🏠 Home Directory:   Verify home directory backup only`)
+
+	s.WriteString(info)
+
+	// Additional verification info
+	verifyInfo := infoBoxStyle.Render("🛡️  Verification compares backup files with source using SHA256 checksums")
+	s.WriteString("\n" + verifyInfo)
+
+	// Help text
+	help := m.renderHelp()
+	s.WriteString("\n" + help)
+
+	// Center the content with beautiful border
+	content := borderStyle.Width(m.width - 8).Render(s.String())
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
+}
+
 // Render about screen
 func (m Model) renderAbout() string {
 	var s strings.Builder

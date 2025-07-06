@@ -7,7 +7,7 @@ package internal
 
 const (
 	AppName    = "Migrate"
-	AppVersion = "1.0.21"  // ⬅️ CHANGE VERSION HERE ONLY
+	AppVersion = "1.0.22"  // ⬅️ CHANGE VERSION HERE ONLY
 	AppAuthor  = "Cypher Riot (x.com/CyphrRiot)"
 	AppDesc    = "A Beautiful Live System Backup & Restore"
 )

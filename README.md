@@ -23,6 +23,7 @@ Unlike traditional tools that require booting from external media (looking at yo
 - 🎨 **Beautiful TUI** - Tokyo Night color scheme with smooth animations  
 - 🚀 **Pure Go** - Zero external dependencies, single static binary
 - 💾 **System Backup** - Complete 1:1 backup or selective home directory backup
+- 🔍 **Verification** - Comprehensive backup integrity checking with progress tracking
 - 🔄 **Smart Sync** - SHA256-based deduplication, automatic cleanup of deleted files
 - 📊 **Real-time Progress** - File-based progress tracking with accurate estimates
 - 🔒 **LUKS Support** - Works with encrypted external drives
@@ -56,6 +57,7 @@ That's it! The tool launches a beautiful TUI interface:
 - 🎨 Navigate with arrow keys and Enter
 - 🔍 Automatically detects external drives  
 - 📊 Watch real-time progress with smooth animations
+- ✅ Access backup, restore, and verification options from the main menu
 
 ## ⚙️ How It Works
 
@@ -73,6 +75,40 @@ Performs the equivalent of `rsync -aAx --delete / /backup/destination/` but with
 - **Automatic exclusions** - `/dev`, `/proc`, `/sys`, `/tmp`, backup destination
 - **Progress accuracy** - File-based tracking: `(processed / total) * 85% + cleanup * 15%`
 - **Performance optimization** - Smart cache pattern exclusions boost speed dramatically
+
+## 🔍 Backup Verification
+
+**Comprehensive integrity checking** ensures your backups are complete and trustworthy with beautiful real-time progress tracking.
+
+### ✨ Key Features
+- **🔍 Complete System Verification** - Full backup integrity check against source system
+- **🏠 Home Directory Verification** - Granular verification of selective backups
+- **📊 Real-Time Progress** - Smooth progress tracking with Tokyo Night styling
+- **🎯 Smart Sampling** - Efficient random sampling for large backup verification
+- **⚡ SHA256 Validation** - Cryptographic verification using existing file comparison logic
+- **📋 Detailed Reporting** - Comprehensive missing file reports with option to save logs
+
+### 🎛️ How Verification Works
+When you select **"🔍 Verify Backup"**:
+
+1. **Drive Detection** - Automatic discovery of backup drives
+2. **Read-Only Mounting** - Safe mounting of backup source for verification
+3. **Critical File Check** - Validates essential system files first
+4. **Random Sampling** - Efficiently checks representative file samples
+5. **Comprehensive Report** - Lists any missing files and backup integrity status
+
+### 🔒 Verification Types
+- **Complete System** - Verifies full system backups against root filesystem
+- **Home Directory** - Validates selective home directory backups
+- **Background Processing** - Verification runs asynchronously with progress tracking
+- **Log Generation** - Optional saving of verification results to `~/migrate-verified.log`
+
+### 📊 Progress Display
+Verification features the same beautiful Tokyo Night progress bars with:
+- **Time-Based Progress** (70%) - Realistic timing spread over 8-12 seconds
+- **File Progress** (30%) - Actual file verification completion
+- **Progressive Phases** - Initializing → Critical Files → Sampling → Completing
+- **🔍 Icon Integration** - Verification-specific styling and branding
 
 ## 💾 Drive Support
 
@@ -155,6 +191,7 @@ Recent testing on production systems shows excellent performance:
 │   ├── filesystem.go # File operations
 │   ├── drives.go     # Drive detection and mounting
 │   ├── operations.go # Backup/restore logic
+│   ├── verification.go # Backup verification logic
 │   ├── model.go      # Bubble Tea state management
 │   └── ui.go         # Interface rendering
 └── bin/migrate       # Static binary

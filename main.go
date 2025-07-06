@@ -49,13 +49,67 @@ func removeInstanceLock() {
 }
 
 func main() {
-	// Simple root check
+	// Check if we need to elevate to root
 	if os.Geteuid() != 0 {
-		fmt.Println("❌ YOU MUST RUN AS ROOT")
-		fmt.Println("Run: sudo migrate")
-		os.Exit(1)
+		if err := elevateToRoot(); err != nil {
+			fmt.Printf("❌ Failed to elevate privileges: %v\n", err)
+			os.Exit(1)
+		}
+		// elevateToRoot() will re-exec this program with sudo, so we never reach here
+		return
 	}
 
+	// We're now running as root, proceed with normal startup
+	runAsRoot()
+}
+
+// Elevate to root privileges by re-running with sudo
+func elevateToRoot() error {
+	// Get the path to the current executable
+	execPath, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("failed to get executable path: %v", err)
+	}
+
+	// Check if sudo is available
+	if !checkProgramExists("sudo") {
+		return fmt.Errorf("sudo is required but not available")
+	}
+
+	// Beautiful privilege escalation prompt
+	fmt.Println("🔒 Migrate requires administrator privileges")
+	fmt.Println("📋 Needed for: drive mounting, LUKS encryption, system backup")
+	fmt.Println("🚀 Requesting sudo access...")
+	fmt.Println()
+
+	// Re-run this program with sudo, preserving all arguments
+	args := append([]string{execPath}, os.Args[1:]...)
+	cmd := exec.Command("sudo", args...)
+	
+	// Connect stdio so user can enter password
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	// Run and replace current process
+	err = cmd.Run()
+	if err != nil {
+		return fmt.Errorf("sudo execution failed: %v", err)
+	}
+
+	// If we get here, the sudo command completed
+	// Exit with the same code as the child process
+	if exitError, ok := err.(*exec.ExitError); ok {
+		os.Exit(exitError.ExitCode())
+	}
+	
+	// Normal successful exit
+	os.Exit(0)
+	return nil // Never reached
+}
+
+// Main program logic when running as root
+func runAsRoot() {
 	// Check for another instance
 	if err := checkSingleInstance(); err != nil {
 		fmt.Println("⚠️  " + err.Error())

@@ -95,6 +95,7 @@ var directoryWalkComplete bool // Directory enumeration finished
 
 // VERIFICATION PHASE TRACKING  
 var verificationPhaseActive bool    // Track verification phase
+var isStandaloneVerification bool   // Track if this is standalone verification (not part of backup)
 var totalFilesVerified int64        // Counter for verification progress
 var copiedFilesList []string        // Files that were actually copied (for verification)
 var copiedFilesListMutex sync.Mutex // Protect copiedFilesList for thread safety
@@ -123,6 +124,7 @@ func resetBackupState() {
 	syncPhaseComplete = false
 	deletionPhaseActive = false
 	verificationPhaseActive = false
+	isStandaloneVerification = false
 	
 	// Reset verification tracking
 	totalFilesVerified = 0
@@ -339,7 +341,16 @@ func CheckTUIBackupProgress() tea.Cmd {
 			if tuiBackupError != nil {
 				return ProgressUpdate{Error: tuiBackupError, Done: true}
 			}
-			return ProgressUpdate{Percentage: 1.0, Message: "Backup completed successfully!", Done: true}
+			
+			// Use context-appropriate success message
+			var successMessage string
+			if isStandaloneVerification {
+				successMessage = "Verification completed successfully!"
+			} else {
+				successMessage = "Backup completed successfully!"
+			}
+			
+			return ProgressUpdate{Percentage: 1.0, Message: successMessage, Done: true}
 		}
 
 		// Only show regular progress if not cancelling
@@ -375,25 +386,63 @@ func calculateRealProgress() (float64, string) {
 	var message string
 
 	if verificationPhaseActive {
-		// Verification phase: 95-100% range
-		if totalFilesVerified > 0 && len(copiedFilesList) > 0 {
-			// Thread-safe access to copiedFilesList length
-			copiedFilesListMutex.Lock()
-			copiedFilesCount := len(copiedFilesList)
-			copiedFilesListMutex.Unlock()
+		if isStandaloneVerification {
+			// Standalone verification: Time-based progress to ensure smooth progression
+			elapsed := time.Since(backupStartTime)
 			
-			// Progress based on files verified vs files that need verification
-			estimatedVerificationFiles := int64(copiedFilesCount) + int64(float64(filesSkipped)*DefaultVerificationConfig.SampleRate) + int64(len(DefaultVerificationConfig.CriticalFiles))
-			verificationProgress := float64(totalFilesVerified) / float64(estimatedVerificationFiles)
-			if verificationProgress > 1.0 {
-				verificationProgress = 1.0
+			// Target verification to take 8-12 seconds for good UX
+			targetDuration := 10.0 // 10 seconds
+			timeProgress := elapsed.Seconds() / targetDuration
+			
+			// Combine time progress with file progress
+			var fileProgress float64
+			if totalFilesVerified == 0 {
+				fileProgress = 0.0
+			} else if totalFilesVerified < 10 {
+				fileProgress = 0.3 // Up to 30% for first 10 files (critical files)
+			} else if totalFilesVerified < 100 {
+				fileProgress = 0.3 + (float64(totalFilesVerified-10)/90.0)*0.6 // 30% to 90% for sampling
+			} else {
+				fileProgress = 0.9 // Cap file progress at 90%
 			}
-			progress = 0.95 + (verificationProgress * 0.05) // 95% to 100%
+			
+			// Use the minimum of time and file progress for realistic progression
+			progress = timeProgress * 0.7 + fileProgress * 0.3 // Weighted toward time
+			if progress > 0.99 {
+				progress = 0.99 // Cap at 99% until complete
+			}
+			
+			// Progressive messages based on stage
+			if totalFilesVerified == 0 {
+				message = "🔍 Initializing verification..."
+			} else if totalFilesVerified < 10 {
+				message = fmt.Sprintf("🔍 Checking critical files • %d verified", totalFilesVerified)
+			} else if totalFilesVerified < 50 {
+				message = fmt.Sprintf("🔍 Sampling backup files • %d verified", totalFilesVerified)
+			} else {
+				message = fmt.Sprintf("🔍 Completing verification • %d files verified", totalFilesVerified)
+			}
 		} else {
-			progress = 0.95 // Starting verification
+			// Backup verification phase: 95-100% range (part of backup process)
+			if totalFilesVerified > 0 && len(copiedFilesList) > 0 {
+				// Thread-safe access to copiedFilesList length
+				copiedFilesListMutex.Lock()
+				copiedFilesCount := len(copiedFilesList)
+				copiedFilesListMutex.Unlock()
+				
+				// Progress based on files verified vs files that need verification
+				estimatedVerificationFiles := int64(copiedFilesCount) + int64(float64(filesSkipped)*DefaultVerificationConfig.SampleRate) + int64(len(DefaultVerificationConfig.CriticalFiles))
+				verificationProgress := float64(totalFilesVerified) / float64(estimatedVerificationFiles)
+				if verificationProgress > 1.0 {
+					verificationProgress = 1.0
+				}
+				progress = 0.95 + (verificationProgress * 0.05) // 95% to 100%
+			} else {
+				progress = 0.95 // Starting backup verification
+			}
+			
+			message = fmt.Sprintf("Verifying backup integrity • %s files verified", formatNumber(totalFilesVerified))
 		}
-		
-		message = fmt.Sprintf("Verifying backup integrity • %s files verified", formatNumber(totalFilesVerified))
 
 	} else if deletionPhaseActive {
 		// Deletion phase: 95-99% range (after sync completion)
@@ -781,6 +830,114 @@ func startSelectiveHomeBackup(mountPoint string, homeFolders []HomeFolderInfo, s
 		// Start the backup
 		cmd := startBackup(config)
 		return cmd()
+	}
+}
+
+// Start verification operation
+func startVerification(operationType, mountPoint string) tea.Cmd {
+	return func() tea.Msg {
+		// Reset all backup state and set up for standalone verification
+		resetBackupState()
+		isStandaloneVerification = true
+		
+		// Start verification in background like backup operations
+		go runVerificationSilently(operationType, mountPoint)
+		return ProgressUpdate{Percentage: -1, Message: "Starting verification...", Done: false}
+	}
+}
+
+// Run verification using the same pattern as backup operations
+func runVerificationSilently(operationType, mountPoint string) {
+	// Reset cancellation flag at start
+	resetBackupCancel()
+
+	// Setup logging in appropriate directory
+	logPath := getLogFilePath()
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err == nil {
+		fmt.Fprintf(logFile, "\n=== VERIFICATION STARTED: %s ===\n", time.Now().Format(time.RFC3339))
+		fmt.Fprintf(logFile, "Operation: %s\n", operationType)
+		fmt.Fprintf(logFile, "Backup Source: %s\n", mountPoint)
+		defer logFile.Close()
+	}
+
+	tuiBackupCompleted = false
+	tuiBackupError = nil
+	tuiBackupCancelling = false
+
+	// Initialize progress tracking like backup operations
+	backupStartTime = time.Now()
+
+	// Check if valid backup exists
+	backupInfo := filepath.Join(mountPoint, "BACKUP-INFO.txt")
+	if _, err := os.Stat(backupInfo); os.IsNotExist(err) {
+		tuiBackupCompleted = true
+		tuiBackupError = fmt.Errorf("no valid backup found at %s", mountPoint)
+		return
+	}
+
+	// Detect backup type for source path determination
+	backupType, err := detectBackupType(mountPoint)
+	if err != nil {
+		tuiBackupCompleted = true
+		tuiBackupError = fmt.Errorf("cannot determine backup type: %v", err)
+		return
+	}
+
+	// Determine source path based on operation and backup type
+	var sourcePath string
+	
+	switch operationType {
+	case "system_verify":
+		if backupType != "system" {
+			tuiBackupCompleted = true
+			tuiBackupError = fmt.Errorf("selected system verification but backup is %s type", backupType)
+			return
+		}
+		sourcePath = "/"
+		
+	case "home_verify":
+		if backupType != "home" {
+			tuiBackupCompleted = true
+			tuiBackupError = fmt.Errorf("selected home verification but backup is %s type", backupType)
+			return
+		}
+		// Get the actual user's home directory
+		username := getCurrentUser()
+		sourcePath = "/home/" + username
+		
+	default:
+		tuiBackupCompleted = true
+		tuiBackupError = fmt.Errorf("unknown verification type: %s", operationType)
+		return
+	}
+
+	if logFile != nil {
+		fmt.Fprintf(logFile, "Backup type detected: %s\n", backupType)
+		fmt.Fprintf(logFile, "Source path: %s\n", sourcePath)
+		fmt.Fprintf(logFile, "Backup path: %s\n", mountPoint)
+		fmt.Fprintf(logFile, "Starting verification...\n")
+	}
+
+	// Perform the actual verification
+	err = performStandaloneVerification(sourcePath, mountPoint, logFile)
+	if err != nil {
+		if logFile != nil {
+			fmt.Fprintf(logFile, "VERIFICATION ERROR: %v\n", err)
+		}
+		tuiBackupCompleted = true
+		if shouldCancelBackup() {
+			tuiBackupCancelling = false // Cancellation complete
+			tuiBackupError = fmt.Errorf("verification canceled by user")
+		} else {
+			tuiBackupError = fmt.Errorf("verification failed: %v", err)
+		}
+	} else {
+		if logFile != nil {
+			fmt.Fprintf(logFile, "VERIFICATION SUCCESS: completed\n")
+		}
+		tuiBackupCompleted = true
+		tuiBackupError = nil
 	}
 }
 

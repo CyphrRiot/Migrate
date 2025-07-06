@@ -64,12 +64,16 @@ func syncDirectoriesWithExclusions(src, dst string, excludePatterns []string, lo
 			return fmt.Errorf("operation canceled")
 		}
 
+		// Update current directory for TUI display much more frequently
+		if fileCounter%500 == 0 { // Update display every 500 files instead of 10k
+			currentDir := filepath.Dir(path)
+			currentDirectory = currentDir
+		}
+
 		// Log current directory being processed every 10k files to track slowdowns
 		if fileCounter%10000 == 0 && logFile != nil {
 			currentDir := filepath.Dir(path)
 			fmt.Fprintf(logFile, "Processing directory: %s (file #%d: %s)\n", currentDir, fileCounter, filepath.Base(path))
-			// Update global current directory for TUI display
-			currentDirectory = currentDir
 		}
 
 		if err != nil {
