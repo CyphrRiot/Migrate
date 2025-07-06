@@ -12,6 +12,9 @@
 proposal.md
 wip.md
 
+# ignore the binary if it's in the wrong place
+migrate
+
 # Test binary, built with `go test -c`
 *.test
 
