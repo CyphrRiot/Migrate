@@ -270,6 +270,16 @@ var (
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(lipgloss.Color("#e0af68"))  // Keep border as accent only
 
+	// Info style for neutral confirmations (like unmount)
+	infoStyle = lipgloss.NewStyle().
+			Foreground(textColor).  // Use normal text color
+			Background(lipgloss.Color("#1e2030")).  // Same dark background
+			Bold(true).
+			Align(lipgloss.Center).
+			Padding(0, 2).
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("#7aa2f7"))  // Tokyo Night blue border
+
 	errorStyle = lipgloss.NewStyle().
 			Foreground(textColor).  // Use normal text color
 			Background(lipgloss.Color("#1e2030")).  // Same dark background
@@ -467,8 +477,21 @@ func (m Model) renderConfirmation() string {
 	// Header
 	s.WriteString(titleStyle.Render("⚠️  Confirmation Required") + "\n\n")
 
-	// Confirmation message
-	confirmMsg := warningStyle.Render(m.confirmation)
+	// Choose appropriate style based on confirmation content
+	var confirmStyle lipgloss.Style
+	if strings.Contains(m.confirmation, "unmount") || strings.Contains(m.confirmation, "Backup completed successfully") {
+		// Use neutral info style for unmount confirmations
+		confirmStyle = infoStyle
+	} else if strings.Contains(m.confirmation, "OVERWRITE") || strings.Contains(m.confirmation, "overwrite") {
+		// Use warning style for destructive operations
+		confirmStyle = warningStyle
+	} else {
+		// Default to info style for other confirmations
+		confirmStyle = infoStyle
+	}
+
+	// Confirmation message with appropriate styling
+	confirmMsg := confirmStyle.Render(m.confirmation)
 	s.WriteString(confirmMsg + "\n\n")
 
 	// Yes/No options
