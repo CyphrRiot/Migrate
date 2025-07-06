@@ -50,7 +50,7 @@ make install   # optional
 ## 🖥️ Usage
 
 ```bash
-sudo migrate
+migrate
 ```
 
 That's it! The tool launches a beautiful TUI interface:
