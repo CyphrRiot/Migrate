@@ -260,33 +260,33 @@ var (
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(borderColor)  // Tokyo Night border
 
-	// Clean status styles without excessive padding
+	// Clean status styles with dark Tokyo Night backgrounds
 	warningStyle = lipgloss.NewStyle().
-			Foreground(backgroundColor).
-			Background(warningGradient.Start).
+			Foreground(textColor).  // Use normal text color
+			Background(lipgloss.Color("#1e2030")).  // Much darker background, closer to main bg
 			Bold(true).
 			Align(lipgloss.Center).
 			Padding(0, 2).   // Back to minimal padding
 			Border(lipgloss.RoundedBorder()).
-			BorderForeground(warningGradient.End)
+			BorderForeground(lipgloss.Color("#e0af68"))  // Keep border as accent only
 
 	errorStyle = lipgloss.NewStyle().
-			Foreground(backgroundColor).
-			Background(errorGradient.Start).
+			Foreground(textColor).  // Use normal text color
+			Background(lipgloss.Color("#1e2030")).  // Same dark background
 			Bold(true).
 			Align(lipgloss.Center).
 			Padding(0, 2).
 			Border(lipgloss.RoundedBorder()).
-			BorderForeground(errorGradient.End)
+			BorderForeground(lipgloss.Color("#f7768e"))  // Tokyo Night red border
 
 	successStyle = lipgloss.NewStyle().
-			Foreground(backgroundColor).
-			Background(successGradient.Start).
+			Foreground(textColor).  // Use normal text color  
+			Background(lipgloss.Color("#1e2030")).  // Same dark background
 			Bold(true).
 			Align(lipgloss.Center).
 			Padding(0, 2).
 			Border(lipgloss.RoundedBorder()).
-			BorderForeground(successGradient.End)
+			BorderForeground(lipgloss.Color("#9ece6a"))  // Tokyo Night green border
 
 	// Tokyo Night menu selection styling
 	selectedMenuItemStyle = lipgloss.NewStyle().
@@ -644,7 +644,7 @@ func (m Model) renderProgressBarWithMessage(message string) string {
 					segments = append(segments, lipgloss.NewStyle().Foreground(dimColor).Render("░"))
 				}
 			} else {
-				segments = append(segments, lipgloss.NewStyle().Foreground(backgroundColor).Render("░"))
+				segments = append(segments, lipgloss.NewStyle().Foreground(lipgloss.Color("#24283b")).Render("░"))
 			}
 		}
 		
@@ -707,7 +707,7 @@ func (m Model) renderProgressBarWithMessage(message string) string {
 			if i == cylonPos || i == cylonPos+1 {
 				segments = append(segments, lipgloss.NewStyle().Foreground(dimColor).Render("▒"))
 			} else {
-				segments = append(segments, lipgloss.NewStyle().Foreground(backgroundColor).Render("░"))
+				segments = append(segments, lipgloss.NewStyle().Foreground(lipgloss.Color("#24283b")).Render("░"))
 			}
 		}
 	}
