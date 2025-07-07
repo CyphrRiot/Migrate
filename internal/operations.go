@@ -28,14 +28,14 @@ import (
 // BackupConfig contains all configuration parameters for a backup operation.
 // Supports both full system backups and selective home directory backups.
 type BackupConfig struct {
-	SourcePath          string              // Root directory to backup (e.g., "/", "/home/user")
-	DestinationPath     string              // Target directory for backup (mount point)
-	ExcludePatterns     []string            // Glob patterns for files/directories to exclude
-	BackupType          string              // Human-readable backup type ("Complete System", "Home Directory")
-	IsSelectiveBackup   bool                // true for user-selected folder backups
-	SelectedFolders     map[string]bool     // folder path -> selected state (for selective backups)
-	HomeFolders         []HomeFolderInfo    // metadata about home folders (for selective backups)
-	SelectedSubfolders  map[string]bool     // explicitly selected subfolders for smart inclusion (hierarchical support)
+	SourcePath         string           // Root directory to backup (e.g., "/", "/home/user")
+	DestinationPath    string           // Target directory for backup (mount point)
+	ExcludePatterns    []string         // Glob patterns for files/directories to exclude
+	BackupType         string           // Human-readable backup type ("Complete System", "Home Directory")
+	IsSelectiveBackup  bool             // true for user-selected folder backups
+	SelectedFolders    map[string]bool  // folder path -> selected state (for selective backups)
+	HomeFolders        []HomeFolderInfo // metadata about home folders (for selective backups)
+	SelectedSubfolders map[string]bool  // explicitly selected subfolders for smart inclusion (hierarchical support)
 }
 
 // BackupFolderList contains folder selection information from selective home backups.
@@ -63,7 +63,7 @@ var DefaultVerificationConfig = VerificationConfig{
 	ParallelWorkers: 4,    // 4 concurrent workers
 	CriticalFiles: []string{
 		"/etc/fstab",
-		"/etc/passwd", 
+		"/etc/passwd",
 		"/etc/shadow",
 		"/etc/group",
 		"/boot/grub/grub.cfg",
@@ -81,7 +81,7 @@ type VerificationResult struct {
 	Success         bool          // true if verification passed without critical errors
 	FilesVerified   int64         // Total number of files that were verified
 	NewFilesChecked int64         // Number of newly copied files verified
-	SampledFiles    int64         // Number of files verified through random sampling  
+	SampledFiles    int64         // Number of files verified through random sampling
 	CriticalFiles   int64         // Number of critical system files verified
 	ErrorCount      int           // Count of non-critical errors encountered
 	Warnings        []string      // List of warning messages
@@ -106,35 +106,35 @@ var (
 	tuiBackupCancelling bool  // true when cancellation is in progress
 
 	// Timing and baseline measurements
-	backupStartTime      time.Time // when the current operation started
-	sourceUsedSpace      int64     // source drive used space (fixed at start)
-	destStartUsedSpace   int64     // destination used space when backup started
-	progressCallCounter  int       // simple counter for progress function calls
-	totalFilesProcessed  int64     // cumulative files processed
-	totalFilesEstimate   int64     // estimated total files to process
+	backupStartTime     time.Time // when the current operation started
+	sourceUsedSpace     int64     // source drive used space (fixed at start)
+	destStartUsedSpace  int64     // destination used space when backup started
+	progressCallCounter int       // simple counter for progress function calls
+	totalFilesProcessed int64     // cumulative files processed
+	totalFilesEstimate  int64     // estimated total files to process
 
 	// Phase tracking flags
-	syncPhaseComplete       bool // true when main sync phase is done
-	deletionPhaseActive     bool // true during deletion phase
-	directoryWalkComplete   bool // true when initial directory enumeration is done
-	verificationPhaseActive bool // true during verification phase
+	syncPhaseComplete        bool // true when main sync phase is done
+	deletionPhaseActive      bool // true during deletion phase
+	directoryWalkComplete    bool // true when initial directory enumeration is done
+	verificationPhaseActive  bool // true during verification phase
 	isStandaloneVerification bool // true for standalone verification (not part of backup)
 
 	// File operation counters
-	filesSkipped     int64 // files skipped (identical between source and destination)
-	filesCopied      int64 // files actually copied/updated
-	filesDeleted     int64 // files deleted during cleanup phase
-	totalFilesFound  int64 // total files discovered during directory walk
+	filesSkipped    int64 // files skipped (identical between source and destination)
+	filesCopied     int64 // files actually copied/updated
+	filesDeleted    int64 // files deleted during cleanup phase
+	totalFilesFound int64 // total files discovered during directory walk
 
 	// Verification tracking
-	totalFilesVerified   int64        // counter for verification progress
-	copiedFilesList      []string     // list of files that were actually copied (for verification)
-	copiedFilesListMutex sync.Mutex   // protect copiedFilesList for thread safety
-	verificationErrors   []string     // non-critical errors during verification
+	totalFilesVerified   int64      // counter for verification progress
+	copiedFilesList      []string   // list of files that were actually copied (for verification)
+	copiedFilesListMutex sync.Mutex // protect copiedFilesList for thread safety
+	verificationErrors   []string   // non-critical errors during verification
 
 	// Enhanced progress tracking
-	currentDirectory     string // current directory being scanned (for display)
-	lastProgressMessage  string // last progress message (to avoid spam)
+	currentDirectory    string // current directory being scanned (for display)
+	lastProgressMessage string // last progress message (to avoid spam)
 )
 
 // resetBackupState clears all global progress tracking variables.
@@ -142,7 +142,7 @@ var (
 func resetBackupState() {
 	// Reset timing
 	backupStartTime = time.Time{}
-	
+
 	// Reset counters
 	filesSkipped = 0
 	filesCopied = 0
@@ -151,23 +151,23 @@ func resetBackupState() {
 	progressCallCounter = 0
 	totalFilesProcessed = 0
 	totalFilesEstimate = 0
-	
+
 	// Reset phase tracking
 	directoryWalkComplete = false
 	syncPhaseComplete = false
 	deletionPhaseActive = false
 	verificationPhaseActive = false
 	isStandaloneVerification = false
-	
+
 	// Reset verification tracking
 	totalFilesVerified = 0
 	copiedFilesList = []string{}
 	verificationErrors = []string{}
-	
+
 	// Reset enhanced progress tracking
 	currentDirectory = ""
 	lastProgressMessage = ""
-	
+
 	// Reset TUI state
 	tuiBackupCompleted = false
 	tuiBackupError = nil
@@ -181,7 +181,7 @@ func startBackup(config BackupConfig) tea.Cmd {
 	return func() tea.Msg {
 		// Reset all backup state before starting
 		resetBackupState()
-		
+
 		// Always run in TUI mode with pure Go implementation
 		go runBackupSilently(config)
 		return ProgressUpdate{Percentage: -1, Message: "Starting backup...", Done: false}
@@ -223,7 +223,7 @@ func runBackupSilently(config BackupConfig) {
 	if logFile != nil {
 		fmt.Fprintf(logFile, "About to start performPureGoBackup SYNCHRONOUSLY\n")
 	}
-	
+
 	// Run synchronously instead of in goroutine to fix execution bug
 	err = performPureGoBackup(config, logFile)
 	if err != nil {
@@ -248,7 +248,7 @@ func runBackupSilently(config BackupConfig) {
 
 // performPureGoBackup executes the three-phase backup process using only pure Go.
 // Phase 1: Sync files from source to destination (with selective exclusions)
-// Phase 2: Delete files that exist in destination but not source (--delete behavior)  
+// Phase 2: Delete files that exist in destination but not source (--delete behavior)
 // Phase 3: Verify backup integrity (if enabled)
 // All phases support cancellation and provide detailed progress tracking.
 func performPureGoBackup(config BackupConfig, logFile *os.File) error {
@@ -288,12 +288,12 @@ func performPureGoBackup(config BackupConfig, logFile *os.File) error {
 				fmt.Fprintf(logFile, "  Folder: '%s' -> Selected: %t\n", folderPath, isSelected)
 			}
 		}
-		
+
 		// BULLETPROOF HIERARCHICAL EXCLUSION LOGIC
 		// Build exclusion patterns that respect subfolder selections
 		enhancedExcludes := make([]string, len(config.ExcludePatterns))
 		copy(enhancedExcludes, config.ExcludePatterns)
-		
+
 		// SIMPLE APPROACH: Add every deselected folder to exclusions
 		// No complex logic - if it's not selected, exclude it
 		for folderPath, isSelected := range config.SelectedFolders {
@@ -304,7 +304,7 @@ func performPureGoBackup(config BackupConfig, logFile *os.File) error {
 				}
 			}
 		}
-		
+
 		// SIMPLE INCLUSION: Only put EXPLICITLY selected individual subfolders
 		// Don't include parent folders at all - they'll be handled by exclusions
 		selectedSubfolders := make(map[string]bool)
@@ -323,7 +323,7 @@ func performPureGoBackup(config BackupConfig, logFile *os.File) error {
 				}
 			}
 		}
-		
+
 		// Update config with enhanced exclusions
 		config.ExcludePatterns = enhancedExcludes
 		if logFile != nil {
@@ -413,7 +413,7 @@ func CheckTUIBackupProgress() tea.Cmd {
 			if tuiBackupError != nil {
 				return ProgressUpdate{Error: tuiBackupError, Done: true}
 			}
-			
+
 			// Use context-appropriate success message
 			var successMessage string
 			if isStandaloneVerification {
@@ -421,7 +421,7 @@ func CheckTUIBackupProgress() tea.Cmd {
 			} else {
 				successMessage = "Backup completed successfully!"
 			}
-			
+
 			return ProgressUpdate{Percentage: 1.0, Message: successMessage, Done: true}
 		}
 
@@ -467,11 +467,11 @@ func calculateRealProgress() (float64, string) {
 		if isStandaloneVerification {
 			// Standalone verification: Time-based progress to ensure smooth progression
 			elapsed := time.Since(backupStartTime)
-			
+
 			// Target verification to take 8-12 seconds for good UX
 			targetDuration := 10.0 // 10 seconds
 			timeProgress := elapsed.Seconds() / targetDuration
-			
+
 			// Combine time progress with file progress
 			var fileProgress float64
 			if totalFilesVerified == 0 {
@@ -483,13 +483,13 @@ func calculateRealProgress() (float64, string) {
 			} else {
 				fileProgress = 0.9 // Cap file progress at 90%
 			}
-			
+
 			// Use the minimum of time and file progress for realistic progression
-			progress = timeProgress * 0.7 + fileProgress * 0.3 // Weighted toward time
+			progress = timeProgress*0.7 + fileProgress*0.3 // Weighted toward time
 			if progress > 0.99 {
 				progress = 0.99 // Cap at 99% until complete
 			}
-			
+
 			// Progressive messages based on stage
 			if totalFilesVerified == 0 {
 				message = "🔍 Initializing verification..."
@@ -507,7 +507,7 @@ func calculateRealProgress() (float64, string) {
 				copiedFilesListMutex.Lock()
 				copiedFilesCount := len(copiedFilesList)
 				copiedFilesListMutex.Unlock()
-				
+
 				// Progress based on files verified vs files that need verification
 				estimatedVerificationFiles := int64(copiedFilesCount) + int64(float64(filesSkipped)*DefaultVerificationConfig.SampleRate) + int64(len(DefaultVerificationConfig.CriticalFiles))
 				verificationProgress := float64(totalFilesVerified) / float64(estimatedVerificationFiles)
@@ -518,7 +518,7 @@ func calculateRealProgress() (float64, string) {
 			} else {
 				progress = 0.95 // Starting backup verification
 			}
-			
+
 			message = fmt.Sprintf("Verifying backup integrity • %s files verified", FormatNumber(totalFilesVerified))
 		}
 
@@ -546,7 +546,7 @@ func calculateRealProgress() (float64, string) {
 		// Use file-based progress throughout (no arbitrary time estimates)
 		if totalFilesFound > 0 {
 			filesProcessed := filesSkipped + filesCopied
-			
+
 			if directoryWalkComplete {
 				// Directory walk done - file progress from 1% to 95%
 				syncProgress := float64(filesProcessed) / float64(totalFilesFound)
@@ -554,7 +554,7 @@ func calculateRealProgress() (float64, string) {
 					syncProgress = 1.0
 				}
 				progress = 0.01 + (syncProgress * 0.94) // 1% to 95% range (94% span)
-				
+
 				// Show sync status
 				if filesCopied > 0 {
 					message = fmt.Sprintf("📁 Syncing files • %s copied, %s skipped • %s total",
@@ -566,7 +566,7 @@ func calculateRealProgress() (float64, string) {
 					message = fmt.Sprintf("🔄 Processing files • %s of %s analyzed",
 						FormatNumber(filesProcessed), FormatNumber(totalFilesFound))
 				}
-				
+
 				// Add current directory info if available - FIXED WIDTH with truncation
 				if currentDirectory != "" {
 					// Clean up the path - remove /home/grendel prefix and show just the relative folder
@@ -586,34 +586,34 @@ func calculateRealProgress() (float64, string) {
 			} else {
 				// Directory walk still in progress - scanning only (0% to 1%)
 				elapsed := time.Since(backupStartTime)
-				
+
 				// Scanning phase: 0% to 1% only
 				if elapsed.Seconds() < 10 {
-					progress = 0.001 + (float64(totalFilesFound) / 500000) * 0.009 // 0.1% to 1% based on files found
+					progress = 0.001 + (float64(totalFilesFound)/500000)*0.009 // 0.1% to 1% based on files found
 					if progress > 0.01 {
 						progress = 0.01 // Cap at 1%
 					}
 				} else {
 					// After 10 seconds of scanning, approach 1% gradually
-					progress = 0.005 + (elapsed.Seconds() - 10) / 300 * 0.005 // 0.5% to 1% over 5 minutes
+					progress = 0.005 + (elapsed.Seconds()-10)/300*0.005 // 0.5% to 1% over 5 minutes
 					if progress > 0.01 {
 						progress = 0.01 // Still cap at 1%
 					}
 				}
-				
+
 				// Calculate discovery rate
 				fileDiscoveryRate := 0.0
 				if elapsed.Seconds() > 1.0 {
 					fileDiscoveryRate = float64(totalFilesFound) / elapsed.Seconds()
 				}
-				
+
 				if fileDiscoveryRate > 0 {
-					message = fmt.Sprintf("🔍 Scanning filesystem • %s files found • %s files/sec", 
+					message = fmt.Sprintf("🔍 Scanning filesystem • %s files found • %s files/sec",
 						FormatNumber(totalFilesFound), FormatNumber(int64(fileDiscoveryRate)))
 				} else {
 					message = fmt.Sprintf("🔍 Scanning filesystem • %s files found", FormatNumber(totalFilesFound))
 				}
-				
+
 				// Add current directory info if available - FIXED WIDTH with truncation
 				if currentDirectory != "" {
 					// Clean up the path - remove /home/grendel prefix and show just the relative folder
@@ -649,7 +649,7 @@ func calculateRealProgress() (float64, string) {
 // startRestore creates a Bubble Tea command for restore operations.
 // Automatically detects backup type (system/home) and determines the appropriate
 // target path. Handles both full system restores and custom path restores.
-func startRestore(sourcePath, targetPath string) tea.Cmd {
+func startRestore(sourcePath, targetPath string, restoreConfig, restoreWindowMgrs bool) tea.Cmd {
 	return func() tea.Msg {
 		// Setup logging in appropriate directory
 		logPath := getLogFilePath()
@@ -675,7 +675,7 @@ func startRestore(sourcePath, targetPath string) tea.Cmd {
 		// SMART TARGETING: Auto-determine restore destination based on backup type
 		var actualTargetPath string
 		var operationDesc string
-		
+
 		switch backupType {
 		case "system":
 			if targetPath == "/" {
@@ -690,7 +690,7 @@ func startRestore(sourcePath, targetPath string) tea.Cmd {
 					fmt.Fprintf(logFile, "WARNING: Restoring system backup to custom path: %s\n", targetPath)
 				}
 			}
-			
+
 		case "home":
 			if targetPath == "/" {
 				// Home backup → auto-target home directory
@@ -705,7 +705,7 @@ func startRestore(sourcePath, targetPath string) tea.Cmd {
 				actualTargetPath = targetPath
 				operationDesc = fmt.Sprintf("CUSTOM RESTORE (Home backup to %s)", targetPath)
 			}
-			
+
 		default:
 			return ProgressUpdate{Error: fmt.Errorf("unknown backup type: %s", backupType)}
 		}
@@ -717,10 +717,10 @@ func startRestore(sourcePath, targetPath string) tea.Cmd {
 			fmt.Fprintf(logFile, "Starting restore from %s to %s\n", sourcePath, actualTargetPath)
 		}
 
-		// Perform the actual restore
-		err = performPureGoRestore(sourcePath, actualTargetPath, logFile)
+		// Perform the actual restore with options
+		err = performPureGoRestore(sourcePath, actualTargetPath, restoreConfig, restoreWindowMgrs, logFile)
 		if err != nil {
-			return ProgressUpdate{Error: err, Done: true}
+			return ProgressUpdate{Error: fmt.Errorf("restore failed: %v", err)}
 		}
 
 		return ProgressUpdate{Percentage: 1.0, Message: fmt.Sprintf("%s completed successfully!", operationDesc), Done: true}
@@ -731,18 +731,19 @@ func startRestore(sourcePath, targetPath string) tea.Cmd {
 // Phase 1: Copy all files from backup to target location
 // Phase 2: Delete files that exist in target but not in backup (--delete behavior)
 // Provides comprehensive logging and error handling.
-func performPureGoRestore(backupPath, targetPath string, logFile *os.File) error {
+func performPureGoRestore(backupPath, targetPath string, restoreConfig, restoreWindowMgrs bool, logFile *os.File) error {
 	if logFile != nil {
 		fmt.Fprintf(logFile, "Starting restore: %s -> %s\n", backupPath, targetPath)
+		fmt.Fprintf(logFile, "Restore config: %v, Restore window managers: %v\n", restoreConfig, restoreWindowMgrs)
 	}
 
-	// Phase 1: Copy all files from backup to target
-	err := syncDirectories(backupPath, targetPath, logFile)
+	// Phase 1: Copy files from backup to target with selective restore
+	err := syncDirectoriesWithOptions(backupPath, targetPath, restoreConfig, restoreWindowMgrs, logFile)
 	if err != nil {
 		if logFile != nil {
 			fmt.Fprintf(logFile, "Error during restore copy: %v\n", err)
 		}
-		return fmt.Errorf("restore copy failed: %v", err)
+		return err
 	}
 
 	// Phase 2: Delete files that exist in target but not in backup (--delete behavior)
@@ -769,14 +770,14 @@ func detectBackupType(backupPath string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to read backup info: %v", err)
 	}
-	
+
 	contentStr := string(content)
 	if strings.Contains(contentStr, "Backup Type: Complete System") {
 		return "system", nil
 	} else if strings.Contains(contentStr, "Backup Type: Home Directory") {
 		return "home", nil
 	}
-	
+
 	// Fallback: try to detect from folder structure
 	if _, err := os.Stat(filepath.Join(backupPath, "etc")); err == nil {
 		// Has /etc directory - likely system backup
@@ -785,7 +786,7 @@ func detectBackupType(backupPath string) (string, error) {
 		// Has .config directory - likely home backup
 		return "home", nil
 	}
-	
+
 	return "unknown", fmt.Errorf("cannot determine backup type from %s", backupPath)
 }
 
@@ -797,14 +798,64 @@ func getCurrentUser() string {
 	if sudoUser := os.Getenv("SUDO_USER"); sudoUser != "" {
 		return sudoUser
 	}
-	
+
 	// Otherwise get current user
 	if user := os.Getenv("USER"); user != "" {
 		return user
 	}
-	
+
 	// Fallback
 	return "unknown"
+}
+
+// syncDirectoriesWithOptions copies files from source to destination with selective restore options.
+// This is similar to syncDirectories but allows filtering based on restore preferences.
+func syncDirectoriesWithOptions(sourcePath, destPath string, restoreConfig, restoreWindowMgrs bool, logFile *os.File) error {
+	if logFile != nil {
+		fmt.Fprintf(logFile, "Starting selective restore: config=%v, windowMgrs=%v\n", restoreConfig, restoreWindowMgrs)
+	}
+
+	// Build exclusion patterns based on user choices
+	var excludePatterns []string
+
+	// If user doesn't want to restore configuration, exclude .config directories
+	if !restoreConfig {
+		excludePatterns = append(excludePatterns,
+			".config/*",
+			"*/.config/*",
+		)
+		if logFile != nil {
+			fmt.Fprintf(logFile, "Excluding configuration directories (.config)\n")
+		}
+	}
+
+	// If user doesn't want to restore window managers, exclude WM-specific directories
+	if !restoreWindowMgrs {
+		excludePatterns = append(excludePatterns,
+			".config/hypr/*",
+			".config/Hyprland/*",
+			".config/sway/*",
+			".config/i3/*",
+			".config/awesome/*",
+			".config/dwm/*",
+			".config/bspwm/*",
+			".config/qtile/*",
+			".config/xmonad/*",
+			".local/share/gnome-shell/*",
+			".local/share/plasma/*",
+			".config/plasma*",
+			".config/kde*",
+			".config/gnome*",
+			".local/share/applications/*",
+			".config/autostart/*",
+		)
+		if logFile != nil {
+			fmt.Fprintf(logFile, "Excluding window manager directories\n")
+		}
+	}
+
+	// Use the filesystem package sync function with our exclusion patterns
+	return syncDirectoriesWithExclusions(sourcePath, destPath, excludePatterns, logFile)
 }
 
 // createBackupInfo generates the BACKUP-INFO.txt file for a backup.
@@ -849,11 +900,11 @@ The restored system will overwrite the fresh install and boot exactly as it was 
 // knows which folders should and shouldn't exist in the backup.
 func createBackupFolderList(mountPoint string, selectedFolders map[string]bool, logFile *os.File) error {
 	var content strings.Builder
-	
+
 	content.WriteString("SELECTIVE HOME BACKUP FOLDER LIST\n")
 	content.WriteString("=====================================\n")
 	content.WriteString(fmt.Sprintf("Created: %s\n\n", time.Now().Format(time.RFC3339)))
-	
+
 	// List included folders
 	content.WriteString("INCLUDED FOLDERS (backed up):\n")
 	includedCount := 0
@@ -863,8 +914,8 @@ func createBackupFolderList(mountPoint string, selectedFolders map[string]bool, 
 			includedCount++
 		}
 	}
-	
-	// List excluded folders  
+
+	// List excluded folders
 	content.WriteString("\nEXCLUDED FOLDERS (not backed up):\n")
 	excludedCount := 0
 	for folderPath, isSelected := range selectedFolders {
@@ -873,18 +924,18 @@ func createBackupFolderList(mountPoint string, selectedFolders map[string]bool, 
 			excludedCount++
 		}
 	}
-	
+
 	content.WriteString(fmt.Sprintf("\nSUMMARY: %d folders included, %d folders excluded\n", includedCount, excludedCount))
 	content.WriteString("\nNOTE: Verification will only check included folders.\n")
 	content.WriteString("Excluded folders are intentionally missing from backup.\n")
-	
+
 	folderListPath := filepath.Join(mountPoint, "BACKUP-FOLDERS.txt")
 	err := os.WriteFile(folderListPath, []byte(content.String()), 0644)
-	
+
 	if logFile != nil && err == nil {
 		fmt.Fprintf(logFile, "Created backup folder list: %d included, %d excluded\n", includedCount, excludedCount)
 	}
-	
+
 	return err
 }
 
@@ -893,22 +944,22 @@ func createBackupFolderList(mountPoint string, selectedFolders map[string]bool, 
 // Returns an error if the file doesn't exist (indicating a full backup, not selective).
 func loadBackupFolderList(backupPath string, logFile *os.File) (*BackupFolderList, error) {
 	folderListPath := filepath.Join(backupPath, "BACKUP-FOLDERS.txt")
-	
+
 	content, err := os.ReadFile(folderListPath)
 	if err != nil {
 		// File doesn't exist - this is a full backup, not selective
 		return nil, fmt.Errorf("no backup folder list found (full backup)")
 	}
-	
+
 	lines := strings.Split(string(content), "\n")
-	
+
 	var result BackupFolderList
 	var inIncluded bool
 	var inExcluded bool
-	
+
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
-		
+
 		if strings.Contains(line, "INCLUDED FOLDERS") {
 			inIncluded = true
 			inExcluded = false
@@ -922,7 +973,7 @@ func loadBackupFolderList(backupPath string, logFile *os.File) (*BackupFolderLis
 		if strings.Contains(line, "SUMMARY:") {
 			break // End of folder lists
 		}
-		
+
 		// Parse folder entries
 		if inIncluded && strings.HasPrefix(line, "✅ ") {
 			folder := strings.TrimPrefix(line, "✅ ")
@@ -932,12 +983,12 @@ func loadBackupFolderList(backupPath string, logFile *os.File) (*BackupFolderLis
 			result.ExcludedFolders = append(result.ExcludedFolders, folder)
 		}
 	}
-	
+
 	if logFile != nil {
-		fmt.Fprintf(logFile, "Loaded folder list: %d included, %d excluded\n", 
+		fmt.Fprintf(logFile, "Loaded folder list: %d included, %d excluded\n",
 			len(result.IncludedFolders), len(result.ExcludedFolders))
 	}
-	
+
 	return &result, nil
 }
 
@@ -953,7 +1004,7 @@ func loadBackupFolderList(backupPath string, logFile *os.File) (*BackupFolderLis
 // Returns a properly configured BackupConfig struct for the specified operation type.
 func createBackupConfig(operationType, mountPoint string, selectedFolders map[string]bool, homeFolders []HomeFolderInfo) (BackupConfig, error) {
 	var config BackupConfig
-	
+
 	switch operationType {
 	case "system_backup":
 		config = BackupConfig{
@@ -965,7 +1016,7 @@ func createBackupConfig(operationType, mountPoint string, selectedFolders map[st
 			SelectedFolders:   nil,
 			HomeFolders:       nil,
 		}
-		
+
 	case "home_backup":
 		// Handle SUDO_USER properly - get the actual user's home directory
 		var homeDir string
@@ -974,7 +1025,7 @@ func createBackupConfig(operationType, mountPoint string, selectedFolders map[st
 		} else {
 			homeDir, _ = os.UserHomeDir()
 		}
-		
+
 		config = BackupConfig{
 			SourcePath:        homeDir,
 			DestinationPath:   mountPoint,
@@ -984,7 +1035,7 @@ func createBackupConfig(operationType, mountPoint string, selectedFolders map[st
 			SelectedFolders:   nil,
 			HomeFolders:       nil,
 		}
-		
+
 	case "selective_home_backup":
 		// Handle SUDO_USER properly - get the actual user's home directory
 		var homeDir string
@@ -993,16 +1044,16 @@ func createBackupConfig(operationType, mountPoint string, selectedFolders map[st
 		} else {
 			homeDir, _ = os.UserHomeDir()
 		}
-		
+
 		config = BackupConfig{
-			SourcePath:        homeDir,
-			DestinationPath:   mountPoint,
-			ExcludePatterns:   []string{
-				".cache/*", 
+			SourcePath:      homeDir,
+			DestinationPath: mountPoint,
+			ExcludePatterns: []string{
+				".cache/*",
 				".local/share/Trash/*",
 				".local/share/Steam/*",
 				".cache/yay/*",
-				".cache/paru/*", 
+				".cache/paru/*",
 				".cache/mozilla/*",
 				".cache/google-chrome/*",
 				".cache/chromium/*",
@@ -1014,11 +1065,11 @@ func createBackupConfig(operationType, mountPoint string, selectedFolders map[st
 			SelectedFolders:   selectedFolders,
 			HomeFolders:       homeFolders,
 		}
-		
+
 	default:
 		return BackupConfig{}, fmt.Errorf("unknown backup operation type: %s", operationType)
 	}
-	
+
 	return config, nil
 }
 
@@ -1027,7 +1078,7 @@ func createBackupConfig(operationType, mountPoint string, selectedFolders map[st
 // the same code path, ensuring consistent behavior and progress tracking.
 //
 // Parameters:
-//   - operationType: "system_backup", "home_backup", or "selective_home_backup"  
+//   - operationType: "system_backup", "home_backup", or "selective_home_backup"
 //   - mountPoint: Destination backup directory
 //   - selectedFolders: For selective backups (pass nil for system/home backups)
 //   - homeFolders: For selective backups (pass nil for system/home backups)
@@ -1041,7 +1092,7 @@ func startUniversalBackup(operationType, mountPoint string, selectedFolders map[
 		if err != nil {
 			return ProgressUpdate{Error: err, Done: true}
 		}
-		
+
 		// Use the unified backup system
 		cmd := startBackup(config)
 		return cmd()
@@ -1054,7 +1105,7 @@ func startVerification(operationType, mountPoint string) tea.Cmd {
 		// Reset all backup state and set up for standalone verification
 		resetBackupState()
 		isStandaloneVerification = true
-		
+
 		// Start verification in background like backup operations
 		go runVerificationSilently(operationType, mountPoint)
 		return ProgressUpdate{Percentage: -1, Message: "Starting verification...", Done: false}
@@ -1101,7 +1152,7 @@ func runVerificationSilently(operationType, mountPoint string) {
 
 	// Determine source path based on operation and backup type
 	var sourcePath string
-	
+
 	switch operationType {
 	case "system_verify":
 		if backupType != "system" {
@@ -1110,7 +1161,7 @@ func runVerificationSilently(operationType, mountPoint string) {
 			return
 		}
 		sourcePath = "/"
-		
+
 	case "home_verify":
 		if backupType != "home" {
 			tuiBackupCompleted = true
@@ -1120,13 +1171,13 @@ func runVerificationSilently(operationType, mountPoint string) {
 		// Get the actual user's home directory
 		username := getCurrentUser()
 		sourcePath = "/home/" + username
-		
+
 	case "auto_verify":
 		// Auto-detection: Set source path based on detected backup type
 		if logFile != nil {
 			fmt.Fprintf(logFile, "Auto-detected backup type: %s\n", backupType)
 		}
-		
+
 		if backupType == "system" {
 			sourcePath = "/"
 			if logFile != nil {
@@ -1144,7 +1195,7 @@ func runVerificationSilently(operationType, mountPoint string) {
 			tuiBackupError = fmt.Errorf("cannot auto-verify: unknown backup type '%s'", backupType)
 			return
 		}
-		
+
 	default:
 		tuiBackupCompleted = true
 		tuiBackupError = fmt.Errorf("unknown verification type: %s", operationType)
@@ -1174,12 +1225,12 @@ func runVerificationSilently(operationType, mountPoint string) {
 	case "system":
 		// System verification: Use system exclusions PLUS cache exclusions
 		// Cache files change constantly and should never be verified
-		excludePatterns = append(ExcludePatterns, 
-			"/home/*/.cache/*",    // User cache directories
-			"/root/.cache/*",      // Root cache directory  
-			"/.cache/*",           // Any other cache directories
-			"/var/cache/*",        // System package cache
-			"/tmp/*",              // Already in ExcludePatterns but being explicit
+		excludePatterns = append(ExcludePatterns,
+			"/home/*/.cache/*", // User cache directories
+			"/root/.cache/*",   // Root cache directory
+			"/.cache/*",        // Any other cache directories
+			"/var/cache/*",     // System package cache
+			"/tmp/*",           // Already in ExcludePatterns but being explicit
 		)
 	case "home":
 		excludePatterns = []string{".cache/*", ".local/share/Trash/*"} // Use home exclusions

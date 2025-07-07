@@ -499,6 +499,43 @@ func (m Model) renderVerifyMenu() string {
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
 }
 
+// Render restore options menu
+func (m Model) renderRestoreOptions() string {
+	var s strings.Builder
+
+	// Header with ASCII art (consistent with other screens)
+	ascii := asciiStyle.Render(MigrateASCII)
+	s.WriteString(ascii + "\n")
+	s.WriteString(titleStyle.Render("🔄 Restore Options") + "\n\n")
+
+	// Menu options with beautiful styling
+	for i, choice := range m.choices {
+		if m.cursor == i {
+			s.WriteString(selectedMenuItemStyle.Render("❯ "+choice) + "\n")
+		} else {
+			s.WriteString(menuItemStyle.Render("  "+choice) + "\n")
+		}
+	}
+
+	// Enhanced info box
+	info := infoBoxStyle.Render(`⚙️  Configuration:     Restores user settings, app configs, and preferences
+🪟  Window Managers:   Restores desktop environments and window manager configs`)
+
+	s.WriteString(info)
+
+	// Additional restore info
+	restoreInfo := infoBoxStyle.Render("⚠️  Both options are enabled by default. Uncheck to skip specific restore categories.")
+	s.WriteString("\n" + restoreInfo)
+
+	// Help text
+	help := m.renderHelp()
+	s.WriteString("\n" + help)
+
+	// Center the content with beautiful border
+	content := borderStyle.Width(m.width - 8).Render(s.String())
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
+}
+
 // Render about screen
 func (m Model) renderAbout() string {
 	var s strings.Builder

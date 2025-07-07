@@ -394,8 +394,21 @@ func verifySampledFiles(sourcePath, destPath string, sampleRate float64, exclude
 
 		// Skip excluded patterns
 		for _, pattern := range excludePatterns {
-			if strings.Contains(path, strings.TrimSuffix(pattern, "/*")) {
+			// Use proper glob matching
+			matched, err := filepath.Match(pattern, path)
+			if err == nil && matched {
 				return nil
+			}
+			// Also check if any parent directory matches the pattern
+			relPath, _ := filepath.Rel(sourcePath, path)
+			if relPath != "." {
+				dir := filepath.Dir(relPath)
+				for dir != "." && dir != "/" {
+					if matched, err := filepath.Match(strings.TrimSuffix(pattern, "/*"), dir); err == nil && matched {
+						return nil
+					}
+					dir = filepath.Dir(dir)
+				}
 			}
 		}
 
