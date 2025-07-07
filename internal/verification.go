@@ -41,14 +41,15 @@ import (
 // This is the main verification function called during backup operations to ensure data integrity.
 //
 // The function implements a 4-phase verification strategy:
-//   1. Verification of newly copied files (100% coverage with checksums)
-//   2. Critical system files verification (essential files always checked)
-//   3. Statistical sampling of unchanged files (performance-optimized validation)
-//   4. Directory structure integrity validation (ensures completeness)
+//  1. Verification of newly copied files (100% coverage with checksums)
+//  2. Critical system files verification (essential files always checked)
+//  3. Statistical sampling of unchanged files (performance-optimized validation)
+//  4. Directory structure integrity validation (ensures completeness)
 //
 // Parameters:
 //   - sourcePath: The original source directory that was backed up
 //   - destPath: The destination backup directory to verify against
+//   - excludePatterns: Patterns that were excluded during backup (cache, temp files, etc.)
 //   - logFile: Optional log file for detailed verification reporting (nil to disable logging)
 //
 // Returns an error if verification fails or if critical integrity issues are detected.
@@ -56,7 +57,7 @@ import (
 //
 // The function uses adaptive error thresholds based on backup size and automatically
 // adjusts verification intensity based on the number of files processed.
-func performBackupVerification(sourcePath, destPath string, logFile *os.File) error {
+func performBackupVerification(sourcePath, destPath string, excludePatterns []string, logFile *os.File) error {
 	if logFile != nil {
 		fmt.Fprintf(logFile, "Starting smart incremental backup verification\n")
 		fmt.Fprintf(logFile, "Source: %s, Destination: %s\n", sourcePath, destPath)
@@ -65,7 +66,7 @@ func performBackupVerification(sourcePath, destPath string, logFile *os.File) er
 	// Mark verification as active
 	verificationPhaseActive = true
 	verificationStart := time.Now()
-	
+
 	// Reset verification counters
 	totalFilesVerified = 0
 	verificationErrors = []string{}
@@ -77,15 +78,15 @@ func performBackupVerification(sourcePath, destPath string, logFile *os.File) er
 	copiedFilesCopy := make([]string, len(copiedFilesList))
 	copy(copiedFilesCopy, copiedFilesList)
 	copiedFilesListMutex.Unlock()
-	
+
 	if copiedFilesCount > 0 {
 		if logFile != nil {
 			fmt.Fprintf(logFile, "Verifying %d newly copied files\n", copiedFilesCount)
 		}
-		
+
 		// Small delay to ensure filesystem sync
 		time.Sleep(1 * time.Second)
-		
+
 		err := verifyNewFiles(copiedFilesCopy, sourcePath, destPath, logFile)
 		if err != nil {
 			return fmt.Errorf("verification of new files failed: %v", err)
@@ -110,7 +111,7 @@ func performBackupVerification(sourcePath, destPath string, logFile *os.File) er
 		if logFile != nil {
 			fmt.Fprintf(logFile, "Sampling verification of %d unchanged files\n", filesSkipped)
 		}
-		err = verifySampledFiles(sourcePath, destPath, DefaultVerificationConfig.SampleRate, logFile)
+		err = verifySampledFiles(sourcePath, destPath, DefaultVerificationConfig.SampleRate, excludePatterns, logFile)
 		if err != nil {
 			// Non-critical error - log but don't fail backup
 			verificationErrors = append(verificationErrors, fmt.Sprintf("Sample verification: %v", err))
@@ -133,7 +134,7 @@ func performBackupVerification(sourcePath, destPath string, logFile *os.File) er
 	}
 
 	duration := time.Since(verificationStart)
-	
+
 	// Final verification report
 	if logFile != nil {
 		fmt.Fprintf(logFile, "Verification completed in %v\n", duration)
@@ -141,7 +142,7 @@ func performBackupVerification(sourcePath, destPath string, logFile *os.File) er
 		fmt.Fprintf(logFile, "New files checked: %d\n", copiedFilesCount)
 		fmt.Fprintf(logFile, "Critical files checked: %d\n", len(DefaultVerificationConfig.CriticalFiles))
 		fmt.Fprintf(logFile, "Errors/warnings: %d\n", len(verificationErrors))
-		
+
 		if len(verificationErrors) > 0 {
 			fmt.Fprintf(logFile, "Verification warnings:\n")
 			for _, err := range verificationErrors {
@@ -154,13 +155,10 @@ func performBackupVerification(sourcePath, destPath string, logFile *os.File) er
 	verificationPhaseActive = false
 
 	// Fail backup if too many critical errors (threshold: 1% of new files)
-	criticalErrorThreshold := copiedFilesCount / 100
-	if criticalErrorThreshold < 1 {
-		criticalErrorThreshold = 1
-	}
-	
+	criticalErrorThreshold := max(copiedFilesCount/100, 1)
+
 	if len(verificationErrors) > criticalErrorThreshold {
-		return fmt.Errorf("verification failed with %d errors (threshold: %d)", 
+		return fmt.Errorf("verification failed with %d errors (threshold: %d)",
 			len(verificationErrors), criticalErrorThreshold)
 	}
 
@@ -245,13 +243,13 @@ func verifyNewFiles(copiedFiles []string, sourcePath, destPath string, logFile *
 				fmt.Fprintf(logFile, "  %v\n", err)
 			}
 		}
-		
+
 		// Fail if too many errors (threshold: 10% of files or minimum 10 files)
-		errorThreshold := len(copiedFiles) / 10  // 10% threshold
+		errorThreshold := len(copiedFiles) / 10 // 10% threshold
 		if errorThreshold < 10 {
-			errorThreshold = 10  // But at least 10 files must fail before we give up
+			errorThreshold = 10 // But at least 10 files must fail before we give up
 		}
-		
+
 		if len(errors) > errorThreshold {
 			return fmt.Errorf("%d verification errors (threshold: %d)", len(errors), errorThreshold)
 		} else if len(errors) > 0 {
@@ -311,7 +309,7 @@ func verifyCriticalFiles(sourcePath, destPath string, logFile *os.File) error {
 			// Relative path
 			srcFile = filepath.Join(sourcePath, criticalPath)
 		}
-		
+
 		// Skip if file doesn't exist in source (not an error for critical files)
 		if _, err := os.Stat(srcFile); os.IsNotExist(err) {
 			if logFile != nil {
@@ -356,16 +354,17 @@ func verifyCriticalFiles(sourcePath, destPath string, logFile *os.File) error {
 //   - sourcePath: Original source directory for file discovery
 //   - destPath: Destination backup directory for verification
 //   - sampleRate: Fraction of files to verify (0.01 = 1%, 0.05 = 5%)
+//   - excludePatterns: Patterns that were excluded during backup (should also be excluded from verification)
 //   - logFile: Optional log file for detailed verification reporting
 //
 // The function performs intelligent candidate selection:
 //   - Walks source directory to find all files
-//   - Excludes patterns from ExcludePatterns (temp files, system directories)
+//   - Excludes patterns from excludePatterns (temp files, system directories, cache files)
 //   - Verifies corresponding destination files exist before sampling
 //   - Uses cryptographically secure random selection
 //
 // Returns an error only if sample error rate exceeds 1%, indicating systematic issues.
-func verifySampledFiles(sourcePath, destPath string, sampleRate float64, logFile *os.File) error {
+func verifySampledFiles(sourcePath, destPath string, sampleRate float64, excludePatterns []string, logFile *os.File) error {
 	if sampleRate <= 0 || filesSkipped == 0 {
 		return nil
 	}
@@ -380,21 +379,21 @@ func verifySampledFiles(sourcePath, destPath string, sampleRate float64, logFile
 	}
 
 	if logFile != nil {
-		fmt.Fprintf(logFile, "Sampling %d files out of %d unchanged files (%.1f%%)\n", 
+		fmt.Fprintf(logFile, "Sampling %d files out of %d unchanged files (%.1f%%)\n",
 			sampleSize, filesSkipped, sampleRate*100)
 	}
 
 	// We don't have a list of skipped files, so we'll do a directory walk
 	// and randomly sample files that exist in both locations
 	var candidateFiles []string
-	
+
 	err := filepath.WalkDir(sourcePath, func(path string, d os.DirEntry, err error) error {
 		if err != nil || !d.Type().IsRegular() {
 			return nil
 		}
 
 		// Skip excluded patterns
-		for _, pattern := range ExcludePatterns {
+		for _, pattern := range excludePatterns {
 			if strings.Contains(path, strings.TrimSuffix(pattern, "/*")) {
 				return nil
 			}
@@ -406,7 +405,7 @@ func verifySampledFiles(sourcePath, destPath string, sampleRate float64, logFile
 			return nil
 		}
 		destFile := filepath.Join(destPath, relPath)
-		
+
 		if _, err := os.Stat(destFile); err == nil {
 			candidateFiles = append(candidateFiles, path)
 		}
@@ -565,7 +564,7 @@ func verifySingleFile(filePath, sourcePath, destPath string) error {
 	var relPath string
 	var err error
 	var actualSourcePath string
-	
+
 	if filepath.IsAbs(filePath) && strings.HasPrefix(filePath, sourcePath) {
 		// File path is absolute and within source path
 		relPath, err = filepath.Rel(sourcePath, filePath)
@@ -638,14 +637,15 @@ func verifySingleFile(filePath, sourcePath, destPath string) error {
 //   - Full critical files and directory structure validation
 //
 // Verification Process:
-//   1. Critical system files verification (essential files always checked)
-//   2. Extensive random sampling verification (10x sample rate)
-//   3. Directory structure integrity validation
-//   4. Comprehensive error reporting and threshold validation
+//  1. Critical system files verification (essential files always checked)
+//  2. Extensive random sampling verification (10x sample rate)
+//  3. Directory structure integrity validation
+//  4. Comprehensive error reporting and threshold validation
 //
 // Parameters:
 //   - sourcePath: Original source directory that was backed up
 //   - destPath: Backup directory to verify for integrity
+//   - excludePatterns: Patterns that were excluded during backup
 //   - logFile: Optional log file for detailed verification reporting
 //
 // Unlike incremental verification during backup, this function:
@@ -656,7 +656,7 @@ func verifySingleFile(filePath, sourcePath, destPath string) error {
 //
 // Returns an error only if verification discovers systematic integrity issues
 // that exceed the standalone verification error threshold (10 errors maximum).
-func performStandaloneVerification(sourcePath, destPath string, logFile *os.File) error {
+func performStandaloneVerification(sourcePath, destPath string, excludePatterns []string, logFile *os.File) error {
 	if logFile != nil {
 		fmt.Fprintf(logFile, "Starting standalone verification\n")
 		fmt.Fprintf(logFile, "Source: %s, Destination: %s\n", sourcePath, destPath)
@@ -665,14 +665,14 @@ func performStandaloneVerification(sourcePath, destPath string, logFile *os.File
 	// Mark verification as active
 	verificationPhaseActive = true
 	verificationStart := time.Now()
-	
+
 	// Reset verification counters
 	totalFilesVerified = 0
 	verificationErrors = []string{}
-	
+
 	// For standalone verification, we don't have a list of copied files,
 	// so we'll verify a representative sample of all files
-	
+
 	// Step 1: Verify critical system files (always check)
 	if logFile != nil {
 		fmt.Fprintf(logFile, "Verifying critical system files\n")
@@ -686,7 +686,7 @@ func performStandaloneVerification(sourcePath, destPath string, logFile *os.File
 	if logFile != nil {
 		fmt.Fprintf(logFile, "Sampling verification of backup files\n")
 	}
-	err = verifyRandomSampleOfBackup(sourcePath, destPath, DefaultVerificationConfig.SampleRate*10, logFile) // Use 10x sample rate for standalone
+	err = verifyRandomSampleOfBackup(sourcePath, destPath, DefaultVerificationConfig.SampleRate*10, excludePatterns, logFile) // Use 10x sample rate for standalone
 	if err != nil {
 		// Non-critical error - log but don't fail verification
 		verificationErrors = append(verificationErrors, fmt.Sprintf("Sample verification: %v", err))
@@ -708,14 +708,14 @@ func performStandaloneVerification(sourcePath, destPath string, logFile *os.File
 	}
 
 	duration := time.Since(verificationStart)
-	
+
 	// Final verification report
 	if logFile != nil {
 		fmt.Fprintf(logFile, "Standalone verification completed in %v\n", duration)
 		fmt.Fprintf(logFile, "Files verified: %d\n", totalFilesVerified)
 		fmt.Fprintf(logFile, "Critical files checked: %d\n", len(DefaultVerificationConfig.CriticalFiles))
 		fmt.Fprintf(logFile, "Errors/warnings: %d\n", len(verificationErrors))
-		
+
 		if len(verificationErrors) > 0 {
 			fmt.Fprintf(logFile, "Verification warnings:\n")
 			for _, err := range verificationErrors {
@@ -729,9 +729,9 @@ func performStandaloneVerification(sourcePath, destPath string, logFile *os.File
 
 	// For standalone verification, be more lenient with error thresholds
 	maxAllowedErrors := 10 // Allow up to 10 errors for standalone verification
-	
+
 	if len(verificationErrors) > maxAllowedErrors {
-		return fmt.Errorf("verification failed with %d errors (threshold: %d)", 
+		return fmt.Errorf("verification failed with %d errors (threshold: %d)",
 			len(verificationErrors), maxAllowedErrors)
 	}
 
@@ -754,7 +754,7 @@ func performStandaloneVerification(sourcePath, destPath string, logFile *os.File
 //
 // Sampling Algorithm:
 //   - Walks the SOURCE directory to discover all current files
-//   - Excludes patterns from ExcludePatterns (temp files, system directories)
+//   - Excludes patterns from excludePatterns (temp files, system directories, cache files)
 //   - For each source file, validates it exists and matches in backup
 //   - Uses cryptographically secure random selection without replacement
 //   - Reports files missing from backup or content mismatches
@@ -763,6 +763,7 @@ func performStandaloneVerification(sourcePath, destPath string, logFile *os.File
 //   - sourcePath: Original source directory to validate (this is the "truth")
 //   - destPath: Backup directory to verify against source
 //   - sampleRate: Fraction of discovered files to verify (0.1 = 10%)
+//   - excludePatterns: Patterns that were excluded during backup (should also be excluded from verification)
 //   - logFile: Optional log file for detailed verification reporting
 //
 // Performance Characteristics:
@@ -773,7 +774,7 @@ func performStandaloneVerification(sourcePath, destPath string, logFile *os.File
 //
 // Returns an error if sample error rate exceeds 5%, indicating systematic backup issues.
 // This correctly detects missing files, content mismatches, and backup corruption.
-func verifyRandomSampleOfBackup(sourcePath, destPath string, sampleRate float64, logFile *os.File) error {
+func verifyRandomSampleOfBackup(sourcePath, destPath string, sampleRate float64, excludePatterns []string, logFile *os.File) error {
 	if sampleRate <= 0 {
 		return nil
 	}
@@ -785,14 +786,14 @@ func verifyRandomSampleOfBackup(sourcePath, destPath string, sampleRate float64,
 
 	// Walk the SOURCE directory to find all files that should be in backup
 	var candidateFiles []string
-	
+
 	err := filepath.WalkDir(sourcePath, func(sourceFilePath string, d os.DirEntry, err error) error {
 		if err != nil || !d.Type().IsRegular() {
 			return nil
 		}
 
 		// Skip excluded patterns (same logic as backup process)
-		for _, pattern := range ExcludePatterns {
+		for _, pattern := range excludePatterns {
 			if strings.Contains(sourceFilePath, strings.TrimSuffix(pattern, "/*")) {
 				return nil
 			}
@@ -803,9 +804,9 @@ func verifyRandomSampleOfBackup(sourcePath, destPath string, sampleRate float64,
 		if err != nil {
 			return nil
 		}
-		
+
 		backupFilePath := filepath.Join(destPath, relPath)
-		
+
 		// Check if corresponding backup file exists
 		if _, err := os.Stat(backupFilePath); err == nil {
 			// Backup file exists - add to candidates for verification
@@ -857,13 +858,13 @@ func verifyRandomSampleOfBackup(sourcePath, destPath string, sampleRate float64,
 	if sampleSize > 1000 { // Cap at 1000 files for reasonable performance
 		sampleSize = 1000
 	}
-	
+
 	if sampleSize > len(candidateFiles) {
 		sampleSize = len(candidateFiles)
 	}
 
 	if logFile != nil {
-		fmt.Fprintf(logFile, "Sampling %d files out of %d available files (%.1f%%)\n", 
+		fmt.Fprintf(logFile, "Sampling %d files out of %d available files (%.1f%%)\n",
 			sampleSize, len(candidateFiles), float64(sampleSize)/float64(len(candidateFiles))*100)
 	}
 
@@ -903,14 +904,14 @@ func verifyRandomSampleOfBackup(sourcePath, destPath string, sampleRate float64,
 
 	// Allow up to 5% sample error rate for standalone verification
 	totalIssues := len(verificationErrors) // Includes both missing files and content errors
-	
+
 	if totalIssues > 0 {
 		// Calculate overall error rate including missing files
 		totalFilesChecked := verified + errors + (len(verificationErrors) - errors) // missing files + content errors
 		overallErrorRate := float64(totalIssues) / float64(totalFilesChecked)
-		
+
 		if overallErrorRate > 0.05 { // 5% error threshold
-			return fmt.Errorf("high verification failure rate: %d issues out of %d files checked (%.1f%% failure rate)", 
+			return fmt.Errorf("high verification failure rate: %d issues out of %d files checked (%.1f%% failure rate)",
 				totalIssues, totalFilesChecked, overallErrorRate*100)
 		} else if totalIssues > 0 {
 			// Some issues found but within threshold - log as warning

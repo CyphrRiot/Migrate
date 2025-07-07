@@ -340,7 +340,7 @@ func performPureGoBackup(config BackupConfig, logFile *os.File) error {
 			fmt.Fprintf(logFile, "Verification skipped (disabled for debugging)\n")
 		}
 	} else {
-		err = performBackupVerification(config.SourcePath, config.DestinationPath, logFile)
+		err = performBackupVerification(config.SourcePath, config.DestinationPath, config.ExcludePatterns, logFile)
 		if err != nil {
 			if logFile != nil {
 				fmt.Fprintf(logFile, "ERROR during verification: %v\n", err)
@@ -963,15 +963,35 @@ func runVerificationSilently(operationType, mountPoint string) {
 		return
 	}
 
+	// Determine exclusion patterns based on backup type
+	var excludePatterns []string
+	switch backupType {
+	case "system":
+		// System verification: Use system exclusions PLUS cache exclusions
+		// Cache files change constantly and should never be verified
+		excludePatterns = append(ExcludePatterns, 
+			"/home/*/.cache/*",    // User cache directories
+			"/root/.cache/*",      // Root cache directory  
+			"/.cache/*",           // Any other cache directories
+			"/var/cache/*",        // System package cache
+			"/tmp/*",              // Already in ExcludePatterns but being explicit
+		)
+	case "home":
+		excludePatterns = []string{".cache/*", ".local/share/Trash/*"} // Use home exclusions
+	default:
+		excludePatterns = []string{} // No exclusions for unknown types
+	}
+
 	if logFile != nil {
 		fmt.Fprintf(logFile, "Backup type detected: %s\n", backupType)
 		fmt.Fprintf(logFile, "Source path: %s\n", sourcePath)
 		fmt.Fprintf(logFile, "Backup path: %s\n", mountPoint)
+		fmt.Fprintf(logFile, "Exclusion patterns: %v\n", excludePatterns)
 		fmt.Fprintf(logFile, "Starting verification...\n")
 	}
 
 	// Perform the actual verification
-	err = performStandaloneVerification(sourcePath, mountPoint, logFile)
+	err = performStandaloneVerification(sourcePath, mountPoint, excludePatterns, logFile)
 	if err != nil {
 		if logFile != nil {
 			fmt.Fprintf(logFile, "VERIFICATION ERROR: %v\n", err)

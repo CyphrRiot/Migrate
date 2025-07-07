@@ -803,7 +803,7 @@ func (m Model) renderProgressBarWithMessage(message string) string {
 			if i == cylonPos || i == cylonPos+1 {
 				segments = append(segments, lipgloss.NewStyle().Foreground(dimColor).Render("▒"))
 			} else {
-				segments = append(segments, lipgloss.NewStyle().Foreground(lipgloss.Color("#24283b")).Render("░"))
+				segments = append(segments, lipgloss.NewStyle().Foreground(lipgloss.Color("#414868")).Render("░"))
 			}
 		}
 	}

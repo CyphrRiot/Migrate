@@ -5,7 +5,7 @@
 // the AppVersion constant - all other version strings will be automatically updated.
 //
 // The version system supports:
-//   - Semantic versioning (major.minor.patch format)  
+//   - Semantic versioning (major.minor.patch format)
 //   - Automatic version string generation for UI components
 //   - Consistent branding and author attribution
 //   - Backup metadata generation with version tracking
@@ -19,16 +19,16 @@ package internal
 const (
 	// AppName is the official name of the application
 	AppName = "Migrate"
-	
+
 	// AppVersion follows semantic versioning (major.minor.patch)
 	// ⬅️ CHANGE VERSION HERE ONLY - this updates everywhere automatically
-	AppVersion = "1.0.24"
-	
+	AppVersion = "1.0.25"
+
 	// AppAuthor contains author information with social media reference
-	AppAuthor = "Cypher Riot (x.com/CyphrRiot)"
-	
+	AppAuthor = "Cypher Riot - https://x.com/CyphrRiot"
+
 	// AppDesc is the tagline/description used in UI and documentation
-	AppDesc = "A Beautiful Live System Backup & Restore"
+	AppDesc = "The Beautiful Live System Backup & Restore"
 )
 
 // GetVersionString returns just the version number for programmatic use.
@@ -69,8 +69,9 @@ func GetAboutText() string {
 // This text is embedded in BACKUP-INFO.txt files to track which version created the backup.
 //
 // Example output:
-//   "This backup was created using Migrate v1.0.22\n
-//    A Beautiful Live System Backup & Restore by Cypher Riot (x.com/CyphrRiot)"
+//
+//	"This backup was created using Migrate v1.0.22\n
+//	 A Beautiful Live System Backup & Restore by Cypher Riot (x.com/CyphrRiot)"
 func GetBackupInfoHeader(backupType string) string {
 	return "This backup was created using " + AppName + " v" + AppVersion + "\n" +
 		AppDesc + " by " + AppAuthor
