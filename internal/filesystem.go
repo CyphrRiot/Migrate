@@ -540,8 +540,8 @@ func deleteExtraFilesFromBackupWithExclusions(sourcePath, backupPath string, exc
 			}
 		}
 
-		// Skip special backup files
-		if strings.Contains(backupFile, "BACKUP-INFO.txt") {
+		// Skip special backup metadata files
+		if strings.Contains(backupFile, "BACKUP-INFO.txt") || strings.Contains(backupFile, "BACKUP-FOLDERS.txt") {
 			return nil
 		}
 
@@ -604,8 +604,8 @@ func deleteExtraFiles(backupPath, targetPath string, logFile *os.File) error {
 			}
 		}
 
-		// Skip special files (BACKUP-INFO.txt, etc.)
-		if strings.Contains(targetFile, "BACKUP-INFO.txt") {
+		// Skip special backup metadata files
+		if strings.Contains(targetFile, "BACKUP-INFO.txt") || strings.Contains(targetFile, "BACKUP-FOLDERS.txt") {
 			return nil
 		}
 
