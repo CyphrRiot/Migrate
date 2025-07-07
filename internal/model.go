@@ -15,6 +15,7 @@ package internal
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -41,6 +42,7 @@ const (
 	screenError                         // Error display requiring manual dismissal
 	screenComplete                      // Success completion requiring manual dismissal
 	screenHomeFolderSelect              // Selective home folder backup interface
+	screenHomeSubfolderSelect           // NEW: Sub-folder selection within a parent
 )
 
 // Model represents the complete application state for the Migrate TUI.
@@ -81,6 +83,11 @@ type Model struct {
 	homeFolders     []HomeFolderInfo // Discovered home directory folders
 	selectedFolders map[string]bool  // User's folder selections (path -> selected)
 	totalBackupSize int64           // Calculated total size of selected content
+	
+	// NEW: Navigation state for sub-folder drilling
+	currentFolderPath string                        // "" = root, "/Videos" = in Videos submenu
+	folderBreadcrumb  []string                      // ["Home", "Videos"] for navigation
+	subfolderCache    map[string][]HomeFolderInfo   // Cache discovered subfolders
 }
 
 // InitialModel creates and returns a new Model instance with default values.
@@ -92,6 +99,7 @@ func InitialModel() Model {
 		choices:         []string{"🚀 Backup System", "🔄 Restore System", "🔍 Verify Backup", "ℹ️ About", "❌ Exit"},
 		selected:        make(map[int]struct{}),
 		selectedFolders: make(map[string]bool),
+		subfolderCache:  make(map[string][]HomeFolderInfo), // NEW: Initialize subfolder cache
 		width:           100,
 		height:          30,
 	}
@@ -132,16 +140,93 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		
 		m.homeFolders = msg.folders
 		
-		// Initialize selected folders - all visible folders selected by default
-		m.selectedFolders = make(map[string]bool)
-		for _, folder := range m.homeFolders {
-			if folder.IsVisible {
-				m.selectedFolders[folder.Path] = true
+		// Load saved configuration to restore previous selections
+		config, err := LoadSelectiveBackupConfig()
+		if err != nil {
+			// Failed to load config - use defaults (all visible folders selected)
+			m.selectedFolders = make(map[string]bool)
+			for _, folder := range m.homeFolders {
+				if folder.IsVisible {
+					m.selectedFolders[folder.Path] = true
+				}
 			}
+			m.message = fmt.Sprintf("Using default selections (config load failed: %v)", err)
+		} else {
+			// Successfully loaded config - restore previous selections
+			m.selectedFolders = make(map[string]bool)
+			
+			// Apply saved selections to discovered folders
+			for _, folder := range m.homeFolders {
+				if folder.IsVisible {
+					// Check if we have a saved preference for this folder
+					if savedSelection, exists := config.FolderSelections[folder.Path]; exists {
+						m.selectedFolders[folder.Path] = savedSelection
+					} else {
+						// New folder not in saved config - default to selected
+						m.selectedFolders[folder.Path] = true
+					}
+				} else {
+					// Hidden folders are always "selected" but not shown in UI
+					m.selectedFolders[folder.Path] = true
+				}
+			}
+			
+			// Restore cached subfolders from saved config
+			if len(config.SubfolderCache) > 0 {
+				m.subfolderCache = ConvertSavedSubfoldersToHomeFolders(config.SubfolderCache)
+				
+				// Apply saved subfolder selections
+				for parentPath, subfolders := range m.subfolderCache {
+					for i := range subfolders {
+						if savedSelection, exists := config.FolderSelections[subfolders[i].Path]; exists {
+							subfolders[i].Selected = savedSelection
+							m.selectedFolders[subfolders[i].Path] = savedSelection
+						}
+					}
+					m.subfolderCache[parentPath] = subfolders
+				}
+			}
+			
+			// Clean up any old selections for folders that no longer exist
+			m.selectedFolders = CleanupOldSelections(m.selectedFolders)
+			
+			// Restore navigation state if saved (optional - user-friendly feature)
+			if config.LastFolderPath != "" {
+				m.currentFolderPath = config.LastFolderPath
+				m.folderBreadcrumb = config.LastBreadcrumb
+			}
+			
+			// Show success message about restored selections
+			selectedCount := 0
+			for _, selected := range m.selectedFolders {
+				if selected {
+					selectedCount++
+				}
+			}
+			m.message = fmt.Sprintf("✅ Restored previous folder selections (%d folders)", selectedCount)
 		}
 		
 		// Calculate initial total backup size
 		m.calculateTotalBackupSize()
+		
+		return m, nil
+
+	case SubfoldersDiscovered:
+		if msg.error != nil {
+			m.message = fmt.Sprintf("Failed to scan subfolder %s: %v", msg.parentPath, msg.error)
+			return m, tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
+				return tea.KeyMsg{Type: tea.KeyEsc}
+			})
+		}
+		
+		// Cache the discovered subfolders for future navigation
+		m.subfolderCache[msg.parentPath] = msg.subfolders
+		
+		// Update navigation state and switch to subfolder screen
+		m.currentFolderPath = msg.parentPath
+		m.folderBreadcrumb = []string{"Home", filepath.Base(msg.parentPath)}
+		m.screen = screenHomeSubfolderSelect
+		m.cursor = 0
 		
 		return m, nil
 
@@ -218,14 +303,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				
 				m.confirmation = fmt.Sprintf("Ready to restore %s\n\nSource: %s (%s)\nType: %s\nMounted at: %s\n\n⚠️ This will OVERWRITE existing files!\n\nProceed with restore?", 
 					restoreTypeDesc, msg.drivePath, msg.driveSize, msg.driveType, msg.mountPoint)
-			} else if strings.Contains(m.operation, "verify") {
+			} else if strings.Contains(m.operation, "verify") || m.operation == "auto_verify" {
 				// Verification confirmation
-				verifyTypeDesc := "ENTIRE SYSTEM"
-				if m.operation == "home_verify" {
-					verifyTypeDesc = "HOME DIRECTORY"
-				}
+				verifyTypeDesc := "AUTO-DETECTED BACKUP"
 				
-				m.confirmation = fmt.Sprintf("Ready to verify %s backup\n\nBackup Source: %s (%s)\nType: %s\nMounted at: %s\n\n🔍 This will compare backup files with your current system\n\nProceed with verification?", 
+				m.confirmation = fmt.Sprintf("Ready to verify %s\n\nBackup Source: %s (%s)\nType: %s\nMounted at: %s\n\n🔍 This will auto-detect backup type and compare backup files with your current system\n\nProceed with verification?", 
 					verifyTypeDesc, msg.drivePath, msg.driveSize, msg.driveType, msg.mountPoint)
 			}
 			
@@ -429,6 +511,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.choices = []string{"🚀 Backup System", "🔄 Restore System", "🔍 Verify Backup", "ℹ️ About", "❌ Exit"}
 				m.errorRequiresManualDismissal = false
 				return m, nil
+			} else if m.screen == screenHomeSubfolderSelect {
+				// NEW: Return to parent folder view from subfolder screen
+				m.currentFolderPath = ""
+				m.folderBreadcrumb = []string{}
+				m.screen = screenHomeFolderSelect
+				m.cursor = 0
+				m.message = "" // Clear any temporary messages
+				return m, nil
 			} else if m.screen != screenMain {
 				// Reset backup state when returning to main menu
 				resetBackupState()
@@ -457,6 +547,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				numControls := 2
 				visibleFolders := m.getVisibleFoldersNonEmpty()
 				maxCursor := numControls + len(visibleFolders) - 1
+				if m.cursor > 0 {
+					m.cursor--
+				} else {
+					m.cursor = maxCursor // Wrap to bottom
+				}
+			} else if m.screen == screenHomeSubfolderSelect {
+				// NEW: Subfolder selection navigation
+				// Cursor 0-1: Controls (Continue, Back)
+				// Cursor 2+: Subfolders (non-empty only)
+				numControls := 2
+				subfolders := m.getCurrentSubfolders()
+				maxCursor := numControls + len(subfolders) - 1
 				if m.cursor > 0 {
 					m.cursor--
 				} else {
@@ -491,6 +593,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				} else {
 					m.cursor = 0 // Wrap to top
 				}
+			} else if m.screen == screenHomeSubfolderSelect {
+				// NEW: Subfolder selection navigation
+				// Cursor 0-1: Controls (Continue, Back)
+				// Cursor 2+: Subfolders (non-empty only)
+				numControls := 2
+				subfolders := m.getCurrentSubfolders()
+				maxCursor := numControls + len(subfolders) - 1
+				if m.cursor < maxCursor {
+					m.cursor++
+				} else {
+					m.cursor = 0 // Wrap to top
+				}
 			} else if m.cursor < len(m.choices)-1 {
 				m.cursor++
 			}
@@ -507,6 +621,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.selectedFolders[folder.Path] = true
 				}
 				m.calculateTotalBackupSize()
+				m.autoSaveSelections() // Auto-save when user selects all
 			}
 			return m, nil
 			
@@ -518,6 +633,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.selectedFolders[folder.Path] = false
 				}
 				m.calculateTotalBackupSize()
+				m.autoSaveSelections() // Auto-save when user deselects all
 			}
 			return m, nil
 		}
@@ -543,7 +659,7 @@ func (m Model) handleSelection() (tea.Model, tea.Cmd) {
 			m.cursor = 0
 		case 2: // Verify Backup
 			m.screen = screenVerify
-			m.choices = []string{"🔍 Verify Complete System", "🏠 Verify Home Directory", "⬅️ Back"}
+			m.choices = []string{"🔍 Auto-Detect & Verify Backup", "⬅️ Back"}
 			m.cursor = 0
 		case 3: // About
 			m.screen = screenAbout
@@ -591,19 +707,13 @@ func (m Model) handleSelection() (tea.Model, tea.Cmd) {
 		}
 	case screenVerify:
 		switch m.cursor {
-		case 0: // Verify Complete System
-			m.operation = "system_verify"
+		case 0: // Auto-detect backup type and verify
+			m.operation = "auto_verify"
 			// Go to drive selection for backup source
 			m.screen = screenDriveSelect
 			m.cursor = 0
 			return m, LoadDrives()
-		case 1: // Verify Home Directory
-			m.operation = "home_verify"
-			// Go to drive selection for backup source
-			m.screen = screenDriveSelect
-			m.cursor = 0
-			return m, LoadDrives()
-		case 2: // Back
+		case 1: // Back
 			m.screen = screenMain
 			m.choices = []string{"🚀 Backup System", "🔄 Restore System", "🔍 Verify Backup", "ℹ️ About", "❌ Exit"}
 			m.cursor = 0
@@ -634,6 +744,13 @@ func (m Model) handleSelection() (tea.Model, tea.Cmd) {
 						}),
 					)
 				case "home_backup":
+					// SAVE SELECTIONS BEFORE BACKUP: Persist user's folder choices
+					err := SaveSelectiveBackupConfig(m.selectedFolders, m.subfolderCache, m.currentFolderPath, m.folderBreadcrumb)
+					if err != nil {
+						// Log error but continue with backup
+						m.message = fmt.Sprintf("⚠️ Failed to save folder preferences: %v", err)
+					}
+					
 					// Home backup - use universal backup system for selective home backup
 					return m, tea.Batch(
 						startUniversalBackup("selective_home_backup", m.selectedDrive, m.selectedFolders, m.homeFolders),
@@ -661,6 +778,15 @@ func (m Model) handleSelection() (tea.Model, tea.Cmd) {
 					)
 				case "home_verify":
 					// Home directory verification
+					return m, tea.Batch(
+						startVerification(m.operation, m.selectedDrive),
+						CheckTUIBackupProgress(),
+						tea.Tick(100*time.Millisecond, func(t time.Time) tea.Msg {
+							return cylonAnimateMsg{}
+						}),
+					)
+				case "auto_verify":
+					// Auto-detection verification
 					return m, tea.Batch(
 						startVerification(m.operation, m.selectedDrive),
 						CheckTUIBackupProgress(),
@@ -707,6 +833,16 @@ func (m Model) handleSelection() (tea.Model, tea.Cmd) {
 			// Handle control selection
 			switch m.cursor {
 			case 0: // "Continue" option - go to drive selection
+				// SAVE SELECTIONS: Persist user's folder choices when they continue
+				err := SaveSelectiveBackupConfig(m.selectedFolders, m.subfolderCache, m.currentFolderPath, m.folderBreadcrumb)
+				if err != nil {
+					m.message = fmt.Sprintf("⚠️ Failed to save preferences: %v", err)
+					// Continue anyway after brief display
+					return m, tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
+						return tea.KeyMsg{Type: tea.KeyEnter} // Retry continue
+					})
+				}
+				
 				m.screen = screenDriveSelect
 				m.cursor = 0
 				return m, LoadDrives()
@@ -721,12 +857,82 @@ func (m Model) handleSelection() (tea.Model, tea.Cmd) {
 			visibleFolders := m.getVisibleFoldersNonEmpty()
 			
 			if folderIndex < len(visibleFolders) {
-				// Toggle folder selection
 				folder := visibleFolders[folderIndex]
-				m.selectedFolders[folder.Path] = !m.selectedFolders[folder.Path]
+				
+				// NEW: Check if this folder has subfolders and can be drilled down
+				if folder.HasSubfolders {
+					// Check if we already have this folder cached
+					if _, exists := m.subfolderCache[folder.Path]; exists {
+						// Use cached data - switch directly to subfolder screen
+						m.currentFolderPath = folder.Path
+						m.folderBreadcrumb = []string{"Home", folder.Name}
+						m.screen = screenHomeSubfolderSelect
+						m.cursor = 0
+					} else {
+						// Need to discover subfolders first
+						m.message = fmt.Sprintf("🔍 Scanning %s...", folder.Name)
+						return m, DiscoverSubfoldersCmd(folder.Path)
+					}
+				} else {
+					// No subfolders - use smart toggle selection 
+					m.toggleParentFolder(folder)
+					
+					// Recalculate total backup size
+					m.calculateTotalBackupSize()
+					
+					// Auto-save after folder toggle
+					m.autoSaveSelections()
+				}
+			}
+		}
+	case screenHomeSubfolderSelect:
+		// NEW: Subfolder selection handling
+		numControls := 2
+		
+		if m.cursor < numControls {
+			// Handle control selection
+			switch m.cursor {
+			case 0: // "Continue" option - go to drive selection
+				// SAVE SELECTIONS: Persist user's folder choices when they continue from subfolders
+				err := SaveSelectiveBackupConfig(m.selectedFolders, m.subfolderCache, m.currentFolderPath, m.folderBreadcrumb)
+				if err != nil {
+					m.message = fmt.Sprintf("⚠️ Failed to save preferences: %v", err)
+					// Continue anyway after brief display
+					return m, tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
+						return tea.KeyMsg{Type: tea.KeyEnter} // Retry continue
+					})
+				}
+				
+				m.screen = screenDriveSelect
+				m.cursor = 0
+				return m, LoadDrives()
+			case 1: // "Back" option - return to parent folder view
+				// Reset navigation state and return to main folder view
+				m.currentFolderPath = ""
+				m.folderBreadcrumb = []string{}
+				m.screen = screenHomeFolderSelect
+				m.cursor = 0
+				// Clear any temporary messages
+				m.message = ""
+			}
+		} else {
+			// Handle subfolder selection (cursor >= 2)
+			subfolderIndex := m.cursor - numControls
+			subfolders := m.getCurrentSubfolders()
+			
+			if subfolderIndex < len(subfolders) {
+				// Toggle subfolder selection
+				subfolder := subfolders[subfolderIndex]
+				m.selectedFolders[subfolder.Path] = !m.selectedFolders[subfolder.Path]
+				
+				// NEW: Update parent folder selection state based on subfolder changes
+				m.updateParentSelectionState(m.currentFolderPath)
 				
 				// Recalculate total backup size
 				m.calculateTotalBackupSize()
+				
+				// Auto-save after subfolder toggle
+				m.autoSaveSelections()
 			}
 		}
 	case screenDriveSelect:
@@ -742,7 +948,7 @@ func (m Model) handleSelection() (tea.Model, tea.Cmd) {
 				// For backup: mount drive for destination with appropriate space check
 				if m.operation == "home_backup" {
 					// FIXED: Pass selected folders for accurate space checking
-					return m, mountDriveForSelectiveHomeBackup(selectedDrive, m.homeFolders, m.selectedFolders)
+					return m, mountDriveForSelectiveHomeBackup(selectedDrive, m.homeFolders, m.selectedFolders, m.subfolderCache)
 				} else {
 					return m, mountDriveForBackup(selectedDrive)
 				}
@@ -783,17 +989,84 @@ func (m Model) handleSelection() (tea.Model, tea.Cmd) {
 
 // calculateTotalBackupSize computes the total size of all selected folders for backup.
 // This includes both user-selected visible folders and automatically included hidden folders.
+// FIXED: Now properly handles hierarchical selections - when subfolders are individually 
+// selected, uses their specific sizes instead of the parent folder's total size.
 // The result is stored in m.totalBackupSize for display and space validation.
 func (m *Model) calculateTotalBackupSize() {
 	m.totalBackupSize = 0
+	
+	// Track which parent folders have been processed to avoid double-counting
+	processedParents := make(map[string]bool)
 	
 	for _, folder := range m.homeFolders {
 		if folder.AlwaysInclude {
 			// Hidden folders are always included (dotfiles/dotdirs)
 			m.totalBackupSize += folder.Size
-		} else if m.selectedFolders[folder.Path] {
-			// Visible folders only if explicitly selected by user
-			m.totalBackupSize += folder.Size
+		} else if folder.IsVisible {
+			// NEW: Handle visible folders with potential subfolders
+			if folder.HasSubfolders {
+				// Check if any subfolders are cached (user has drilled down)
+				if subfolders, exists := m.subfolderCache[folder.Path]; exists {
+					// User has drilled down - calculate based on individual subfolder selections
+					subfolderTotal := int64(0)
+					anySubfolderSelected := false
+					
+					for _, subfolder := range subfolders {
+						if subfolder.Size > 0 && m.selectedFolders[subfolder.Path] {
+							subfolderTotal += subfolder.Size
+							anySubfolderSelected = true
+						}
+					}
+					
+					// Only add subfolders if at least one is selected
+					if anySubfolderSelected {
+						m.totalBackupSize += subfolderTotal
+					}
+					processedParents[folder.Path] = true
+				} else {
+					// No subfolders cached - use parent folder selection
+					if m.selectedFolders[folder.Path] {
+						m.totalBackupSize += folder.Size
+					}
+					processedParents[folder.Path] = true
+				}
+			} else {
+				// No subfolders - use parent folder selection directly
+				if m.selectedFolders[folder.Path] {
+					m.totalBackupSize += folder.Size
+				}
+				processedParents[folder.Path] = true
+			}
+		}
+	}
+	
+	// ADDITIONAL: Add any individually selected subfolders whose parents weren't processed
+	// This handles edge cases where subfolders might be selected but parent isn't in homeFolders
+	for folderPath, isSelected := range m.selectedFolders {
+		if !isSelected {
+			continue
+		}
+		
+		// Check if this is a subfolder (has a parent path that was processed)
+		parentProcessed := false
+		for processedParent := range processedParents {
+			if strings.HasPrefix(folderPath, processedParent+"/") {
+				parentProcessed = true
+				break
+			}
+		}
+		
+		// If no parent was processed, this might be a standalone subfolder selection
+		if !parentProcessed {
+			// Find the subfolder in cache and add its size
+			for _, cachedSubfolders := range m.subfolderCache {
+				for _, subfolder := range cachedSubfolders {
+					if subfolder.Path == folderPath && subfolder.Size > 0 {
+						m.totalBackupSize += subfolder.Size
+						break
+					}
+				}
+			}
 		}
 	}
 }
@@ -822,7 +1095,128 @@ func (m Model) getVisibleFoldersNonEmpty() []HomeFolderInfo {
 	return visibleFolders
 }
 
-// View implements tea.Model.View() and renders the current screen.
+// getCurrentSubfolders returns the cached subfolders for the current folder path.
+// Used for UI navigation and rendering in screenHomeSubfolderSelect.
+func (m Model) getCurrentSubfolders() []HomeFolderInfo {
+	if subfolders, exists := m.subfolderCache[m.currentFolderPath]; exists {
+		// Filter to only show non-empty subfolders (like main folders)
+		nonEmptySubfolders := make([]HomeFolderInfo, 0)
+		for _, subfolder := range subfolders {
+			if subfolder.Size > 0 {
+				nonEmptySubfolders = append(nonEmptySubfolders, subfolder)
+			}
+		}
+		return nonEmptySubfolders
+	}
+	return []HomeFolderInfo{} // Return empty list if no cache
+}
+
+// NEW: Smart selection state management functions
+
+// getFolderSelectionState determines the selection state of a parent folder based on its subfolders.
+// Returns: "full" if all subfolders selected, "partial" if some selected, "none" if none selected
+func (m Model) getFolderSelectionState(folder HomeFolderInfo) string {
+	if !folder.HasSubfolders {
+		// No subfolders - return based on direct selection
+		if m.selectedFolders[folder.Path] {
+			return "full"
+		}
+		return "none"
+	}
+	
+	// Check subfolder selection states
+	subfolders, exists := m.subfolderCache[folder.Path]
+	if !exists {
+		// No subfolders cached yet - return based on parent selection
+		if m.selectedFolders[folder.Path] {
+			return "full"
+		}
+		return "none"
+	}
+	
+	// Count selected vs total subfolders
+	totalSubfolders := 0 
+	selectedSubfolders := 0
+	
+	for _, subfolder := range subfolders {
+		if subfolder.Size > 0 { // Only count non-empty subfolders
+			totalSubfolders++
+			if m.selectedFolders[subfolder.Path] {
+				selectedSubfolders++
+			}
+		}
+	}
+	
+	if selectedSubfolders == 0 {
+		return "none"
+	} else if selectedSubfolders == totalSubfolders {
+		return "full"
+	} else {
+		return "partial"
+	}
+}
+
+// updateParentSelectionState updates the parent folder's selection based on subfolder changes.
+// Called after subfolder selections are modified to maintain consistency.
+func (m *Model) updateParentSelectionState(parentFolderPath string) {
+	// Find the parent folder in homeFolders
+	var parentFolder *HomeFolderInfo
+	for i := range m.homeFolders {
+		if m.homeFolders[i].Path == parentFolderPath {
+			parentFolder = &m.homeFolders[i]
+			break
+		}
+	}
+	
+	if parentFolder == nil || !parentFolder.HasSubfolders {
+		return
+	}
+	
+	// Get selection state and update parent accordingly
+	state := m.getFolderSelectionState(*parentFolder)
+	switch state {
+	case "full":
+		m.selectedFolders[parentFolderPath] = true
+	case "none":
+		m.selectedFolders[parentFolderPath] = false
+	case "partial":
+		// For partial selection, we'll keep parent selected but track it's partial
+		// This preserves the user's intent while showing partial state
+		m.selectedFolders[parentFolderPath] = true
+	}
+}
+
+// toggleParentFolder toggles the selection of a parent folder and all its subfolders.
+// If toggling on, selects all subfolders. If toggling off, deselects all subfolders.
+func (m *Model) toggleParentFolder(folder HomeFolderInfo) {
+	currentState := m.selectedFolders[folder.Path]
+	newState := !currentState
+	
+	// Set parent folder selection
+	m.selectedFolders[folder.Path] = newState
+	
+	// If folder has subfolders, also set all subfolder selections
+	if folder.HasSubfolders {
+		if subfolders, exists := m.subfolderCache[folder.Path]; exists {
+			for _, subfolder := range subfolders {
+				if subfolder.Size > 0 { // Only affect non-empty subfolders
+					m.selectedFolders[subfolder.Path] = newState
+				}
+			}
+		}
+	}
+}
+
+// autoSaveSelections saves the current configuration in the background without blocking the UI.
+// This ensures user preferences are preserved even if they exit before completing backup.
+func (m *Model) autoSaveSelections() {
+	// Save configuration asynchronously - don't block UI for save errors
+	go func() {
+		SaveSelectiveBackupConfig(m.selectedFolders, m.subfolderCache, m.currentFolderPath, m.folderBreadcrumb)
+		// Note: We ignore errors in background saves to avoid disrupting UI flow
+		// Critical saves (before backup) still handle errors properly
+	}()
+}
 // This method delegates to specific render functions based on the active screen.
 func (m Model) View() string {
 	switch m.screen {
@@ -842,6 +1236,8 @@ func (m Model) View() string {
 		return m.renderProgress()
 	case screenHomeFolderSelect:
 		return m.renderHomeFolderSelect()
+	case screenHomeSubfolderSelect:
+		return m.renderHomeSubfolderSelect() // NEW: Subfolder rendering
 	case screenDriveSelect:
 		return m.renderDriveSelect()
 	case screenError:

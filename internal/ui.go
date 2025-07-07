@@ -3,7 +3,7 @@
 // This package implements the visual layer of the TUI using the Lipgloss library for styling.
 // The UI system provides:
 //   - Tokyo Night color theme with authentic palette implementation
-//   - Gradient color system for progress bars and status indicators  
+//   - Gradient color system for progress bars and status indicators
 //   - Responsive rendering for different terminal sizes
 //   - Screen-specific render methods for each application state
 //   - Progress visualization with animated cylon effects
@@ -16,6 +16,7 @@ package internal
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -33,31 +34,31 @@ type GradientColors struct {
 var (
 	// 🌃 AUTHENTIC TOKYO NIGHT COLOR PALETTE 🌃
 	// Based on the official Tokyo Night theme specification
-	
+
 	// Tokyo Night Blue - Primary brand color
 	blueGradient = GradientColors{
 		Start: lipgloss.Color("#7aa2f7"), // Tokyo Night blue (primary)
 		End:   lipgloss.Color("#3d59a1"), // Tokyo Night blue dark
 	}
-	
+
 	// Tokyo Night Purple - Accent and keywords
 	purpleGradient = GradientColors{
 		Start: lipgloss.Color("#bb9af7"), // Tokyo Night purple (bright)
 		End:   lipgloss.Color("#9d7cd8"), // Tokyo Night purple (medium)
 	}
-	
-	// Tokyo Night Green - Success and strings  
+
+	// Tokyo Night Green - Success and strings
 	greenGradient = GradientColors{
 		Start: lipgloss.Color("#9ece6a"), // Tokyo Night green (primary)
 		End:   lipgloss.Color("#73b957"), // Tokyo Night green dark
 	}
-	
+
 	// Tokyo Night Orange/Red - Warnings and errors
 	orangeGradient = GradientColors{
 		Start: lipgloss.Color("#e0af68"), // Tokyo Night orange (warm)
 		End:   lipgloss.Color("#f7768e"), // Tokyo Night red/pink
 	}
-	
+
 	// Tokyo Night Cyan - Special highlights
 	tealGradient = GradientColors{
 		Start: lipgloss.Color("#73daca"), // Tokyo Night cyan (bright)
@@ -65,25 +66,25 @@ var (
 	}
 
 	// Status-specific gradients using authentic Tokyo Night colors
-	successGradient = greenGradient    // Tokyo Night green for success
-	warningGradient = orangeGradient   // Tokyo Night orange for warnings  
-	errorGradient = GradientColors{
+	successGradient = greenGradient  // Tokyo Night green for success
+	warningGradient = orangeGradient // Tokyo Night orange for warnings
+	errorGradient   = GradientColors{
 		Start: lipgloss.Color("#f7768e"), // Tokyo Night red/pink
 		End:   lipgloss.Color("#ff5555"), // Tokyo Night red intense
 	}
-	infoGradient = blueGradient        // Tokyo Night blue for info
-	progressGradient = purpleGradient  // Tokyo Night purple for progress
+	infoGradient     = blueGradient   // Tokyo Night blue for info
+	progressGradient = purpleGradient // Tokyo Night purple for progress
 
 	// Base Tokyo Night colors - authentic theme foundation
 	primaryColor    = lipgloss.Color("#7aa2f7") // Tokyo Night blue
-	secondaryColor  = lipgloss.Color("#9ece6a") // Tokyo Night green  
+	secondaryColor  = lipgloss.Color("#9ece6a") // Tokyo Night green
 	accentColor     = lipgloss.Color("#bb9af7") // Tokyo Night purple
 	warningColor    = lipgloss.Color("#e0af68") // Tokyo Night orange
 	errorColor      = lipgloss.Color("#f7768e") // Tokyo Night red/pink
 	successColor    = lipgloss.Color("#9ece6a") // Tokyo Night green
 	textColor       = lipgloss.Color("#c0caf5") // Tokyo Night foreground
 	dimColor        = lipgloss.Color("#565f89") // Tokyo Night comment/dim
-	backgroundColor = lipgloss.Color("#1a1b26") // Tokyo Night background  
+	backgroundColor = lipgloss.Color("#1a1b26") // Tokyo Night background
 	borderColor     = lipgloss.Color("#414868") // Tokyo Night border/line
 )
 
@@ -92,7 +93,8 @@ var (
 // with proper color interpolation for smoother gradients.
 //
 // Parameters:
-//   position: Float between 0.0 (start color) and 1.0 (end color)
+//
+//	position: Float between 0.0 (start color) and 1.0 (end color)
 func (g GradientColors) GetColor(position float64) lipgloss.Color {
 	// Clamp position between 0 and 1
 	if position < 0 {
@@ -101,7 +103,7 @@ func (g GradientColors) GetColor(position float64) lipgloss.Color {
 	if position > 1 {
 		position = 1
 	}
-	
+
 	// Simple implementation: threshold at 50%
 	// TODO: Consider implementing proper color interpolation for smoother transitions
 	if position < 0.5 {
@@ -139,7 +141,7 @@ func GetStatusGradient(status string) GradientColors {
 // The style parameter determines the color scheme used (e.g., "speed" for transfer rates, "size" for file sizes).
 func formatBytesWithColor(bytes int64, style string) string {
 	formatted := FormatBytes(bytes)
-	
+
 	var colorStyle lipgloss.Style
 	switch style {
 	case "speed":
@@ -167,7 +169,7 @@ func formatBytesWithColor(bytes int64, style string) string {
 	default:
 		colorStyle = lipgloss.NewStyle().Foreground(textColor)
 	}
-	
+
 	return colorStyle.Render(formatted)
 }
 
@@ -175,7 +177,7 @@ func formatBytesWithColor(bytes int64, style string) string {
 // The significance parameter determines the color thresholds (e.g., "high" for important metrics, "files" for file counts).
 func formatNumberWithColor(n int64, significance string) string {
 	formatted := FormatNumber(n)
-	
+
 	var colorStyle lipgloss.Style
 	switch significance {
 	case "high":
@@ -199,7 +201,7 @@ func formatNumberWithColor(n int64, significance string) string {
 	default:
 		colorStyle = lipgloss.NewStyle().Foreground(textColor)
 	}
-	
+
 	return colorStyle.Render(formatted)
 }
 
@@ -208,8 +210,8 @@ func formatNumberWithColor(n int64, significance string) string {
 func renderDataMetric(label, value, icon string) string {
 	labelStyle := lipgloss.NewStyle().Foreground(dimColor)
 	iconStyle := lipgloss.NewStyle().Foreground(blueGradient.Start)
-	
-	return fmt.Sprintf("%s %s %s", 
+
+	return fmt.Sprintf("%s %s %s",
 		iconStyle.Render(icon),
 		labelStyle.Render(label+":"),
 		value)
@@ -219,26 +221,26 @@ func renderDataMetric(label, value, icon string) string {
 // Shows counts for files copied, skipped, and total with appropriate color coding.
 func renderProgressStats(filesCopied, filesSkipped, totalFiles int64) string {
 	var parts []string
-	
+
 	if filesCopied > 0 {
 		copiedText := formatNumberWithColor(filesCopied, "files")
 		parts = append(parts, renderDataMetric("Copied", copiedText, "📄"))
 	}
-	
+
 	if filesSkipped > 0 {
-		skippedText := formatNumberWithColor(filesSkipped, "files") 
+		skippedText := formatNumberWithColor(filesSkipped, "files")
 		parts = append(parts, renderDataMetric("Skipped", skippedText, "⚡"))
 	}
-	
+
 	if totalFiles > 0 {
 		totalText := formatNumberWithColor(totalFiles, "files")
 		parts = append(parts, renderDataMetric("Total", totalText, "📁"))
 	}
-	
+
 	if len(parts) == 0 {
 		return ""
 	}
-	
+
 	return strings.Join(parts, " • ")
 }
 
@@ -258,89 +260,89 @@ var (
 	subtitleStyle = lipgloss.NewStyle().
 			Foreground(textColor).
 			Align(lipgloss.Center).
-			MarginBottom(1)  // Reduced from 2 to 1
+			MarginBottom(1) // Reduced from 2 to 1
 
 	// Subdued style for version/author info
 	versionStyle = lipgloss.NewStyle().
-			Foreground(dimColor).  // Much darker and less prominent
+			Foreground(dimColor). // Much darker and less prominent
 			Align(lipgloss.Center).
 			MarginBottom(1)
 
 	// Modern Panel System - authentic Tokyo Night styling
 	modernPanelStyle = lipgloss.NewStyle().
 				BorderStyle(lipgloss.RoundedBorder()).
-				BorderForeground(borderColor).  // Tokyo Night border
-				Background(lipgloss.Color("#24283b")).  // Tokyo Night dark panel bg
-				Padding(3, 4).  // More generous padding
-				Margin(1, 2)   // Better spacing
+				BorderForeground(borderColor).         // Tokyo Night border
+				Background(lipgloss.Color("#24283b")). // Tokyo Night dark panel bg
+				Padding(3, 4).                         // More generous padding
+				Margin(1, 2)                           // Better spacing
 
 	// Enhanced border system - Tokyo Night themed
 	borderStyle = lipgloss.NewStyle().
 			BorderStyle(lipgloss.RoundedBorder()).
-			BorderForeground(borderColor).  // Tokyo Night border color
+			BorderForeground(borderColor). // Tokyo Night border color
 			Padding(2, 3).
 			Margin(1)
 
 	// Clean info panels with Tokyo Night colors
 	infoBoxStyle = lipgloss.NewStyle().
-			Background(lipgloss.Color("#24283b")).   // Tokyo Night panel bg
+			Background(lipgloss.Color("#24283b")). // Tokyo Night panel bg
 			Foreground(textColor).
-			Padding(0, 1).   // Minimal padding
-			Margin(0).       // No margins
+			Padding(0, 1). // Minimal padding
+			Margin(0).     // No margins
 			Border(lipgloss.RoundedBorder()).
-			BorderForeground(borderColor)  // Tokyo Night border
+			BorderForeground(borderColor) // Tokyo Night border
 
 	// Clean status styles with dark Tokyo Night backgrounds
 	warningStyle = lipgloss.NewStyle().
-			Foreground(textColor).  // Use normal text color
-			Background(lipgloss.Color("#1e2030")).  // Much darker background, closer to main bg
+			Foreground(textColor).                 // Use normal text color
+			Background(lipgloss.Color("#1e2030")). // Much darker background, closer to main bg
 			Bold(true).
 			Align(lipgloss.Center).
-			Padding(0, 2).   // Back to minimal padding
+			Padding(0, 2). // Back to minimal padding
 			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("#e0af68"))  // Keep border as accent only
+			BorderForeground(lipgloss.Color("#e0af68")) // Keep border as accent only
 
 	// Info style for neutral confirmations (like unmount)
 	infoStyle = lipgloss.NewStyle().
-			Foreground(textColor).  // Use normal text color
-			Background(lipgloss.Color("#1e2030")).  // Same dark background
+			Foreground(textColor).                 // Use normal text color
+			Background(lipgloss.Color("#1e2030")). // Same dark background
 			Bold(true).
 			Align(lipgloss.Center).
 			Padding(0, 2).
 			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("#7aa2f7"))  // Tokyo Night blue border
+			BorderForeground(lipgloss.Color("#7aa2f7")) // Tokyo Night blue border
 
 	errorStyle = lipgloss.NewStyle().
-			Foreground(textColor).  // Use normal text color
-			Background(lipgloss.Color("#1e2030")).  // Same dark background
+			Foreground(textColor).                 // Use normal text color
+			Background(lipgloss.Color("#1e2030")). // Same dark background
 			Bold(true).
 			Align(lipgloss.Center).
 			Padding(0, 2).
 			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("#f7768e"))  // Tokyo Night red border
+			BorderForeground(lipgloss.Color("#f7768e")) // Tokyo Night red border
 
 	successStyle = lipgloss.NewStyle().
-			Foreground(textColor).  // Use normal text color  
-			Background(lipgloss.Color("#1e2030")).  // Same dark background
+			Foreground(textColor).                 // Use normal text color
+			Background(lipgloss.Color("#1e2030")). // Same dark background
 			Bold(true).
 			Align(lipgloss.Center).
 			Padding(0, 2).
 			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("#9ece6a"))  // Tokyo Night green border
+			BorderForeground(lipgloss.Color("#9ece6a")) // Tokyo Night green border
 
 	// Tokyo Night menu selection styling
 	selectedMenuItemStyle = lipgloss.NewStyle().
-				PaddingLeft(2).   // Back to normal padding
+				PaddingLeft(2). // Back to normal padding
 				PaddingRight(2).
-				Background(primaryColor).  // Tokyo Night blue
-				Foreground(backgroundColor).  // Tokyo Night dark bg as text
+				Background(primaryColor).    // Tokyo Night blue
+				Foreground(backgroundColor). // Tokyo Night dark bg as text
 				Bold(true).
 				Border(lipgloss.RoundedBorder()).
-				BorderForeground(blueGradient.End)  // Deeper Tokyo Night blue border
+				BorderForeground(blueGradient.End) // Deeper Tokyo Night blue border
 
 	// Clean menu items
 	menuItemStyle = lipgloss.NewStyle().
-			PaddingLeft(2).   // Normal padding
+			PaddingLeft(2). // Normal padding
 			PaddingRight(2).
 			Foreground(textColor)
 
@@ -363,9 +365,9 @@ var (
 
 // MigrateASCII contains the ASCII art logo displayed in headers throughout the application.
 // Uses a sleek design that fits the Tokyo Night aesthetic.
-const MigrateASCII = `▖  ▖▘      ▗     ▐▘▄▖    ▗      ▜ 
-▛▖▞▌▌▛▌▛▘▀▌▜▘█▌  ▐ ▚ ▌▌▛▘▜▘█▌▛▛▌▐ 
-▌▝ ▌▌▙▌▌ █▌▐▖▙▖  ▐ ▄▌▙▌▄▌▐▖▙▖▌▌▌▐ 
+const MigrateASCII = `▖  ▖▘      ▗     ▐▘▄▖    ▗      ▜
+▛▖▞▌▌▛▌▛▘▀▌▜▘█▌  ▐ ▚ ▌▌▛▘▜▘█▌▛▛▌▐
+▌▝ ▌▌▙▌▌ █▌▐▖▙▖  ▐ ▄▌▙▌▄▌▐▖▙▖▌▌▌▐
      ▄▌          ▝▘  ▄▌         ▀ `
 
 // renderMainMenu renders the primary application menu screen.
@@ -479,13 +481,13 @@ func (m Model) renderVerifyMenu() string {
 	}
 
 	// Enhanced info box
-	info := infoBoxStyle.Render(`🔍 Complete System:  Verify entire system backup integrity
-🏠 Home Directory:   Verify home directory backup only`)
+	info := infoBoxStyle.Render(`🔍 Auto-Detection:  Automatically detects backup type (Complete System vs Home Directory)
+🛡️  Fast Analysis:    Quickly scans backup contents to determine what to verify`)
 
 	s.WriteString(info)
 
 	// Additional verification info
-	verifyInfo := infoBoxStyle.Render("🛡️  Verification compares backup files with source using SHA256 checksums")
+	verifyInfo := infoBoxStyle.Render("🔍 Verification compares backup files with source using SHA256 checksums")
 	s.WriteString("\n" + verifyInfo)
 
 	// Help text
@@ -509,7 +511,7 @@ func (m Model) renderAbout() string {
 	// About content with enhanced data visualization
 	features := []string{
 		renderDataMetric("Implementation", "Pure Go", "⚡"),
-		renderDataMetric("Dependencies", "Zero external", "🛡️"),  
+		renderDataMetric("Dependencies", "Zero external", "🛡️"),
 		renderDataMetric("UI Framework", "Bubble Tea + Lipgloss", "🎨"),
 		renderDataMetric("Progress Tracking", "Real-time file-based", "📊"),
 		renderDataMetric("Deduplication", "SHA256 checksums", "🔍"),
@@ -517,13 +519,13 @@ func (m Model) renderAbout() string {
 		renderDataMetric("Sync Method", "rsync --delete equivalent", "🔄"),
 		renderDataMetric("Portability", "Static binary", "📦"),
 	}
-	
+
 	aboutContent := GetAboutText() + "\n\n" +
 		"Created by " + AppAuthor + "\n\n" +
 		"🔗 GitHub: https://github.com/CyphrRiot/Migrate\n" +
 		"🐦 X: https://x.com/CyphrRiot\n\n" +
 		"✨ Authentic Tokyo Night interface with neon gradient progress bars\n\n" +
-		"Key Features:\n" + 
+		"Key Features:\n" +
 		strings.Join(features, "\n") + "\n\n" +
 		"Press any key to return to main menu"
 
@@ -570,11 +572,11 @@ func (m Model) renderConfirmation() string {
 		cursor := " "
 		if m.cursor == i {
 			cursor = "❯"
-			s.WriteString(fmt.Sprintf("%s %s\n", 
+			s.WriteString(fmt.Sprintf("%s %s\n",
 				selectedMenuItemStyle.Render(cursor+" "+choice),
 				""))
 		} else {
-			s.WriteString(fmt.Sprintf("%s %s\n", 
+			s.WriteString(fmt.Sprintf("%s %s\n",
 				menuItemStyle.Render(cursor+" "+choice),
 				""))
 		}
@@ -598,7 +600,7 @@ func (m Model) renderProgress() string {
 	s.WriteString(ascii + "\n")
 	title := titleStyle.Render(AppDesc)
 	s.WriteString(title + "\n")
-	version := versionStyle.Render(GetSubtitle())  // Use dimmer versionStyle instead of subtitleStyle
+	version := versionStyle.Render(GetSubtitle()) // Use dimmer versionStyle instead of subtitleStyle
 	s.WriteString(version + "\n\n")
 
 	// Operation title
@@ -618,24 +620,22 @@ func (m Model) renderProgress() string {
 	}
 
 	// Operation info - show source and destination drives with proper styling
-	logPath := getLogFilePath() // Get log path for display
-	if m.operation == "system_backup" {
-		backupTypeStyle := lipgloss.NewStyle().Foreground(greenGradient.Start).Bold(true) // Slightly highlighted
-		logStyle := lipgloss.NewStyle().Foreground(dimColor) // Darker/subdued
-		
+	logPath := getLogFilePath()                                                       // Get log path for display
+	backupTypeStyle := lipgloss.NewStyle().Foreground(greenGradient.Start).Bold(true) // Slightly highlighted
+	logStyle := lipgloss.NewStyle().Foreground(dimColor)                              // Darker/subdued
+
+	switch m.operation {
+	case "system_backup":
 		s.WriteString(backupTypeStyle.Render("📁 Backup Type:    Complete System") + "\n")
 		s.WriteString("📂 Source:         /\n")
 		s.WriteString("💾 Destination:    " + m.selectedDrive + "\n")
-		s.WriteString(logStyle.Render("📋 Log:            " + logPath) + "\n\n")
-	} else if m.operation == "home_backup" {
-		backupTypeStyle := lipgloss.NewStyle().Foreground(greenGradient.Start).Bold(true) // Slightly highlighted
-		logStyle := lipgloss.NewStyle().Foreground(dimColor) // Darker/subdued
-		
+		s.WriteString(logStyle.Render("📋 Log:            "+logPath) + "\n\n")
+	case "home_backup":
 		s.WriteString(backupTypeStyle.Render("📁 Backup Type:    Home Directory Only") + "\n")
-		s.WriteString("📂 Source:         ~/\n")  
+		s.WriteString("📂 Source:         ~/\n")
 		s.WriteString("💾 Destination:    " + m.selectedDrive + "\n")
-		s.WriteString(logStyle.Render("📋 Log:            " + logPath) + "\n\n")
-	} else {
+		s.WriteString(logStyle.Render("📋 Log:            "+logPath) + "\n\n")
+	default:
 		opInfo := fmt.Sprintf("Running: %s", m.operation)
 		s.WriteString(subtitleStyle.Render(opInfo) + "\n")
 		s.WriteString("📋 Log:            " + logPath + "\n\n")
@@ -655,7 +655,7 @@ func (m Model) renderProgress() string {
 		} else if strings.Contains(m.message, "Deleting") || strings.Contains(m.message, "deletion") {
 			// Deletion messages in Tokyo Night red/pink
 			statusStyle = lipgloss.NewStyle().
-				Foreground(errorColor).  // Tokyo Night red/pink
+				Foreground(errorColor). // Tokyo Night red/pink
 				Bold(true).
 				Align(lipgloss.Center)
 		} else {
@@ -670,7 +670,7 @@ func (m Model) renderProgress() string {
 			} else {
 				progressColor = greenGradient.Start
 			}
-			
+
 			statusStyle = lipgloss.NewStyle().
 				Foreground(progressColor)
 		}
@@ -700,15 +700,15 @@ func getProgressEmoji(message string, progress float64) string {
 		return "🔍" // Magnifying glass for scanning
 	}
 	if strings.Contains(message, "Deleting") || strings.Contains(message, "deletion") {
-		return "🗑️"  // Trash can for deletion
+		return "🗑️" // Trash can for deletion
 	}
 	if strings.Contains(message, "cleaned up") {
-		return "🗑️"  // Trash can for cleanup
+		return "🗑️" // Trash can for cleanup
 	}
 	if strings.Contains(message, "Preparing") {
 		return "⏳" // Hourglass for preparation
 	}
-	
+
 	// Default to processing/working for active operations
 	return "💫" // Dizzy for processing/working
 }
@@ -718,13 +718,13 @@ func getProgressEmoji(message string, progress float64) string {
 // The progress bar features authentic Tokyo Night color gradients and a sweeping cylon animation.
 func (m Model) renderProgressBarWithMessage(message string) string {
 	width := 60 // Increased width for better visual impact
-	
+
 	// Check if this is indeterminate progress (-1)
 	if m.progress < 0 {
 		// Beautiful Tokyo Night animated indeterminate progress
 		now := time.Now().Unix()
 		pos := int(now/1) % width // Move every second
-		
+
 		var segments []string
 		for i := 0; i < width; i++ {
 			distance := ((pos - i + width) % width)
@@ -743,37 +743,37 @@ func (m Model) renderProgressBarWithMessage(message string) string {
 				segments = append(segments, lipgloss.NewStyle().Foreground(lipgloss.Color("#24283b")).Render("░"))
 			}
 		}
-		
+
 		bar := strings.Join(segments, "")
 		emoji := getProgressEmoji(message, -1)
 		progressText := fmt.Sprintf("%s %s Working...", emoji, bar)
-		
+
 		return lipgloss.NewStyle().
 			Align(lipgloss.Center).
 			Render(progressText)
 	}
-	
+
 	// Beautiful gradient progress bar based on percentage
 	percentage := fmt.Sprintf("%.1f%%", m.progress*100)
 	filled := int(m.progress * float64(width))
-	
-	// Calculate cylon position (sweeps back and forth) 
+
+	// Calculate cylon position (sweeps back and forth)
 	cylonPos := m.cylonFrame
 	if cylonPos >= 10 {
 		cylonPos = 20 - cylonPos // Reverse direction for second half
 	}
 	cylonPos = cylonPos * (width - 1) / 10 // Scale to full progress bar width (0 to width-1)
-	
+
 	// Create authentic Tokyo Night gradient segments based on progress
 	var segments []string
 	for i := 0; i < width; i++ {
 		progressPos := float64(i) / float64(width)
-		
+
 		if i < filled {
 			// Filled portion - Tokyo Night rainbow gradient
 			// This creates the signature Tokyo Night color progression
 			var segmentColor lipgloss.Color
-			
+
 			if progressPos < 0.25 {
 				// 0-25% of bar: Tokyo Night Blue → Deep Blue
 				ratio := progressPos * 4 // Scale to 0-1 for this segment
@@ -783,7 +783,7 @@ func (m Model) renderProgressBarWithMessage(message string) string {
 				ratio := (progressPos - 0.25) * 4
 				segmentColor = purpleGradient.GetColor(ratio)
 			} else if progressPos < 0.75 {
-				// 50-75% of bar: Tokyo Night Cyan spectrum  
+				// 50-75% of bar: Tokyo Night Cyan spectrum
 				ratio := (progressPos - 0.50) * 4
 				segmentColor = tealGradient.GetColor(ratio)
 			} else {
@@ -791,7 +791,7 @@ func (m Model) renderProgressBarWithMessage(message string) string {
 				ratio := (progressPos - 0.75) * 4
 				segmentColor = greenGradient.GetColor(ratio)
 			}
-			
+
 			// Cylon overlay effect with Tokyo Night accent
 			if i == cylonPos || i == cylonPos+1 {
 				segments = append(segments, lipgloss.NewStyle().Foreground(lipgloss.Color("#c0caf5")).Render("▓"))
@@ -807,9 +807,9 @@ func (m Model) renderProgressBarWithMessage(message string) string {
 			}
 		}
 	}
-	
+
 	bar := strings.Join(segments, "")
-	
+
 	// Enhanced progress text with Tokyo Night percentage styling
 	var percentageStyle lipgloss.Style
 	if m.progress < 0.25 {
@@ -821,10 +821,10 @@ func (m Model) renderProgressBarWithMessage(message string) string {
 	} else {
 		percentageStyle = lipgloss.NewStyle().Foreground(greenGradient.Start).Bold(true)
 	}
-	
+
 	emoji := getProgressEmoji(message, m.progress)
 	progressText := fmt.Sprintf("%s %s %s", emoji, bar, percentageStyle.Render(percentage))
-	
+
 	return lipgloss.NewStyle().
 		Align(lipgloss.Center).
 		Render(progressText)
@@ -835,8 +835,8 @@ func (m Model) renderProgressBarWithMessage(message string) string {
 func (m Model) renderHeader() string {
 	ascii := asciiStyle.Render(MigrateASCII)
 	title := titleStyle.Render(AppDesc)
-	version := versionStyle.Render(GetSubtitle())  // Use dimmer versionStyle instead of subtitleStyle
-	
+	version := versionStyle.Render(GetSubtitle()) // Use dimmer versionStyle instead of subtitleStyle
+
 	return ascii + "\n" + title + "\n" + version
 }
 
@@ -858,7 +858,7 @@ func (m Model) renderDriveSelect() string {
 		// Show available drives
 		info := infoBoxStyle.Render("Select a drive to mount.")
 		s.WriteString(info + "\n\n")
-		
+
 		// Add LUKS warning
 		luksWarning := warningStyle.Render("⚠️  LUKS encrypted drives must be unlocked manually first")
 		s.WriteString(luksWarning + "\n\n")
@@ -904,15 +904,13 @@ func (m Model) renderError() string {
 
 	// Parse error message for better formatting
 	errorText := m.message
-	
+
 	// Remove "Error: " prefix if present
-	if strings.HasPrefix(errorText, "Error: ") {
-		errorText = strings.TrimPrefix(errorText, "Error: ")
-	}
-	
+	errorText, _ = strings.CutPrefix(errorText, "Error: ")
+
 	// Parse the nested error structure
 	var displayLines []string
-	
+
 	if strings.Contains(errorText, "backup failed: verification phase failed: verification of new files failed:") {
 		// Verification error - format nicely
 		displayLines = []string{
@@ -920,7 +918,7 @@ func (m Model) renderError() string {
 			"Backup completed but file verification failed",
 			"",
 		}
-		
+
 		// Extract the specific error details - find everything after the last ":"
 		lastColonIndex := strings.LastIndex(errorText, ":")
 		if lastColonIndex != -1 && lastColonIndex < len(errorText)-1 {
@@ -965,7 +963,7 @@ func (m Model) renderError() string {
 			errorText,
 		}
 	}
-	
+
 	// Ensure we have at least some content
 	if len(displayLines) == 0 || (len(displayLines) == 1 && displayLines[0] == "") {
 		displayLines = []string{
@@ -975,7 +973,7 @@ func (m Model) renderError() string {
 			"Original message: " + m.message,
 		}
 	}
-	
+
 	// Header
 	s.WriteString(titleStyle.Render("❌ Error") + "\n\n")
 
@@ -991,7 +989,7 @@ func (m Model) renderError() string {
 			s.WriteString(lipgloss.NewStyle().Foreground(textColor).Render(line) + "\n")
 		}
 	}
-	
+
 	s.WriteString("\n")
 
 	// Help text - emphasize manual dismissal
@@ -1049,16 +1047,16 @@ func (m Model) renderHomeFolderSelect() string {
 			visibleFolders = append(visibleFolders, folder)
 		}
 	}
-	
+
 	// Calculate layout with controls at TOP
 	numFolders := len(visibleFolders)
-	
+
 	// Controls FIRST
 	controls := []string{
 		"➡️ Continue",
-		"⬅️ Back", 
+		"⬅️ Back",
 	}
-	
+
 	for i, control := range controls {
 		if m.cursor == i {
 			s.WriteString(selectedMenuItemStyle.Render("❯ "+control) + "\n")
@@ -1066,60 +1064,92 @@ func (m Model) renderHomeFolderSelect() string {
 			s.WriteString(menuItemStyle.Render("  "+control) + "\n")
 		}
 	}
-	
+
 	s.WriteString("\n") // Line between controls and folders
-	
+
 	// Then folders in two columns
 	rowCount := (numFolders + 1) / 2 // Number of rows needed
 
 	// TWO-COLUMN LAYOUT - COMPLETELY REWRITTEN to fix ANSI styling issues
-	for row := 0; row < rowCount; row++ {
+	for row := range rowCount {
 		var leftText, rightText string
 		var leftStyled, rightStyled string
-		
+
 		// Left column: items 0, 1, 2, 3, 4, 5, ... (first half)
 		leftIndex := row
 		if leftIndex < numFolders {
 			folder := visibleFolders[leftIndex]
+
+			// NEW: Enhanced selection indicators based on folder state
+			selectionState := m.getFolderSelectionState(folder)
 			checkbox := "[ ]"
-			if m.selectedFolders[folder.Path] {
-				checkbox = "[✓]"
+			switch selectionState {
+			case "full":
+				checkbox = "[✓]" // Fully selected
+			case "partial":
+				checkbox = "[▲]" // Partially selected (some subfolders)
+			case "none":
+				checkbox = "[ ]" // Not selected
 			}
+
 			sizeText := FormatBytes(folder.Size)
-			leftText = fmt.Sprintf("%s %s (%s)", checkbox, folder.Name, sizeText)
-			
+
+			// NEW: Add drill-down indicator for folders with subfolders
+			drillIndicator := ""
+			if folder.HasSubfolders {
+				drillIndicator = " →"
+			}
+
+			leftText = fmt.Sprintf("%s %s (%s)%s", checkbox, folder.Name, sizeText, drillIndicator)
+
 			// Adjust cursor for controls offset
 			folderCursor := leftIndex + len(controls)
 			if m.cursor == folderCursor {
-				leftStyled = selectedMenuItemStyle.Render("❯ "+leftText)
+				leftStyled = selectedMenuItemStyle.Render("❯ " + leftText)
 			} else {
-				leftStyled = menuItemStyle.Render("  "+leftText)
+				leftStyled = menuItemStyle.Render("  " + leftText)
 			}
 		}
-		
+
 		// Right column: items 6, 7, 8, 9, 10, 11 (second half)
 		rightIndex := row + rowCount
 		if rightIndex < numFolders {
 			folder := visibleFolders[rightIndex]
+
+			// NEW: Enhanced selection indicators based on folder state
+			selectionState := m.getFolderSelectionState(folder)
 			checkbox := "[ ]"
-			if m.selectedFolders[folder.Path] {
-				checkbox = "[✓]"
+			switch selectionState {
+			case "full":
+				checkbox = "[✓]" // Fully selected
+			case "partial":
+				checkbox = "[▲]" // Partially selected (some subfolders)
+			case "none":
+				checkbox = "[ ]" // Not selected
 			}
+
 			sizeText := FormatBytes(folder.Size)
-			rightText = fmt.Sprintf("%s %s (%s)", checkbox, folder.Name, sizeText)
-			
+
+			// NEW: Add drill-down indicator for folders with subfolders
+			drillIndicator := ""
+			if folder.HasSubfolders {
+				drillIndicator = " →"
+			}
+
+			rightText = fmt.Sprintf("%s %s (%s)%s", checkbox, folder.Name, sizeText, drillIndicator)
+
 			// Adjust cursor for controls offset
 			folderCursor := rightIndex + len(controls)
 			if m.cursor == folderCursor {
-				rightStyled = selectedMenuItemStyle.Render("❯ "+rightText)
+				rightStyled = selectedMenuItemStyle.Render("❯ " + rightText)
 			} else {
-				rightStyled = menuItemStyle.Render("  "+rightText)
+				rightStyled = menuItemStyle.Render("  " + rightText)
 			}
 		}
-		
+
 		// Build the final line using lipgloss.JoinHorizontal for proper alignment
 		if rightStyled != "" {
-			line := lipgloss.JoinHorizontal(lipgloss.Left, 
+			line := lipgloss.JoinHorizontal(lipgloss.Left,
 				lipgloss.NewStyle().Width(50).Render(leftStyled),
 				rightStyled,
 			)
@@ -1144,11 +1174,134 @@ func (m Model) renderHomeFolderSelect() string {
 		BorderForeground(blueGradient.Start).
 		Padding(0, 2).
 		Align(lipgloss.Center)
-	
+
 	s.WriteString(totalSizeStyle.Render(totalSizeText) + "\n\n")
 
 	// Compact help text
 	help := helpStyle.Render("↑/↓: navigate • space: toggle • A: all • X: none")
+	s.WriteString(help)
+
+	// Center the content with beautiful border
+	content := borderStyle.Width(m.width - 8).Render(s.String())
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
+}
+
+// renderHomeSubfolderSelect renders the subfolder selection screen with breadcrumb navigation.
+// Shows the current folder context and allows selection of individual subfolders.
+func (m Model) renderHomeSubfolderSelect() string {
+	var s strings.Builder
+
+	// Header with breadcrumb navigation
+	breadcrumbText := strings.Join(m.folderBreadcrumb, " / ")
+	s.WriteString(titleStyle.Render("📁 "+breadcrumbText) + "\n")
+
+	// Get current subfolders
+	subfolders := m.getCurrentSubfolders()
+
+	// If no subfolders cached (shouldn't happen but safety check)
+	if len(subfolders) == 0 {
+		s.WriteString(warningStyle.Render("⚠️  No subfolders found or still loading...") + "\n")
+		help := helpStyle.Render("Press ESC to go back")
+		s.WriteString("\n" + help)
+		content := borderStyle.Width(m.width - 8).Render(s.String())
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
+	}
+
+	// Parent folder info
+	parentName := filepath.Base(m.currentFolderPath)
+	s.WriteString(fmt.Sprintf("Select subfolders within %s:\n\n", parentName))
+
+	// Controls FIRST (Continue, Back)
+	controls := []string{
+		"➡️ Continue",
+		"⬅️ Back",
+	}
+
+	for i, control := range controls {
+		if m.cursor == i {
+			s.WriteString(selectedMenuItemStyle.Render("❯ "+control) + "\n")
+		} else {
+			s.WriteString(menuItemStyle.Render("  "+control) + "\n")
+		}
+	}
+
+	s.WriteString("\n") // Line between controls and subfolders
+
+	// Then subfolders in two columns (similar to main folder view)
+	numSubfolders := len(subfolders)
+	rowCount := (numSubfolders + 1) / 2
+
+	for row := 0; row < rowCount; row++ {
+		var leftStyled, rightStyled string
+
+		// Left column
+		leftIndex := row
+		if leftIndex < numSubfolders {
+			subfolder := subfolders[leftIndex]
+			checkbox := "[ ]"
+			if m.selectedFolders[subfolder.Path] {
+				checkbox = "[✓]"
+			}
+			sizeText := FormatBytes(subfolder.Size)
+			leftText := fmt.Sprintf("%s %s (%s)", checkbox, subfolder.Name, sizeText)
+
+			// Adjust cursor for controls offset
+			subfolderCursor := leftIndex + len(controls)
+			if m.cursor == subfolderCursor {
+				leftStyled = selectedMenuItemStyle.Render("❯ " + leftText)
+			} else {
+				leftStyled = menuItemStyle.Render("  " + leftText)
+			}
+		}
+
+		// Right column
+		rightIndex := row + rowCount
+		if rightIndex < numSubfolders {
+			subfolder := subfolders[rightIndex]
+			checkbox := "[ ]"
+			if m.selectedFolders[subfolder.Path] {
+				checkbox = "[✓]"
+			}
+			sizeText := FormatBytes(subfolder.Size)
+			rightText := fmt.Sprintf("%s %s (%s)", checkbox, subfolder.Name, sizeText)
+
+			// Adjust cursor for controls offset
+			subfolderCursor := rightIndex + len(controls)
+			if m.cursor == subfolderCursor {
+				rightStyled = selectedMenuItemStyle.Render("❯ " + rightText)
+			} else {
+				rightStyled = menuItemStyle.Render("  " + rightText)
+			}
+		}
+
+		// Build the final line
+		if rightStyled != "" {
+			line := lipgloss.JoinHorizontal(lipgloss.Left,
+				lipgloss.NewStyle().Width(50).Render(leftStyled),
+				rightStyled,
+			)
+			s.WriteString(line + "\n")
+		} else {
+			s.WriteString(leftStyled + "\n")
+		}
+	}
+
+	s.WriteString("\n") // Line after subfolders
+
+	// Total backup size display
+	totalSizeText := fmt.Sprintf("Total Backup Size: %s", FormatBytes(m.totalBackupSize))
+	totalSizeStyle := lipgloss.NewStyle().
+		Foreground(blueGradient.End).
+		Bold(true).
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(blueGradient.Start).
+		Padding(0, 2).
+		Align(lipgloss.Center)
+
+	s.WriteString(totalSizeStyle.Render(totalSizeText) + "\n\n")
+
+	// Help text
+	help := helpStyle.Render("↑/↓: navigate • space: toggle • esc: back to parent")
 	s.WriteString(help)
 
 	// Center the content with beautiful border

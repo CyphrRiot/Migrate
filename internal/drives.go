@@ -31,6 +31,7 @@ import (
 
 // HomeFolderInfo represents metadata about a directory within the user's home folder.
 // Used for selective backup operations to track folder size, visibility, and user selections.
+// Now supports subfolder navigation for granular backup control.
 type HomeFolderInfo struct {
 	Name          string // Directory name (e.g., "Documents", ".config")
 	Path          string // Full absolute path to the directory
@@ -38,6 +39,11 @@ type HomeFolderInfo struct {
 	IsVisible     bool   // false for dotfiles/dotdirs (hidden folders)
 	Selected      bool   // Current user selection state for backup inclusion
 	AlwaysInclude bool   // true for dotdirs (automatically included, non-selectable)
+	
+	// NEW: Sub-folder support for granular selection
+	HasSubfolders bool               // true if this folder contains discoverable subfolders
+	Subfolders    []HomeFolderInfo   // Only 1 level deep, populated on-demand
+	ParentPath    string             // For breadcrumb navigation (empty for root level)
 }
 
 // DriveInfo contains metadata about an external drive available for backup operations.
@@ -254,16 +260,81 @@ func checkBackupSpaceRequirements(externalDriveSize string) error {
 }
 
 // Check if external drive has enough space for selective home backup
-func CheckSelectiveHomeBackupSpaceRequirements(selectedFolders []HomeFolderInfo, externalDriveSize string) error {
-	// Calculate total size of selected folders
+// CheckSelectiveHomeBackupSpaceRequirements validates space for selective home backup.
+// FIXED: Now properly handles hierarchical folder selections from the UI selection map.
+func CheckSelectiveHomeBackupSpaceRequirements(homeFolders []HomeFolderInfo, selectedFolders map[string]bool, subfolderCache map[string][]HomeFolderInfo, externalDriveSize string) error {
+	// Use the same logic as calculateTotalBackupSize() for consistency
 	var totalSelectedSize int64
-	for _, folder := range selectedFolders {
+	processedParents := make(map[string]bool)
+	
+	for _, folder := range homeFolders {
 		if folder.AlwaysInclude {
-			// Hidden folders are always included
+			// Hidden folders are always included (dotfiles/dotdirs)
 			totalSelectedSize += folder.Size
-		} else if folder.Selected {
-			// Visible folders only if selected
-			totalSelectedSize += folder.Size
+		} else if folder.IsVisible {
+			// Handle visible folders with potential subfolders
+			if folder.HasSubfolders {
+				// Check if any subfolders are cached (user has drilled down)
+				if subfolders, exists := subfolderCache[folder.Path]; exists {
+					// User has drilled down - calculate based on individual subfolder selections
+					subfolderTotal := int64(0)
+					anySubfolderSelected := false
+					
+					for _, subfolder := range subfolders {
+						if subfolder.Size > 0 && selectedFolders[subfolder.Path] {
+							subfolderTotal += subfolder.Size
+							anySubfolderSelected = true
+						}
+					}
+					
+					// Only add subfolders if at least one is selected
+					if anySubfolderSelected {
+						totalSelectedSize += subfolderTotal
+					}
+					processedParents[folder.Path] = true
+				} else {
+					// No subfolders cached - use parent folder selection
+					if selectedFolders[folder.Path] {
+						totalSelectedSize += folder.Size
+					}
+					processedParents[folder.Path] = true
+				}
+			} else {
+				// No subfolders - use parent folder selection directly
+				if selectedFolders[folder.Path] {
+					totalSelectedSize += folder.Size
+				}
+				processedParents[folder.Path] = true
+			}
+		}
+	}
+	
+	// Additional: Add any individually selected subfolders whose parents weren't processed
+	for folderPath, isSelected := range selectedFolders {
+		if !isSelected {
+			continue
+		}
+		
+		// Check if this is a subfolder (has a parent path that was processed)
+		parentProcessed := false
+		for processedParent := range processedParents {
+			if strings.HasPrefix(folderPath, processedParent+"/") {
+				parentProcessed = true
+				break
+			}
+		}
+		
+		// If no parent was processed, this might be a standalone subfolder selection
+		if !parentProcessed {
+			// Find the subfolder in cache and add its size
+			for _, cachedSubfolders := range subfolderCache {
+				for _, subfolder := range cachedSubfolders {
+					if subfolder.Path == folderPath && subfolder.Size > 0 {
+						totalSelectedSize += subfolder.Size
+						break
+					}
+				}
+			}
 		}
 	}
 	
@@ -737,25 +808,10 @@ func mountDriveForBackup(drive DriveInfo) tea.Cmd {
 }
 
 // Mount any external drive for selective home backup with accurate space checking
-func mountDriveForSelectiveHomeBackup(drive DriveInfo, homeFolders []HomeFolderInfo, selectedFolders map[string]bool) tea.Cmd {
+func mountDriveForSelectiveHomeBackup(drive DriveInfo, homeFolders []HomeFolderInfo, selectedFolders map[string]bool, subfolderCache map[string][]HomeFolderInfo) tea.Cmd {
 	return func() tea.Msg {
-		// Create a list with correct selection state for space calculation
-		foldersWithSelections := make([]HomeFolderInfo, len(homeFolders)) 
-		copy(foldersWithSelections, homeFolders)
-		
-		// Update the Selected field based on current user selections
-		for i := range foldersWithSelections {
-			if foldersWithSelections[i].IsVisible {
-				// For visible folders, use user selection
-				foldersWithSelections[i].Selected = selectedFolders[foldersWithSelections[i].Path]
-			} else {
-				// Hidden folders are always included
-				foldersWithSelections[i].Selected = true
-			}
-		}
-		
 		// FIRST: Check if external drive has sufficient space for SELECTED folders only
-		err := CheckSelectiveHomeBackupSpaceRequirements(foldersWithSelections, drive.Size)
+		err := CheckSelectiveHomeBackupSpaceRequirements(homeFolders, selectedFolders, subfolderCache, drive.Size)
 		if err != nil {
 			return BackupDriveStatus{
 				error: err,
@@ -1092,6 +1148,63 @@ func PerformBackupUnmount() tea.Cmd {
 	}
 }
 
+// discoverSubfolders analyzes subdirectories within a parent folder for granular selection.
+// Only scans one level deep to avoid performance issues with deep directory trees.
+// Returns a list of immediate subdirectories with their sizes and metadata.
+func discoverSubfolders(parentPath string) ([]HomeFolderInfo, error) {
+	entries, err := os.ReadDir(parentPath)
+	if err != nil {
+		return nil, err
+	}
+	
+	var subfolders []HomeFolderInfo
+	
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue // Skip files, only process directories
+		}
+		
+		name := entry.Name()
+		path := filepath.Join(parentPath, name)
+		isHidden := strings.HasPrefix(name, ".")
+		
+		// Calculate folder size - with error handling
+		size, err := calculateDirectorySize(path)
+		if err != nil {
+			size = 0 // Skip folders we can't access
+		}
+		
+		// Don't show empty subdirectories for cleaner UI
+		if size == 0 {
+			continue
+		}
+		
+		subfolder := HomeFolderInfo{
+			Name:          name,
+			Path:          path,
+			Size:          size,
+			IsVisible:     !isHidden,
+			Selected:      false, // Subfolders start unselected
+			AlwaysInclude: false, // Subfolders are never auto-included
+			HasSubfolders: false, // We only go 1 level deep
+			Subfolders:    nil,   // No recursive nesting
+			ParentPath:    parentPath, // Set parent for breadcrumb navigation
+		}
+		
+		subfolders = append(subfolders, subfolder)
+	}
+	
+	// Sort: visible folders first, then by name
+	sort.Slice(subfolders, func(i, j int) bool {
+		if subfolders[i].IsVisible != subfolders[j].IsVisible {
+			return subfolders[i].IsVisible // visible first
+		}
+		return subfolders[i].Name < subfolders[j].Name
+	})
+	
+	return subfolders, nil
+}
+
 // discoverHomeFolders analyzes the user's home directory for selective backup operations.
 // Scans all directories, calculates sizes, and categorizes them as visible or hidden.
 // Logs details to the application log file for debugging purposes.
@@ -1150,6 +1263,25 @@ func discoverHomeFolders() ([]HomeFolderInfo, error) {
 			}
 		}
 		
+		// Check if this folder has subdirectories (for drill-down UI)
+		hasSubfolders := false
+		if !isHidden && size > 0 { // Only check visible, non-empty folders
+			subEntries, subErr := os.ReadDir(path)
+			if subErr == nil {
+				for _, subEntry := range subEntries {
+					if subEntry.IsDir() {
+						// Check if any subdirectory has content
+						subPath := filepath.Join(path, subEntry.Name())
+						subSize, subSizeErr := calculateDirectorySize(subPath)
+						if subSizeErr == nil && subSize > 0 {
+							hasSubfolders = true
+							break
+						}
+					}
+				}
+			}
+		}
+		
 		folder := HomeFolderInfo{
 			Name:          name,
 			Path:          path,
@@ -1157,6 +1289,9 @@ func discoverHomeFolders() ([]HomeFolderInfo, error) {
 			IsVisible:     !isHidden,
 			Selected:      true,  // Default: all selected
 			AlwaysInclude: isHidden, // Dotdirs always included
+			HasSubfolders: hasSubfolders, // NEW: Indicates drill-down capability
+			Subfolders:    nil,           // NEW: Populated on-demand
+			ParentPath:    "",            // NEW: Empty for root level
 		}
 		
 		folders = append(folders, folder)
@@ -1183,6 +1318,13 @@ type HomeFoldersDiscovered struct {
 	error   error            // Non-nil if directory scanning failed
 }
 
+// SubfoldersDiscovered is a Bubble Tea message containing subfolder analysis results.
+type SubfoldersDiscovered struct {
+	parentPath string           // Path of the parent folder that was scanned
+	subfolders []HomeFolderInfo // Discovered subdirectories with size and metadata
+	error      error            // Non-nil if subdirectory scanning failed
+}
+
 // DiscoverHomeFoldersCmd creates a Bubble Tea command to asynchronously analyze the home directory.
 // Returns a HomeFoldersDiscovered message when the analysis completes.
 func DiscoverHomeFoldersCmd() tea.Cmd {
@@ -1191,6 +1333,19 @@ func DiscoverHomeFoldersCmd() tea.Cmd {
 		return HomeFoldersDiscovered{
 			folders: folders,
 			error:   err,
+		}
+	}
+}
+
+// DiscoverSubfoldersCmd creates a Bubble Tea command to asynchronously analyze a specific folder.
+// Returns a SubfoldersDiscovered message when the analysis completes.
+func DiscoverSubfoldersCmd(parentPath string) tea.Cmd {
+	return func() tea.Msg {
+		subfolders, err := discoverSubfolders(parentPath)
+		return SubfoldersDiscovered{
+			parentPath: parentPath,
+			subfolders: subfolders,
+			error:      err,
 		}
 	}
 }

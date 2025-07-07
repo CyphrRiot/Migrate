@@ -28,13 +28,14 @@ import (
 // BackupConfig contains all configuration parameters for a backup operation.
 // Supports both full system backups and selective home directory backups.
 type BackupConfig struct {
-	SourcePath        string              // Root directory to backup (e.g., "/", "/home/user")
-	DestinationPath   string              // Target directory for backup (mount point)
-	ExcludePatterns   []string            // Glob patterns for files/directories to exclude
-	BackupType        string              // Human-readable backup type ("Complete System", "Home Directory")
-	IsSelectiveBackup bool                // true for user-selected folder backups
-	SelectedFolders   map[string]bool     // folder path -> selected state (for selective backups)
-	HomeFolders       []HomeFolderInfo    // metadata about home folders (for selective backups)
+	SourcePath          string              // Root directory to backup (e.g., "/", "/home/user")
+	DestinationPath     string              // Target directory for backup (mount point)
+	ExcludePatterns     []string            // Glob patterns for files/directories to exclude
+	BackupType          string              // Human-readable backup type ("Complete System", "Home Directory")
+	IsSelectiveBackup   bool                // true for user-selected folder backups
+	SelectedFolders     map[string]bool     // folder path -> selected state (for selective backups)
+	HomeFolders         []HomeFolderInfo    // metadata about home folders (for selective backups)
+	SelectedSubfolders  map[string]bool     // explicitly selected subfolders for smart inclusion (hierarchical support)
 }
 
 // BackupFolderList contains folder selection information from selective home backups.
@@ -276,34 +277,49 @@ func performPureGoBackup(config BackupConfig, logFile *os.File) error {
 		}
 	}
 
-	// SELECTIVE BACKUP: Handle folder-specific backup
+	// SELECTIVE BACKUP: Handle folder-specific backup with HIERARCHICAL LOGIC
 	if config.IsSelectiveBackup {
 		if logFile != nil {
 			fmt.Fprintf(logFile, "=== SELECTIVE BACKUP MODE ===\n")
 			fmt.Fprintf(logFile, "Selected folders: %+v\n", config.SelectedFolders)
+			fmt.Fprintf(logFile, "HomeFolders metadata: %d folders\n", len(config.HomeFolders))
 			fmt.Fprintf(logFile, "DEBUG: Folder selection details:\n")
 			for folderPath, isSelected := range config.SelectedFolders {
 				fmt.Fprintf(logFile, "  Folder: '%s' -> Selected: %t\n", folderPath, isSelected)
 			}
 		}
 		
-		// SIMPLE APPROACH: Do full backup but with exclusions for unselected folders
-		// Build exclusion patterns for unselected folders
+		// BULLETPROOF HIERARCHICAL EXCLUSION LOGIC
+		// Build exclusion patterns that respect subfolder selections
 		enhancedExcludes := make([]string, len(config.ExcludePatterns))
 		copy(enhancedExcludes, config.ExcludePatterns)
 		
-		// Add unselected folders to exclusion patterns
+		// SIMPLE APPROACH: Add every deselected folder to exclusions
+		// No complex logic - if it's not selected, exclude it
 		for folderPath, isSelected := range config.SelectedFolders {
 			if !isSelected {
-				// folderPath is already absolute path like "/home/grendel/Videos" 
-				// Don't join with homeDir again - use it directly
 				enhancedExcludes = append(enhancedExcludes, folderPath)
 				if logFile != nil {
-					fmt.Fprintf(logFile, "EXCLUDING unselected folder: %s\n", folderPath)
+					fmt.Fprintf(logFile, "EXCLUDING deselected folder: %s\n", folderPath)
 				}
-			} else {
-				if logFile != nil {
-					fmt.Fprintf(logFile, "INCLUDING selected folder: %s\n", folderPath)
+			}
+		}
+		
+		// SIMPLE INCLUSION: Only put EXPLICITLY selected individual subfolders
+		// Don't include parent folders at all - they'll be handled by exclusions
+		selectedSubfolders := make(map[string]bool)
+		for folderPath, isSelected := range config.SelectedFolders {
+			if isSelected {
+				// Check if this is actually a subfolder (contains "/" after home dir)
+				if strings.Count(folderPath, "/") > 3 { // /home/user/parent/subfolder = 4 slashes
+					selectedSubfolders[folderPath] = true
+					if logFile != nil {
+						fmt.Fprintf(logFile, "SELECTED subfolder for inclusion: %s\n", folderPath)
+					}
+				} else {
+					if logFile != nil {
+						fmt.Fprintf(logFile, "SELECTED root folder (no special inclusion needed): %s\n", folderPath)
+					}
 				}
 			}
 		}
@@ -312,13 +328,16 @@ func performPureGoBackup(config BackupConfig, logFile *os.File) error {
 		config.ExcludePatterns = enhancedExcludes
 		if logFile != nil {
 			fmt.Fprintf(logFile, "Enhanced exclusion patterns: %v\n", enhancedExcludes)
+			fmt.Fprintf(logFile, "Selected subfolders for inclusion: %v\n", selectedSubfolders)
 		}
-		
-		// Now run NORMAL backup with enhanced exclusions - SAME AS FULL BACKUP
 	}
 
-	// REGULAR BACKUP: Sync entire source directory
-	err = syncDirectoriesWithExclusions(config.SourcePath, config.DestinationPath, config.ExcludePatterns, logFile)
+	// REGULAR BACKUP: Sync entire source directory with smart hierarchical support
+	if config.IsSelectiveBackup {
+		err = syncDirectoriesWithSelectiveInclusions(config.SourcePath, config.DestinationPath, config.ExcludePatterns, config.SelectedSubfolders, logFile)
+	} else {
+		err = syncDirectoriesWithExclusions(config.SourcePath, config.DestinationPath, config.ExcludePatterns, logFile)
+	}
 	if err != nil {
 		if logFile != nil {
 			fmt.Fprintf(logFile, "ERROR during sync: %v\n", err)
@@ -1102,6 +1121,30 @@ func runVerificationSilently(operationType, mountPoint string) {
 		username := getCurrentUser()
 		sourcePath = "/home/" + username
 		
+	case "auto_verify":
+		// Auto-detection: Set source path based on detected backup type
+		if logFile != nil {
+			fmt.Fprintf(logFile, "Auto-detected backup type: %s\n", backupType)
+		}
+		
+		if backupType == "system" {
+			sourcePath = "/"
+			if logFile != nil {
+				fmt.Fprintf(logFile, "Auto-verify: Verifying complete system backup\n")
+			}
+		} else if backupType == "home" {
+			// Get the actual user's home directory
+			username := getCurrentUser()
+			sourcePath = "/home/" + username
+			if logFile != nil {
+				fmt.Fprintf(logFile, "Auto-verify: Verifying home directory backup for user: %s\n", username)
+			}
+		} else {
+			tuiBackupCompleted = true
+			tuiBackupError = fmt.Errorf("cannot auto-verify: unknown backup type '%s'", backupType)
+			return
+		}
+		
 	default:
 		tuiBackupCompleted = true
 		tuiBackupError = fmt.Errorf("unknown verification type: %s", operationType)
@@ -1174,6 +1217,17 @@ func runVerificationSilently(operationType, mountPoint string) {
 		tuiBackupCompleted = true
 		tuiBackupError = nil
 	}
+}
+
+// hasSubfolders checks if a given folder path has subfolders in the HomeFolders metadata.
+// This is used to distinguish between parent folders and actual subfolders for smart inclusion logic.
+func hasSubfolders(folderPath string, homeFolders []HomeFolderInfo) bool {
+	for _, folder := range homeFolders {
+		if folder.Path == folderPath && folder.HasSubfolders {
+			return true
+		}
+	}
+	return false
 }
 
 // Simulate progress for demo purposes

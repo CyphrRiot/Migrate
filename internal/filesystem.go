@@ -35,6 +35,303 @@ func syncDirectories(src, dst string, logFile *os.File) error {
 	return syncDirectoriesWithExclusions(src, dst, ExcludePatterns, logFile)
 }
 
+// syncDirectoriesWithSelectiveInclusions performs hierarchical-aware directory synchronization.
+// This enhanced version properly handles cases where parent folders are excluded but specific
+// subfolders need to be included (hierarchical selection from the UI).
+// 
+// Parameters:
+//   - src: Source directory path
+//   - dst: Destination directory path  
+//   - excludePatterns: Standard exclusion patterns (cache, etc.)
+//   - selectedSubfolders: Map of explicitly selected subfolders to include despite parent exclusions
+//   - logFile: Log file for detailed operation tracking
+//
+// This function solves the critical issue where traditional exclusion logic would exclude
+// parent folders and all their contents, even when specific subfolders should be included.
+func syncDirectoriesWithSelectiveInclusions(src, dst string, excludePatterns []string, selectedSubfolders map[string]bool, logFile *os.File) error {
+	// Check for cancellation before starting
+	if shouldCancelBackup() {
+		return fmt.Errorf("operation canceled")
+	}
+
+	// Get the device ID of the source directory to enforce -x (no crossing filesystem boundaries)
+	srcStat, err := os.Lstat(src)
+	if err != nil {
+		return err
+	}
+	srcSysStat, ok := srcStat.Sys().(*syscall.Stat_t)
+	if !ok {
+		return fmt.Errorf("cannot get stat for %s", src)
+	}
+	srcDev := srcSysStat.Dev
+
+	if logFile != nil {
+		fmt.Fprintf(logFile, "Starting HIERARCHICAL directory walk of %s\n", src)
+		fmt.Fprintf(logFile, "Selected subfolders for smart inclusion: %v\n", selectedSubfolders)
+	}
+
+	// Counter to periodically check for cancellation and show progress
+	fileCounter := 0
+	localFilesFound := 0  // Local counter to batch atomic operations
+
+	// Pre-compile exclusion patterns for performance (avoid string ops in hot path)
+	exclusionPrefixes := make([]string, len(excludePatterns))
+	for i, pattern := range excludePatterns {
+		exclusionPrefixes[i] = strings.TrimSuffix(pattern, "/*")
+	}
+	
+	if logFile != nil {
+		fmt.Fprintf(logFile, "Exclusion patterns compiled: %v\n", exclusionPrefixes)
+	}
+
+	// Walk through the source directory efficiently with hierarchical awareness
+	err = filepath.WalkDir(src, func(path string, d os.DirEntry, err error) error {
+		// Check for cancellation less frequently for better performance  
+		fileCounter++
+		if fileCounter%5000 == 0 && shouldCancelBackup() { // Check every 5000 files for responsiveness
+			return fmt.Errorf("operation canceled")
+		}
+
+		// Update current directory for TUI display much more frequently
+		if fileCounter%500 == 0 { // Update display every 500 files instead of 10k
+			currentDir := filepath.Dir(path)
+			currentDirectory = currentDir
+		}
+
+		// Log current directory being processed every 10k files to track slowdowns
+		if fileCounter%10000 == 0 && logFile != nil {
+			currentDir := filepath.Dir(path)
+			fmt.Fprintf(logFile, "Processing directory: %s (file #%d: %s)\n", currentDir, fileCounter, filepath.Base(path))
+		}
+
+		if err != nil {
+			if logFile != nil {
+				fmt.Fprintf(logFile, "Skip error path %s: %v\n", path, err)
+			}
+			// Skip permission errors but continue - don't hang on problematic directories
+			return nil
+		}
+
+		// BULLETPROOF HIERARCHICAL SELECTION LOGIC
+		// Step 1: Check explicit subfolder inclusions FIRST (these override exclusions)
+		isExplicitSubfolderInclude := false
+		for selectedPath := range selectedSubfolders {
+			if strings.HasPrefix(path, selectedPath) {
+				isExplicitSubfolderInclude = true
+				if logFile != nil && fileCounter%10000 == 0 {
+					fmt.Fprintf(logFile, "EXPLICIT SUBFOLDER INCLUDE: %s (matches: %s)\n", path, selectedPath)
+				}
+				break
+			}
+		}
+
+		// Step 2: If not an explicit include, apply ALL exclusions strictly
+		if !isExplicitSubfolderInclude {
+			for _, prefix := range exclusionPrefixes {
+				// Convert to absolute path for proper matching
+				var fullPattern string
+				if strings.HasPrefix(prefix, "/") {
+					// Absolute path pattern
+					fullPattern = prefix
+				} else {
+					// Relative pattern - make it relative to source
+					fullPattern = filepath.Join(src, prefix)
+				}
+				
+				// STRICT EXCLUSION: If path matches ANY exclusion pattern, exclude it immediately
+				if strings.HasPrefix(path, fullPattern) {
+					if d.IsDir() {
+						if logFile != nil && fileCounter%1000 == 0 {
+							fmt.Fprintf(logFile, "EXCLUDING DIRECTORY: %s (pattern: %s)\n", path, fullPattern)
+						}
+						return filepath.SkipDir
+					} else {
+						if logFile != nil && fileCounter%10000 == 0 {
+							fmt.Fprintf(logFile, "EXCLUDING FILE: %s (pattern: %s)\n", path, fullPattern)
+						}
+						return nil
+					}
+				}
+			}
+		}
+
+		// Compute the destination path
+		relPath, err := filepath.Rel(src, path)
+		if err != nil {
+			return nil
+		}
+		dstPath := filepath.Join(dst, relPath)
+
+		// Handle directories
+		if d.IsDir() {
+			fi, err := os.Lstat(path)
+			if err != nil {
+				if logFile != nil {
+					fmt.Fprintf(logFile, "Warning: could not stat directory %s: %v\n", path, err)
+				}
+				return nil // Skip this directory but continue
+			}
+			stat, ok := fi.Sys().(*syscall.Stat_t)
+			if !ok {
+				if logFile != nil {
+					fmt.Fprintf(logFile, "Warning: could not get stat info for %s\n", path)
+				}
+				return nil
+			}
+			
+			// Skip if on a different filesystem (-x option) BUT allow /home even if different subvolume
+			if stat.Dev != srcDev {
+				// Allow /home directory even if it's on different btrfs subvolume
+				if strings.HasPrefix(path, "/home") {
+					if logFile != nil {
+						fmt.Fprintf(logFile, "Allowing /home on different filesystem (likely btrfs subvolume): %s\n", path)
+					}
+				} else {
+					if logFile != nil {
+						fmt.Fprintf(logFile, "Skipping different filesystem: %s\n", path)
+					}
+					return filepath.SkipDir
+				}
+			}
+
+			// Create the directory if it doesn't exist using MkdirAll for safety
+			err = os.MkdirAll(dstPath, fi.Mode())
+			if err != nil {
+				if logFile != nil {
+					fmt.Fprintf(logFile, "ERROR: Failed to create directory %s: %v (continuing)\n", dstPath, err)
+				}
+				// Continue processing - don't skip the directory contents!
+			} else {
+				// Set ownership and timestamps only if directory creation succeeded
+				os.Lchown(dstPath, int(stat.Uid), int(stat.Gid))
+				os.Chtimes(dstPath, fi.ModTime(), fi.ModTime())
+			}
+			return nil // Continue processing directory contents
+		}
+
+		// Handle symbolic links
+		if d.Type()&os.ModeSymlink != 0 {
+			target, err := os.Readlink(path)
+			if err != nil {
+				return nil
+			}
+			os.Symlink(target, dstPath)
+			return nil
+		}
+
+		// Handle regular files with smart tracking (same as original function)
+		if d.Type().IsRegular() {
+			// Count this file in our local counter (batch atomic operations)
+			localFilesFound++
+			
+			// Log slow file processing to identify bottlenecks
+			if localFilesFound%1000 == 0 && logFile != nil {
+				if info, err := d.Info(); err == nil {
+					fmt.Fprintf(logFile, "Processing file %d: %s (size: %s)\n", localFilesFound, path, FormatBytes(info.Size()))
+				} else {
+					fmt.Fprintf(logFile, "Processing file %d: %s\n", localFilesFound, path)
+				}
+			}
+			
+			// Batch update atomic counter every 1000 files for performance
+			if localFilesFound%1000 == 0 {
+				atomic.AddInt64(&totalFilesFound, 1000)
+				if logFile != nil && localFilesFound%10000 == 0 { // Log every 10k files
+					fmt.Fprintf(logFile, "Processed %s files...\n", FormatNumber(atomic.LoadInt64(&totalFilesFound)))
+				}
+			}
+
+			// Quick paths for known scenarios
+			// PERFORMANCE OPTIMIZATION: Use faster file existence check
+			dstStat, err := os.Stat(dstPath)
+			if os.IsNotExist(err) {
+				// Destination doesn't exist - definitely need to copy
+				err = copyFileEfficient(path, dstPath)
+				if err != nil && logFile != nil {
+					fmt.Fprintf(logFile, "Error copying %s: %v\n", path, err)
+				} else {
+					atomic.AddInt64(&filesCopied, 1)
+					// Track copied files for verification (thread-safe)
+					copiedFilesListMutex.Lock()
+					copiedFilesList = append(copiedFilesList, path)
+					copiedFilesListMutex.Unlock()
+					if logFile != nil && filesCopied%1000 == 0 { // Log every 1000 files instead of 100
+						fmt.Fprintf(logFile, "Copied %s files, skipped %s identical files\n",
+							FormatNumber(filesCopied), FormatNumber(filesSkipped))
+					}
+				}
+				return nil
+			}
+
+			// Optimize file comparison for large files - get source info ONCE
+			// PERFORMANCE OPTIMIZATION: Get source info first, then use it efficiently  
+			srcInfo, err := d.Info()
+			if err != nil {
+				return nil // Skip files we can't stat
+			}
+			
+			// LARGE FILE FAST-PATH: For large files, use optimized comparison
+			if dstStat.Size() > 500*1024*1024 { // 500MB threshold
+				// For large files, do immediate size comparison without extra syscalls
+				if srcInfo.Size() == dstStat.Size() {
+					atomic.AddInt64(&filesSkipped, 1)
+					if logFile != nil && filesSkipped%100 == 0 {
+						fmt.Fprintf(logFile, "LARGE FILE FAST-SKIP: %s (size: %s) - sizes match\n", path, FormatBytes(dstStat.Size()))
+					}
+					return nil
+				}
+				// Sizes don't match - fall through to copy
+			} else {
+				// Regular file size comparison
+				if srcInfo.Size() == dstStat.Size() {
+					atomic.AddInt64(&filesSkipped, 1)
+					if logFile != nil && filesSkipped%500 == 0 { // Less frequent logging
+						fmt.Fprintf(logFile, "Skipped %s identical files so far...\n", FormatNumber(filesSkipped))
+					}
+					return nil
+				}
+			}
+
+			// Files are different - copy
+			err = copyFileEfficient(path, dstPath)
+			if err != nil && logFile != nil {
+				fmt.Fprintf(logFile, "Error copying %s: %v\n", path, err)
+			} else {
+				atomic.AddInt64(&filesCopied, 1)
+				// Track copied files for verification (thread-safe)
+				copiedFilesListMutex.Lock()
+				copiedFilesList = append(copiedFilesList, path)
+				copiedFilesListMutex.Unlock()
+				if logFile != nil && filesCopied%100 == 0 {
+					fmt.Fprintf(logFile, "Copied %s files, skipped %s identical files\n",
+						FormatNumber(filesCopied), FormatNumber(filesSkipped))
+				}
+			}
+			return nil
+		}
+
+		// Skip special files
+		return nil
+	})
+
+	// Final batch update for any remaining files not yet added to atomic counter
+	remainingFiles := localFilesFound % 1000
+	if remainingFiles > 0 {
+		atomic.AddInt64(&totalFilesFound, int64(remainingFiles))
+	}
+
+	// Mark directory walk as complete
+	directoryWalkComplete = true
+
+	// Log final summary
+	if logFile != nil {
+		fmt.Fprintf(logFile, "Hierarchical sync completed: copied %s files, skipped %s identical files, processed %s total\n",
+			FormatNumber(filesCopied), FormatNumber(filesSkipped), FormatNumber(totalFilesFound))
+	}
+
+	return err
+}
+
 // syncDirectoriesWithExclusions performs high-performance directory synchronization with custom exclusions.
 // Implements rsync-like functionality using pure Go with the following optimizations:
 //   - Size-based comparison for fast incremental sync detection
@@ -251,19 +548,33 @@ func syncDirectoriesWithExclusions(src, dst string, excludePatterns []string, lo
 				return nil
 			}
 
-			// Destination exists - do ULTRA-FAST size-only comparison for incremental backup
+			// Optimize file comparison for large files - get source info ONCE
+			// PERFORMANCE OPTIMIZATION: Get source info first, then use it efficiently
 			srcInfo, err := d.Info()
 			if err != nil {
 				return nil // Skip files we can't stat
 			}
 			
-			// MEGA-FAST: If sizes match, assume identical (perfect for incremental backups)
-			if srcInfo.Size() == dstStat.Size() {
-				atomic.AddInt64(&filesSkipped, 1)
-				if logFile != nil && filesSkipped%500 == 0 { // Less frequent logging
-					fmt.Fprintf(logFile, "Skipped %s identical files so far...\n", FormatNumber(filesSkipped))
+			// LARGE FILE FAST-PATH: For large files, use optimized comparison
+			if dstStat.Size() > 500*1024*1024 { // 500MB threshold
+				// For large files, do immediate size comparison without extra syscalls
+				if srcInfo.Size() == dstStat.Size() {
+					atomic.AddInt64(&filesSkipped, 1)
+					if logFile != nil && filesSkipped%100 == 0 {
+						fmt.Fprintf(logFile, "LARGE FILE FAST-SKIP: %s (size: %s) - sizes match\n", path, FormatBytes(dstStat.Size()))
+					}
+					return nil
 				}
-				return nil
+				// Sizes don't match - fall through to copy
+			} else {
+				// Regular file size comparison
+				if srcInfo.Size() == dstStat.Size() {
+					atomic.AddInt64(&filesSkipped, 1)
+					if logFile != nil && filesSkipped%500 == 0 { // Less frequent logging
+						fmt.Fprintf(logFile, "Skipped %s identical files so far...\n", FormatNumber(filesSkipped))
+					}
+					return nil
+				}
 			}
 
 			// Files are different - copy
