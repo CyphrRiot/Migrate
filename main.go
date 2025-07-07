@@ -81,31 +81,27 @@ func main() {
 }
 
 // elevateToRoot handles privilege escalation by re-executing the program with sudo.
-// It displays a user-friendly prompt explaining why root access is needed,
-// then re-runs the current executable with all arguments preserved.
+// Only shows messages if there's an error - silent success for better UX.
 func elevateToRoot() error {
 	// Get the path to the current executable
 	execPath, err := os.Executable()
 	if err != nil {
+		fmt.Println("❌ Failed to get executable path")
 		return fmt.Errorf("failed to get executable path: %v", err)
 	}
 
 	// Check if sudo is available
 	if !checkProgramExists("sudo") {
+		fmt.Println("❌ sudo is required but not available")
 		return fmt.Errorf("sudo is required but not available")
 	}
 
-	// Beautiful privilege escalation prompt
-	fmt.Println("🔒 Migrate requires administrator privileges")
-	fmt.Println("📋 Needed for: drive mounting, LUKS encryption, system backup")
-	fmt.Println("🚀 Requesting sudo access...")
-	fmt.Println()
-
+	// Silent privilege escalation - only show messages on failure
 	// Re-run this program with sudo, preserving all arguments
 	args := append([]string{execPath}, os.Args[1:]...)
 	cmd := exec.Command("sudo", args...)
 	
-	// Connect stdio so user can enter password
+	// Connect stdio so user can enter password if needed
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -113,10 +109,14 @@ func elevateToRoot() error {
 	// Run and replace current process
 	err = cmd.Run()
 	if err != nil {
+		// Only show friendly messages if sudo fails
+		fmt.Println("🔒 Migrate requires administrator privileges")
+		fmt.Println("📋 Needed for: drive mounting, LUKS encryption, system backup")
+		fmt.Println("❌ Failed to obtain sudo access")
 		return fmt.Errorf("sudo execution failed: %v", err)
 	}
 
-	// If we get here, the sudo command completed
+	// If we get here, the sudo command completed successfully
 	// Exit with the same code as the child process
 	if exitError, ok := err.(*exec.ExitError); ok {
 		os.Exit(exitError.ExitCode())

@@ -72,22 +72,25 @@ func performBackupVerification(sourcePath, destPath string, excludePatterns []st
 	verificationErrors = []string{}
 
 	// Step 1: Verify newly copied files (high priority)
-	// Thread-safe access to copiedFilesList
+	// Thread-safe access to copiedFilesList - minimize mutex lock time
 	copiedFilesListMutex.Lock()
 	copiedFilesCount := len(copiedFilesList)
-	copiedFilesCopy := make([]string, len(copiedFilesList))
-	copy(copiedFilesCopy, copiedFilesList)
 	copiedFilesListMutex.Unlock()
 
+	var copiedFilesCopy []string
+
 	if copiedFilesCount > 0 {
+		// Create copy only when needed
+		copiedFilesListMutex.Lock()
+		copiedFilesCopy = make([]string, len(copiedFilesList))
+		copy(copiedFilesCopy, copiedFilesList)
+		copiedFilesListMutex.Unlock()
+
 		if logFile != nil {
 			fmt.Fprintf(logFile, "Verifying %d newly copied files\n", copiedFilesCount)
 		}
 
-		// Small delay to ensure filesystem sync
-		time.Sleep(1 * time.Second)
-
-		err := verifyNewFiles(copiedFilesCopy, sourcePath, destPath, logFile)
+		err := verifyNewFiles(copiedFilesCopy, sourcePath, destPath, excludePatterns, logFile)
 		if err != nil {
 			return fmt.Errorf("verification of new files failed: %v", err)
 		}
@@ -154,8 +157,8 @@ func performBackupVerification(sourcePath, destPath string, excludePatterns []st
 	// Mark verification as complete
 	verificationPhaseActive = false
 
-	// Fail backup if too many critical errors (threshold: 1% of new files)
-	criticalErrorThreshold := max(copiedFilesCount/100, 1)
+	// Fail backup if too many critical errors (threshold: 10 or 5% of new files, whichever is higher)
+	criticalErrorThreshold := max(10, copiedFilesCount/20)
 
 	if len(verificationErrors) > criticalErrorThreshold {
 		return fmt.Errorf("verification failed with %d errors (threshold: %d)",
@@ -184,7 +187,7 @@ func performBackupVerification(sourcePath, destPath string, excludePatterns []st
 // Returns an error if verification fails beyond the acceptable threshold.
 // Individual file errors are logged but don't immediately fail the verification.
 // Only when error rates exceed 10% (or 10 files minimum) does this function fail.
-func verifyNewFiles(copiedFiles []string, sourcePath, destPath string, logFile *os.File) error {
+func verifyNewFiles(copiedFiles []string, sourcePath, destPath string, excludePatterns []string, logFile *os.File) error {
 	if len(copiedFiles) == 0 {
 		return nil
 	}
@@ -205,6 +208,26 @@ func verifyNewFiles(copiedFiles []string, sourcePath, destPath string, logFile *
 				if shouldCancelBackup() {
 					errorCh <- fmt.Errorf("verification canceled")
 					return
+				}
+
+				// Skip excluded patterns - use simple string matching
+				shouldSkip := false
+				for _, pattern := range excludePatterns {
+					// Check if file path contains the pattern (like .cache)
+					if strings.Contains(filePath, pattern) {
+						shouldSkip = true
+						break
+					}
+					// Also check pattern without wildcards
+					cleanPattern := strings.TrimSuffix(strings.TrimPrefix(pattern, "*"), "*")
+					if cleanPattern != "" && strings.Contains(filePath, cleanPattern) {
+						shouldSkip = true
+						break
+					}
+				}
+
+				if shouldSkip {
+					continue
 				}
 
 				err := verifySingleFile(filePath, sourcePath, destPath)

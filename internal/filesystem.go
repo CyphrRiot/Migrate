@@ -27,6 +27,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"syscall"
+	"time"
 )
 
 // syncDirectories performs efficient directory synchronization using default exclude patterns.
@@ -38,17 +39,18 @@ func syncDirectories(src, dst string, logFile *os.File) error {
 // syncDirectoriesWithSelectiveInclusions performs hierarchical-aware directory synchronization.
 // This enhanced version properly handles cases where parent folders are excluded but specific
 // subfolders need to be included (hierarchical selection from the UI).
-// 
+//
 // Parameters:
 //   - src: Source directory path
-//   - dst: Destination directory path  
+//   - dst: Destination directory path
 //   - excludePatterns: Standard exclusion patterns (cache, etc.)
 //   - selectedSubfolders: Map of explicitly selected subfolders to include despite parent exclusions
 //   - logFile: Log file for detailed operation tracking
 //
 // This function solves the critical issue where traditional exclusion logic would exclude
 // parent folders and all their contents, even when specific subfolders should be included.
-func syncDirectoriesWithSelectiveInclusions(src, dst string, excludePatterns []string, selectedSubfolders map[string]bool, logFile *os.File) error {
+func syncDirectoriesWithSelectiveInclusions(src, dst string,
+	excludePatterns []string, selectedSubfolders map[string]bool, logFile *os.File) error {
 	// Check for cancellation before starting
 	if shouldCancelBackup() {
 		return fmt.Errorf("operation canceled")
@@ -72,21 +74,21 @@ func syncDirectoriesWithSelectiveInclusions(src, dst string, excludePatterns []s
 
 	// Counter to periodically check for cancellation and show progress
 	fileCounter := 0
-	localFilesFound := 0  // Local counter to batch atomic operations
+	localFilesFound := 0 // Local counter to batch atomic operations
 
 	// Pre-compile exclusion patterns for performance (avoid string ops in hot path)
 	exclusionPrefixes := make([]string, len(excludePatterns))
 	for i, pattern := range excludePatterns {
 		exclusionPrefixes[i] = strings.TrimSuffix(pattern, "/*")
 	}
-	
+
 	if logFile != nil {
 		fmt.Fprintf(logFile, "Exclusion patterns compiled: %v\n", exclusionPrefixes)
 	}
 
 	// Walk through the source directory efficiently with hierarchical awareness
 	err = filepath.WalkDir(src, func(path string, d os.DirEntry, err error) error {
-		// Check for cancellation less frequently for better performance  
+		// Check for cancellation less frequently for better performance
 		fileCounter++
 		if fileCounter%5000 == 0 && shouldCancelBackup() { // Check every 5000 files for responsiveness
 			return fmt.Errorf("operation canceled")
@@ -137,7 +139,7 @@ func syncDirectoriesWithSelectiveInclusions(src, dst string, excludePatterns []s
 					// Relative pattern - make it relative to source
 					fullPattern = filepath.Join(src, prefix)
 				}
-				
+
 				// STRICT EXCLUSION: If path matches ANY exclusion pattern, exclude it immediately
 				if strings.HasPrefix(path, fullPattern) {
 					if d.IsDir() {
@@ -178,7 +180,7 @@ func syncDirectoriesWithSelectiveInclusions(src, dst string, excludePatterns []s
 				}
 				return nil
 			}
-			
+
 			// Skip if on a different filesystem (-x option) BUT allow /home even if different subvolume
 			if stat.Dev != srcDev {
 				// Allow /home directory even if it's on different btrfs subvolume
@@ -223,7 +225,7 @@ func syncDirectoriesWithSelectiveInclusions(src, dst string, excludePatterns []s
 		if d.Type().IsRegular() {
 			// Count this file in our local counter (batch atomic operations)
 			localFilesFound++
-			
+
 			// Log slow file processing to identify bottlenecks
 			if localFilesFound%1000 == 0 && logFile != nil {
 				if info, err := d.Info(); err == nil {
@@ -232,7 +234,7 @@ func syncDirectoriesWithSelectiveInclusions(src, dst string, excludePatterns []s
 					fmt.Fprintf(logFile, "Processing file %d: %s\n", localFilesFound, path)
 				}
 			}
-			
+
 			// Batch update atomic counter every 1000 files for performance
 			if localFilesFound%1000 == 0 {
 				atomic.AddInt64(&totalFilesFound, 1000)
@@ -247,8 +249,10 @@ func syncDirectoriesWithSelectiveInclusions(src, dst string, excludePatterns []s
 			if os.IsNotExist(err) {
 				// Destination doesn't exist - definitely need to copy
 				err = copyFileEfficient(path, dstPath)
-				if err != nil && logFile != nil {
-					fmt.Fprintf(logFile, "Error copying %s: %v\n", path, err)
+				if err != nil {
+					if logFile != nil {
+						fmt.Fprintf(logFile, "Error copying %s: %v\n", path, err)
+					}
 				} else {
 					atomic.AddInt64(&filesCopied, 1)
 					// Track copied files for verification (thread-safe)
@@ -264,12 +268,12 @@ func syncDirectoriesWithSelectiveInclusions(src, dst string, excludePatterns []s
 			}
 
 			// Optimize file comparison for large files - get source info ONCE
-			// PERFORMANCE OPTIMIZATION: Get source info first, then use it efficiently  
+			// PERFORMANCE OPTIMIZATION: Get source info first, then use it efficiently
 			srcInfo, err := d.Info()
 			if err != nil {
 				return nil // Skip files we can't stat
 			}
-			
+
 			// LARGE FILE FAST-PATH: For large files, use optimized comparison
 			if dstStat.Size() > 500*1024*1024 { // 500MB threshold
 				// For large files, do immediate size comparison without extra syscalls
@@ -294,8 +298,10 @@ func syncDirectoriesWithSelectiveInclusions(src, dst string, excludePatterns []s
 
 			// Files are different - copy
 			err = copyFileEfficient(path, dstPath)
-			if err != nil && logFile != nil {
-				fmt.Fprintf(logFile, "Error copying %s: %v\n", path, err)
+			if err != nil {
+				if logFile != nil {
+					fmt.Fprintf(logFile, "Error copying %s: %v\n", path, err)
+				}
 			} else {
 				atomic.AddInt64(&filesCopied, 1)
 				// Track copied files for verification (thread-safe)
@@ -366,21 +372,21 @@ func syncDirectoriesWithExclusions(src, dst string, excludePatterns []string, lo
 
 	// Counter to periodically check for cancellation and show progress
 	fileCounter := 0
-	localFilesFound := 0  // Local counter to batch atomic operations
+	localFilesFound := 0 // Local counter to batch atomic operations
 
 	// Pre-compile exclusion patterns for performance (avoid string ops in hot path)
 	exclusionPrefixes := make([]string, len(excludePatterns))
 	for i, pattern := range excludePatterns {
 		exclusionPrefixes[i] = strings.TrimSuffix(pattern, "/*")
 	}
-	
+
 	if logFile != nil {
 		fmt.Fprintf(logFile, "Exclusion patterns compiled: %v\n", exclusionPrefixes)
 	}
 
 	// Walk through the source directory efficiently
 	err = filepath.WalkDir(src, func(path string, d os.DirEntry, err error) error {
-		// Check for cancellation less frequently for better performance  
+		// Check for cancellation less frequently for better performance
 		fileCounter++
 		if fileCounter%5000 == 0 && shouldCancelBackup() { // Check every 5000 files for responsiveness
 			return fmt.Errorf("operation canceled")
@@ -409,7 +415,7 @@ func syncDirectoriesWithExclusions(src, dst string, excludePatterns []string, lo
 		// Skip excluded patterns (using pre-compiled prefixes for performance)
 		// PERFORMANCE OPTIMIZATION: Quick check for non-cache paths first
 		isInHomeDir := strings.HasPrefix(path, src)
-		
+
 		for _, prefix := range exclusionPrefixes {
 			// Convert to absolute path for proper matching
 			var fullPattern string
@@ -419,14 +425,14 @@ func syncDirectoriesWithExclusions(src, dst string, excludePatterns []string, lo
 			} else {
 				// Relative pattern (like ".cache") - make it relative to source
 				fullPattern = filepath.Join(src, prefix)
-				
+
 				// PERFORMANCE BYPASS: Skip cache pattern checks if we're not in a cache-like directory
-				if isInHomeDir && !strings.Contains(path, "/.cache") && !strings.Contains(path, "/.local") && 
-				   (strings.Contains(prefix, ".cache") || strings.Contains(prefix, ".local")) {
+				if isInHomeDir && !strings.Contains(path, "/.cache") && !strings.Contains(path, "/.local") &&
+					(strings.Contains(prefix, ".cache") || strings.Contains(prefix, ".local")) {
 					continue // Skip cache patterns when not in cache directories
 				}
 			}
-			
+
 			// Check for exact path prefix match (much more efficient)
 			if strings.HasPrefix(path, fullPattern) {
 				if d.IsDir() {
@@ -463,7 +469,7 @@ func syncDirectoriesWithExclusions(src, dst string, excludePatterns []string, lo
 				}
 				return nil
 			}
-			
+
 			// Skip if on a different filesystem (-x option) BUT allow /home even if different subvolume
 			if stat.Dev != srcDev {
 				// Allow /home directory even if it's on different btrfs subvolume
@@ -508,7 +514,7 @@ func syncDirectoriesWithExclusions(src, dst string, excludePatterns []string, lo
 		if d.Type().IsRegular() {
 			// Count this file in our local counter (batch atomic operations)
 			localFilesFound++
-			
+
 			// Log slow file processing to identify bottlenecks
 			if localFilesFound%1000 == 0 && logFile != nil {
 				if info, err := d.Info(); err == nil {
@@ -517,7 +523,7 @@ func syncDirectoriesWithExclusions(src, dst string, excludePatterns []string, lo
 					fmt.Fprintf(logFile, "Processing file %d: %s\n", localFilesFound, path)
 				}
 			}
-			
+
 			// Batch update atomic counter every 1000 files for performance
 			if localFilesFound%1000 == 0 {
 				atomic.AddInt64(&totalFilesFound, 1000)
@@ -532,8 +538,10 @@ func syncDirectoriesWithExclusions(src, dst string, excludePatterns []string, lo
 			if os.IsNotExist(err) {
 				// Destination doesn't exist - definitely need to copy
 				err = copyFileEfficient(path, dstPath)
-				if err != nil && logFile != nil {
-					fmt.Fprintf(logFile, "Error copying %s: %v\n", path, err)
+				if err != nil {
+					if logFile != nil {
+						fmt.Fprintf(logFile, "Error copying %s: %v\n", path, err)
+					}
 				} else {
 					atomic.AddInt64(&filesCopied, 1)
 					// Track copied files for verification (thread-safe)
@@ -554,7 +562,7 @@ func syncDirectoriesWithExclusions(src, dst string, excludePatterns []string, lo
 			if err != nil {
 				return nil // Skip files we can't stat
 			}
-			
+
 			// LARGE FILE FAST-PATH: For large files, use optimized comparison
 			if dstStat.Size() > 500*1024*1024 { // 500MB threshold
 				// For large files, do immediate size comparison without extra syscalls
@@ -579,8 +587,10 @@ func syncDirectoriesWithExclusions(src, dst string, excludePatterns []string, lo
 
 			// Files are different - copy
 			err = copyFileEfficient(path, dstPath)
-			if err != nil && logFile != nil {
-				fmt.Fprintf(logFile, "Error copying %s: %v\n", path, err)
+			if err != nil {
+				if logFile != nil {
+					fmt.Fprintf(logFile, "Error copying %s: %v\n", path, err)
+				}
 			} else {
 				atomic.AddInt64(&filesCopied, 1)
 				// Track copied files for verification (thread-safe)
@@ -650,7 +660,7 @@ func copyFileEfficient(src, dst string) error {
 	defer dstFile.Close()
 
 	// Use larger buffer for better performance on large files
-	bufSize := 64 * 1024 // 64KB buffer
+	bufSize := 64 * 1024           // 64KB buffer
 	if fi.Size() > 100*1024*1024 { // Files >100MB get bigger buffer
 		bufSize = 1024 * 1024 // 1MB buffer
 	}
@@ -662,7 +672,7 @@ func copyFileEfficient(src, dst string) error {
 		return err
 	}
 
-	// Set permissions and ownership  
+	// Set permissions and ownership
 	stat, ok := fi.Sys().(*syscall.Stat_t)
 	if ok {
 		os.Chmod(dst, fi.Mode())
@@ -675,9 +685,9 @@ func copyFileEfficient(src, dst string) error {
 
 // filesAreIdentical performs intelligent file comparison optimized for incremental backups.
 // Uses a multi-stage approach:
-//   1. Fast size comparison (most effective for incremental backups)
-//   2. Empty file optimization (immediate return for zero-byte files)
-//   3. Size-match assumption for performance (skips expensive hash/timestamp checks)
+//  1. Fast size comparison (most effective for incremental backups)
+//  2. Empty file optimization (immediate return for zero-byte files)
+//  3. Size-match assumption for performance (skips expensive hash/timestamp checks)
 //
 // This approach is optimized for the common case where files are either completely
 // different or completely identical, making it ideal for backup scenarios.
@@ -749,8 +759,8 @@ func largFilesIdentical(src, dst string, size int64) bool {
 	// Sample strategy: check beginning, middle, and end
 	sampleSize := int64(4096) // 4KB samples
 	positions := []int64{
-		0,                // Beginning
-		size / 2,         // Middle  
+		0,                 // Beginning
+		size / 2,          // Middle
 		size - sampleSize, // End
 	}
 
@@ -984,23 +994,23 @@ func calculateDirectorySize(path string) (int64, error) {
 		// If du fails, try a fallback method
 		return calculateDirectorySizeFallback(path)
 	}
-	
+
 	// Parse du output: "123456\t/path/to/dir"
 	outputStr := strings.TrimSpace(string(output))
 	if outputStr == "" {
 		return 0, fmt.Errorf("empty du output")
 	}
-	
+
 	parts := strings.Fields(outputStr)
 	if len(parts) < 1 {
 		return 0, fmt.Errorf("unexpected du output format: %q", outputStr)
 	}
-	
+
 	size, err := strconv.ParseInt(parts[0], 10, 64)
 	if err != nil {
 		return 0, fmt.Errorf("failed to parse size from %q: %v", parts[0], err)
 	}
-	
+
 	return size, nil
 }
 
@@ -1009,13 +1019,13 @@ func calculateDirectorySize(path string) (int64, error) {
 // Slower than du but more portable and handles permission errors gracefully.
 func calculateDirectorySizeFallback(path string) (int64, error) {
 	var totalSize int64
-	
+
 	err := filepath.WalkDir(path, func(filePath string, d os.DirEntry, err error) error {
 		if err != nil {
 			// Skip errors (permission denied, etc.) but continue
 			return nil
 		}
-		
+
 		if !d.IsDir() {
 			if info, err := d.Info(); err == nil {
 				totalSize += info.Size()
@@ -1023,7 +1033,7 @@ func calculateDirectorySizeFallback(path string) (int64, error) {
 		}
 		return nil
 	})
-	
+
 	return totalSize, err
 }
 
@@ -1034,7 +1044,7 @@ func GetHomeDirSize() (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	
+
 	// Use du-equivalent Go implementation
 	return calculateDirectorySize(homeDir)
 }
@@ -1260,7 +1270,7 @@ func performGoBackup(sourcePath, destPath string) error {
 	gid, _ := strconv.Atoi(currentUser.Gid)
 
 	// Initialize progress tracking
-	backupStartTime = backupStartTime // Reference these from backup_ops.go
+	backupStartTime = time.Now() // Reference these from backup_ops.go
 	sourceUsedSpace, _ = getUsedDiskSpace(sourcePath)
 	destStartUsedSpace, _ = getUsedDiskSpace(destPath)
 

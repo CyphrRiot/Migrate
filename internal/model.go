@@ -391,7 +391,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Check if this was a backup operation completion
 			if strings.Contains(m.operation, "backup") && msg.Error == nil {
 				// Backup completed successfully, ask about unmounting
-				m.confirmation = fmt.Sprintf("🎉 Backup completed successfully!\n\nDo you want to unmount the backup drive?\n\nNote: Unmounting is recommended for safe removal.")
+				m.confirmation = "🎉 Backup completed successfully!\n\nDo you want to unmount the backup drive?\n\nNote: Unmounting is recommended for safe removal."
 				m.operation = "unmount_backup"
 				m.screen = screenConfirm
 				m.cursor = 0
@@ -1178,13 +1178,15 @@ func (m Model) getFolderSelectionState(folder HomeFolderInfo) string {
 		}
 	}
 
-	if selectedSubfolders == 0 {
+	switch selectedSubfolders {
+	case 0:
 		return "none"
-	} else if selectedSubfolders == totalSubfolders {
+	case totalSubfolders:
 		return "full"
-	} else {
+	default:
 		return "partial"
 	}
+
 }
 
 // updateParentSelectionState updates the parent folder's selection based on subfolder changes.

@@ -571,9 +571,7 @@ func calculateRealProgress() (float64, string) {
 				if currentDirectory != "" {
 					// Clean up the path - remove /home/grendel prefix and show just the relative folder
 					displayPath := currentDirectory
-					if strings.HasPrefix(displayPath, "/home/grendel/") {
-						displayPath = strings.TrimPrefix(displayPath, "/home/grendel/")
-					}
+					displayPath = strings.TrimPrefix(displayPath, "/home/grendel/")
 					if displayPath == "" {
 						displayPath = "~"
 					}
@@ -618,9 +616,7 @@ func calculateRealProgress() (float64, string) {
 				if currentDirectory != "" {
 					// Clean up the path - remove /home/grendel prefix and show just the relative folder
 					displayPath := currentDirectory
-					if strings.HasPrefix(displayPath, "/home/grendel/") {
-						displayPath = strings.TrimPrefix(displayPath, "/home/grendel/")
-					}
+					displayPath = strings.TrimPrefix(displayPath, "/home/grendel/")
 					if displayPath == "" {
 						displayPath = "~"
 					}
@@ -1279,11 +1275,4 @@ func hasSubfolders(folderPath string, homeFolders []HomeFolderInfo) bool {
 		}
 	}
 	return false
-}
-
-// Simulate progress for demo purposes
-func simulateProgress(operation string) tea.Cmd {
-	return tea.Tick(100*time.Millisecond, func(t time.Time) tea.Msg {
-		return tickMsg(t)
-	})
 }
