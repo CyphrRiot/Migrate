@@ -37,6 +37,14 @@ type BackupConfig struct {
 	HomeFolders       []HomeFolderInfo    // metadata about home folders (for selective backups)
 }
 
+// BackupFolderList contains folder selection information from selective home backups.
+// This structure is read from BACKUP-FOLDERS.txt during verification to determine
+// which folders should and shouldn't exist in the backup.
+type BackupFolderList struct {
+	IncludedFolders []string // Folders that were backed up (verification should check these)
+	ExcludedFolders []string // Folders that were skipped (verification should ignore these)
+}
+
 // VerificationConfig controls how backup verification is performed.
 // Provides options for sampling, timeouts, and parallel processing.
 type VerificationConfig struct {
@@ -255,6 +263,17 @@ func performPureGoBackup(config BackupConfig, logFile *os.File) error {
 			fmt.Fprintf(logFile, "Failed to create backup info: %v\n", err)
 		}
 		return fmt.Errorf("failed to create backup info: %v", err)
+	}
+
+	// For selective backups, create folder selection metadata for verification
+	if config.IsSelectiveBackup {
+		err := createBackupFolderList(config.DestinationPath, config.SelectedFolders, logFile)
+		if err != nil {
+			if logFile != nil {
+				fmt.Fprintf(logFile, "Failed to create backup folder list: %v\n", err)
+			}
+			return fmt.Errorf("failed to create backup folder list: %v", err)
+		}
 	}
 
 	// SELECTIVE BACKUP: Handle folder-specific backup
@@ -806,6 +825,103 @@ The restored system will overwrite the fresh install and boot exactly as it was 
 	return os.WriteFile(infoPath, []byte(info), 0644)
 }
 
+// createBackupFolderList generates BACKUP-FOLDERS.txt for selective home backups.
+// This file contains the list of included and excluded folders so verification
+// knows which folders should and shouldn't exist in the backup.
+func createBackupFolderList(mountPoint string, selectedFolders map[string]bool, logFile *os.File) error {
+	var content strings.Builder
+	
+	content.WriteString("SELECTIVE HOME BACKUP FOLDER LIST\n")
+	content.WriteString("=====================================\n")
+	content.WriteString(fmt.Sprintf("Created: %s\n\n", time.Now().Format(time.RFC3339)))
+	
+	// List included folders
+	content.WriteString("INCLUDED FOLDERS (backed up):\n")
+	includedCount := 0
+	for folderPath, isSelected := range selectedFolders {
+		if isSelected {
+			content.WriteString(fmt.Sprintf("  ✅ %s\n", folderPath))
+			includedCount++
+		}
+	}
+	
+	// List excluded folders  
+	content.WriteString("\nEXCLUDED FOLDERS (not backed up):\n")
+	excludedCount := 0
+	for folderPath, isSelected := range selectedFolders {
+		if !isSelected {
+			content.WriteString(fmt.Sprintf("  ❌ %s\n", folderPath))
+			excludedCount++
+		}
+	}
+	
+	content.WriteString(fmt.Sprintf("\nSUMMARY: %d folders included, %d folders excluded\n", includedCount, excludedCount))
+	content.WriteString("\nNOTE: Verification will only check included folders.\n")
+	content.WriteString("Excluded folders are intentionally missing from backup.\n")
+	
+	folderListPath := filepath.Join(mountPoint, "BACKUP-FOLDERS.txt")
+	err := os.WriteFile(folderListPath, []byte(content.String()), 0644)
+	
+	if logFile != nil && err == nil {
+		fmt.Fprintf(logFile, "Created backup folder list: %d included, %d excluded\n", includedCount, excludedCount)
+	}
+	
+	return err
+}
+
+// loadBackupFolderList reads BACKUP-FOLDERS.txt from a selective home backup.
+// Returns the list of included and excluded folders for verification purposes.
+// Returns an error if the file doesn't exist (indicating a full backup, not selective).
+func loadBackupFolderList(backupPath string, logFile *os.File) (*BackupFolderList, error) {
+	folderListPath := filepath.Join(backupPath, "BACKUP-FOLDERS.txt")
+	
+	content, err := os.ReadFile(folderListPath)
+	if err != nil {
+		// File doesn't exist - this is a full backup, not selective
+		return nil, fmt.Errorf("no backup folder list found (full backup)")
+	}
+	
+	lines := strings.Split(string(content), "\n")
+	
+	var result BackupFolderList
+	var inIncluded bool
+	var inExcluded bool
+	
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		
+		if strings.Contains(line, "INCLUDED FOLDERS") {
+			inIncluded = true
+			inExcluded = false
+			continue
+		}
+		if strings.Contains(line, "EXCLUDED FOLDERS") {
+			inIncluded = false
+			inExcluded = true
+			continue
+		}
+		if strings.Contains(line, "SUMMARY:") {
+			break // End of folder lists
+		}
+		
+		// Parse folder entries
+		if inIncluded && strings.HasPrefix(line, "✅ ") {
+			folder := strings.TrimPrefix(line, "✅ ")
+			result.IncludedFolders = append(result.IncludedFolders, folder)
+		} else if inExcluded && strings.HasPrefix(line, "❌ ") {
+			folder := strings.TrimPrefix(line, "❌ ")
+			result.ExcludedFolders = append(result.ExcludedFolders, folder)
+		}
+	}
+	
+	if logFile != nil {
+		fmt.Fprintf(logFile, "Loaded folder list: %d included, %d excluded\n", 
+			len(result.IncludedFolders), len(result.ExcludedFolders))
+	}
+	
+	return &result, nil
+}
+
 // Start the actual backup with proper configuration
 func startActualBackup(operationType, mountPoint string) tea.Cmd {
 	return func() tea.Msg {
@@ -963,6 +1079,23 @@ func runVerificationSilently(operationType, mountPoint string) {
 		return
 	}
 
+	// For home verification, check if this is a selective backup
+	var selectiveExclusions []string
+	if backupType == "home" {
+		// Try to load selective backup folder list
+		folderList, err := loadBackupFolderList(mountPoint, logFile)
+		if err == nil && len(folderList.ExcludedFolders) > 0 {
+			// This is a selective backup - add excluded folders to verification exclusions
+			selectiveExclusions = folderList.ExcludedFolders
+			if logFile != nil {
+				fmt.Fprintf(logFile, "Selective backup detected: excluding %d folders from verification\n", len(selectiveExclusions))
+				for _, folder := range selectiveExclusions {
+					fmt.Fprintf(logFile, "  Excluding from verification: %s\n", folder)
+				}
+			}
+		}
+	}
+
 	// Determine exclusion patterns based on backup type
 	var excludePatterns []string
 	switch backupType {
@@ -978,6 +1111,8 @@ func runVerificationSilently(operationType, mountPoint string) {
 		)
 	case "home":
 		excludePatterns = []string{".cache/*", ".local/share/Trash/*"} // Use home exclusions
+		// Add selective backup exclusions if any
+		excludePatterns = append(excludePatterns, selectiveExclusions...)
 	default:
 		excludePatterns = []string{} // No exclusions for unknown types
 	}
