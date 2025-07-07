@@ -625,18 +625,18 @@ func (m Model) handleSelection() (tea.Model, tea.Cmd) {
 				// Start the actual operation
 				switch m.operation {
 				case "system_backup":
-					// System backup - use regular backup
+					// System backup - use universal backup system
 					return m, tea.Batch(
-						startActualBackup(m.operation, m.selectedDrive),
+						startUniversalBackup(m.operation, m.selectedDrive, nil, nil),
 						CheckTUIBackupProgress(),
 						tea.Tick(100*time.Millisecond, func(t time.Time) tea.Msg {
 							return cylonAnimateMsg{}
 						}),
 					)
 				case "home_backup":
-					// CRITICAL FIX: Use selective backup for home directory
+					// Home backup - use universal backup system for selective home backup
 					return m, tea.Batch(
-						startSelectiveHomeBackup(m.selectedDrive, m.homeFolders, m.selectedFolders),
+						startUniversalBackup("selective_home_backup", m.selectedDrive, m.selectedFolders, m.homeFolders),
 						CheckTUIBackupProgress(),
 						tea.Tick(100*time.Millisecond, func(t time.Time) tea.Msg {
 							return cylonAnimateMsg{}
@@ -669,7 +669,8 @@ func (m Model) handleSelection() (tea.Model, tea.Cmd) {
 						}),
 					)
 				default:
-					return m, startActualBackup(m.operation, m.selectedDrive)
+					// Fallback - use universal backup system
+					return m, startUniversalBackup(m.operation, m.selectedDrive, nil, nil)
 				}
 			}
 		case 1: // No
