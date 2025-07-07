@@ -922,6 +922,113 @@ func loadBackupFolderList(backupPath string, logFile *os.File) (*BackupFolderLis
 	return &result, nil
 }
 
+// createBackupConfig creates the appropriate BackupConfig for any backup operation type.
+// This is the unified configuration builder that handles system, home, and selective backups.
+//
+// Parameters:
+//   - operationType: "system_backup", "home_backup", or "selective_home_backup"
+//   - mountPoint: Destination backup directory
+//   - selectedFolders: For selective backups only (can be nil for others)
+//   - homeFolders: For selective backups only (can be nil for others)
+//
+// Returns a properly configured BackupConfig struct for the specified operation type.
+func createBackupConfig(operationType, mountPoint string, selectedFolders map[string]bool, homeFolders []HomeFolderInfo) (BackupConfig, error) {
+	var config BackupConfig
+	
+	switch operationType {
+	case "system_backup":
+		config = BackupConfig{
+			SourcePath:        "/",
+			DestinationPath:   mountPoint,
+			ExcludePatterns:   ExcludePatterns, // System exclusions only
+			BackupType:        "Complete System",
+			IsSelectiveBackup: false,
+			SelectedFolders:   nil,
+			HomeFolders:       nil,
+		}
+		
+	case "home_backup":
+		// Handle SUDO_USER properly - get the actual user's home directory
+		var homeDir string
+		if sudoUser := os.Getenv("SUDO_USER"); sudoUser != "" {
+			homeDir = "/home/" + sudoUser
+		} else {
+			homeDir, _ = os.UserHomeDir()
+		}
+		
+		config = BackupConfig{
+			SourcePath:        homeDir,
+			DestinationPath:   mountPoint,
+			ExcludePatterns:   []string{".cache/*", ".local/share/Trash/*"}, // Home exclusions
+			BackupType:        "Home Directory",
+			IsSelectiveBackup: false,
+			SelectedFolders:   nil,
+			HomeFolders:       nil,
+		}
+		
+	case "selective_home_backup":
+		// Handle SUDO_USER properly - get the actual user's home directory
+		var homeDir string
+		if sudoUser := os.Getenv("SUDO_USER"); sudoUser != "" {
+			homeDir = "/home/" + sudoUser
+		} else {
+			homeDir, _ = os.UserHomeDir()
+		}
+		
+		config = BackupConfig{
+			SourcePath:        homeDir,
+			DestinationPath:   mountPoint,
+			ExcludePatterns:   []string{
+				".cache/*", 
+				".local/share/Trash/*",
+				".local/share/Steam/*",
+				".cache/yay/*",
+				".cache/paru/*", 
+				".cache/mozilla/*",
+				".cache/google-chrome/*",
+				".cache/chromium/*",
+				".local/share/flatpak/*",
+				".local/share/containers/*",
+			},
+			BackupType:        "Home Directory",
+			IsSelectiveBackup: true,
+			SelectedFolders:   selectedFolders,
+			HomeFolders:       homeFolders,
+		}
+		
+	default:
+		return BackupConfig{}, fmt.Errorf("unknown backup operation type: %s", operationType)
+	}
+	
+	return config, nil
+}
+
+// startUniversalBackup is the unified entry point for ALL backup operations.
+// This single function handles system, home, and selective home backups through
+// the same code path, ensuring consistent behavior and progress tracking.
+//
+// Parameters:
+//   - operationType: "system_backup", "home_backup", or "selective_home_backup"  
+//   - mountPoint: Destination backup directory
+//   - selectedFolders: For selective backups (pass nil for system/home backups)
+//   - homeFolders: For selective backups (pass nil for system/home backups)
+//
+// Returns a Bubble Tea command that starts the backup operation with proper
+// progress tracking, cancellation support, and error handling.
+func startUniversalBackup(operationType, mountPoint string, selectedFolders map[string]bool, homeFolders []HomeFolderInfo) tea.Cmd {
+	return func() tea.Msg {
+		// Create the appropriate configuration for this backup type
+		config, err := createBackupConfig(operationType, mountPoint, selectedFolders, homeFolders)
+		if err != nil {
+			return ProgressUpdate{Error: err, Done: true}
+		}
+		
+		// Use the unified backup system
+		cmd := startBackup(config)
+		return cmd()
+	}
+}
+
 // Start the actual backup with proper configuration
 func startActualBackup(operationType, mountPoint string) tea.Cmd {
 	return func() tea.Msg {
