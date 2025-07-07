@@ -1,3 +1,17 @@
+// Package internal provides the user interface rendering and styling system for Migrate.
+//
+// This package implements the visual layer of the TUI using the Lipgloss library for styling.
+// The UI system provides:
+//   - Tokyo Night color theme with authentic palette implementation
+//   - Gradient color system for progress bars and status indicators  
+//   - Responsive rendering for different terminal sizes
+//   - Screen-specific render methods for each application state
+//   - Progress visualization with animated cylon effects
+//   - Consistent styling across all UI components
+//
+// The styling system is built around the Tokyo Night theme specification,
+// providing a cohesive dark theme experience with carefully chosen colors
+// for different UI elements and states.
 package internal
 
 import (
@@ -8,10 +22,12 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// Tokyo Night Gradient Color System - authentic theme palette
+// GradientColors defines a color gradient with start and end points for smooth transitions.
+// Used throughout the UI to create visually appealing progress bars and status indicators
+// that follow the Tokyo Night color scheme.
 type GradientColors struct {
-	Start lipgloss.Color
-	End   lipgloss.Color
+	Start lipgloss.Color // Starting color of the gradient
+	End   lipgloss.Color // Ending color of the gradient
 }
 
 var (
@@ -71,7 +87,12 @@ var (
 	borderColor     = lipgloss.Color("#414868") // Tokyo Night border/line
 )
 
-// Gradient helper functions for smooth color transitions
+// GetColor returns a color from the gradient based on position (0.0 to 1.0).
+// Currently implements a simple 50% threshold transition - could be enhanced
+// with proper color interpolation for smoother gradients.
+//
+// Parameters:
+//   position: Float between 0.0 (start color) and 1.0 (end color)
 func (g GradientColors) GetColor(position float64) lipgloss.Color {
 	// Clamp position between 0 and 1
 	if position < 0 {
@@ -81,20 +102,22 @@ func (g GradientColors) GetColor(position float64) lipgloss.Color {
 		position = 1
 	}
 	
-	// For now, return the start color for 0-0.5 and end color for 0.5-1
-	// This is a simple implementation - could be enhanced with proper color interpolation
+	// Simple implementation: threshold at 50%
+	// TODO: Consider implementing proper color interpolation for smoother transitions
 	if position < 0.5 {
 		return g.Start
 	}
 	return g.End
 }
 
-// Get gradient color based on percentage (0-100)
+// GetColorFromPercentage converts a percentage (0-100) to a gradient position and returns the color.
+// This is a convenience method for progress bars and percentage-based displays.
 func (g GradientColors) GetColorFromPercentage(percentage float64) lipgloss.Color {
 	return g.GetColor(percentage / 100.0)
 }
 
-// Get status-appropriate gradient color
+// GetStatusGradient returns the appropriate gradient colors for a given status string.
+// This provides semantic color coding throughout the UI for consistent status representation.
 func GetStatusGradient(status string) GradientColors {
 	switch status {
 	case "success", "complete", "done":
@@ -112,9 +135,10 @@ func GetStatusGradient(status string) GradientColors {
 	}
 }
 
-// Enhanced Data Visualization Functions - Tokyo Night themed
+// formatBytesWithColor formats byte values with appropriate color coding based on context.
+// The style parameter determines the color scheme used (e.g., "speed" for transfer rates, "size" for file sizes).
 func formatBytesWithColor(bytes int64, style string) string {
-	formatted := formatBytes(bytes)
+	formatted := FormatBytes(bytes)
 	
 	var colorStyle lipgloss.Style
 	switch style {
@@ -147,8 +171,10 @@ func formatBytesWithColor(bytes int64, style string) string {
 	return colorStyle.Render(formatted)
 }
 
+// formatNumberWithColor formats numeric values with color coding based on significance level.
+// The significance parameter determines the color thresholds (e.g., "high" for important metrics, "files" for file counts).
 func formatNumberWithColor(n int64, significance string) string {
-	formatted := formatNumber(n)
+	formatted := FormatNumber(n)
 	
 	var colorStyle lipgloss.Style
 	switch significance {
@@ -177,6 +203,8 @@ func formatNumberWithColor(n int64, significance string) string {
 	return colorStyle.Render(formatted)
 }
 
+// renderDataMetric creates a formatted data display with icon, label, and value.
+// Used for consistent presentation of metrics throughout the UI.
 func renderDataMetric(label, value, icon string) string {
 	labelStyle := lipgloss.NewStyle().Foreground(dimColor)
 	iconStyle := lipgloss.NewStyle().Foreground(blueGradient.Start)
@@ -187,6 +215,8 @@ func renderDataMetric(label, value, icon string) string {
 		value)
 }
 
+// renderProgressStats creates a formatted display of backup/restore progress statistics.
+// Shows counts for files copied, skipped, and total with appropriate color coding.
 func renderProgressStats(filesCopied, filesSkipped, totalFiles int64) string {
 	var parts []string
 	
@@ -331,13 +361,15 @@ var (
 			MarginTop(2)
 )
 
-// ASCII art for the program name with author - sleek design
+// MigrateASCII contains the ASCII art logo displayed in headers throughout the application.
+// Uses a sleek design that fits the Tokyo Night aesthetic.
 const MigrateASCII = `▖  ▖▘      ▗     ▐▘▄▖    ▗      ▜ 
 ▛▖▞▌▌▛▌▛▘▀▌▜▘█▌  ▐ ▚ ▌▌▛▘▜▘█▌▛▛▌▐ 
 ▌▝ ▌▌▙▌▌ █▌▐▖▙▖  ▐ ▄▌▙▌▄▌▐▖▙▖▌▌▌▐ 
      ▄▌          ▝▘  ▄▌         ▀ `
 
-// Render the main menu
+// renderMainMenu renders the primary application menu screen.
+// Displays the main navigation options with the application header and help text.
 func (m Model) renderMainMenu() string {
 	var s strings.Builder
 
@@ -363,7 +395,8 @@ func (m Model) renderMainMenu() string {
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
 }
 
-// Render backup menu
+// renderBackupMenu renders the backup type selection screen.
+// Shows options for complete system backup or home directory backup with explanatory info.
 func (m Model) renderBackupMenu() string {
 	var s strings.Builder
 
@@ -659,7 +692,8 @@ func (m Model) renderProgress() string {
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
 }
 
-// Get appropriate progress emoji based on operation phase
+// getProgressEmoji returns an appropriate emoji for the current operation phase.
+// Analyzes the message content to provide contextual visual indicators.
 func getProgressEmoji(message string, progress float64) string {
 	// Check message content for specific operations
 	if strings.Contains(message, "Scanning") || strings.Contains(message, "Scan") {
@@ -679,7 +713,9 @@ func getProgressEmoji(message string, progress float64) string {
 	return "💫" // Dizzy for processing/working
 }
 
-// Render gradient progress bar with authentic Tokyo Night styling
+// renderProgressBarWithMessage creates the main progress visualization with Tokyo Night styling.
+// Supports both determinate progress (0.0-1.0) and indeterminate progress (-1) with animated effects.
+// The progress bar features authentic Tokyo Night color gradients and a sweeping cylon animation.
 func (m Model) renderProgressBarWithMessage(message string) string {
 	width := 60 // Increased width for better visual impact
 	
@@ -794,7 +830,8 @@ func (m Model) renderProgressBarWithMessage(message string) string {
 		Render(progressText)
 }
 
-// Render header with beautiful ASCII art
+// renderHeader creates the standard application header with ASCII art, title, and version.
+// Used consistently across most screens for brand recognition and navigation context.
 func (m Model) renderHeader() string {
 	ascii := asciiStyle.Render(MigrateASCII)
 	title := titleStyle.Render(AppDesc)
@@ -855,7 +892,8 @@ func (m Model) renderDriveSelect() string {
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
 }
 
-// Render help text
+// renderHelp creates standardized help text for keyboard navigation.
+// Provides consistent guidance across all interactive screens.
 func (m Model) renderHelp() string {
 	return helpStyle.Render("↑/↓: navigate • enter: select • q: quit • esc: back")
 }
@@ -1118,8 +1156,8 @@ func (m Model) renderHomeFolderSelect() string {
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
 }
 
-// Progress message type
+// progressMsg is a message type for triggering progress updates in the TUI.
 type progressMsg struct{}
 
-// Tick message for progress updates
+// tickMsg carries timestamp information for periodic UI updates and animations.
 type tickMsg time.Time

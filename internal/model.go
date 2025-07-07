@@ -1,3 +1,16 @@
+// Package internal provides the core application model and state management for Migrate's TUI.
+//
+// This package implements the Bubble Tea model pattern for the interactive terminal user interface.
+// The model handles:
+//   - Application state management across different screens (main, backup, restore, verify, etc.)
+//   - Message handling for user input, system events, and background operations
+//   - Screen transitions and navigation logic
+//   - Progress tracking for long-running operations (backup, restore, verification)
+//   - Drive selection and mounting workflows
+//   - Home folder selection for selective backups
+//
+// The main Model struct contains all UI state and implements the tea.Model interface
+// for integration with the Bubble Tea framework.
 package internal
 
 import (
@@ -8,69 +21,91 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// Message types
+// cylonAnimateMsg triggers animation updates for the progress bar cylon effect.
+// This message is sent periodically during progress display to create the sweeping animation.
 type cylonAnimateMsg struct{}
 
-// Screen types
+// screen represents the different UI screens available in the application.
+// Each screen has its own rendering logic and input handling behavior.
 type screen int
 
 const (
-	screenMain screen = iota
-	screenBackup
-	screenRestore
-	screenVerify    // New: verify backup
-	screenAbout
-	screenConfirm
-	screenProgress
-	screenDriveSelect
-	screenError     // For errors that require manual dismissal
-	screenComplete  // For completion messages that require manual dismissal
-	screenHomeFolderSelect  // New: selective home folder backup
+	screenMain             screen = iota // Main menu with primary options
+	screenBackup                        // Backup type selection menu
+	screenRestore                       // Restore type selection menu  
+	screenVerify                        // Verification type selection menu
+	screenAbout                         // About/help information screen
+	screenConfirm                       // Confirmation dialog for operations
+	screenProgress                      // Progress display during operations
+	screenDriveSelect                   // External drive selection interface
+	screenError                         // Error display requiring manual dismissal
+	screenComplete                      // Success completion requiring manual dismissal
+	screenHomeFolderSelect              // Selective home folder backup interface
 )
 
-// Model represents the application state
+// Model represents the complete application state for the Migrate TUI.
+// It implements the tea.Model interface and contains all data needed to 
+// render screens and handle user interactions.
 type Model struct {
-	screen       screen
-	lastScreen   screen
-	cursor       int
-	choices      []string
-	selected     map[int]struct{}
-	confirmation string
-	progress     float64
-	operation    string
-	message      string
-	width        int
-	height       int
-	drives       []DriveInfo  // Available drives
-	selectedDrive string      // Selected drive path
-	cylonFrame   int          // Animation frame for cylon effect
-	canceling    bool         // Flag to indicate operation is being canceled
-	errorRequiresManualDismissal bool  // Flag for errors that need manual dismissal
+	// Screen and navigation state
+	screen     screen // Current active screen
+	lastScreen screen // Previous screen for back navigation
+	cursor     int    // Current cursor/selection position
+	choices    []string // Available menu options for current screen
+
+	// Selection and confirmation state  
+	selected    map[int]struct{} // Multi-select state (legacy, may be unused)
+	confirmation string          // Confirmation dialog text
 	
-	// Home folder selection fields
-	homeFolders    []HomeFolderInfo  // Available home folders
-	selectedFolders map[string]bool   // User selections (by folder path)
-	totalBackupSize int64            // Total size of selected folders (including hidden)
+	// Operation state
+	progress  float64 // Progress percentage (0.0 to 1.0, or -1 for indeterminate)
+	operation string  // Current operation identifier (e.g., "system_backup", "home_restore")
+	message   string  // Status or error message to display
+	canceling bool    // Flag indicating operation cancellation in progress
+	
+	// Display dimensions
+	width  int // Terminal width for rendering
+	height int // Terminal height for rendering
+	
+	// Drive management
+	drives        []DriveInfo // List of available external drives
+	selectedDrive string      // Currently selected drive path/mount point
+	
+	// Animation state
+	cylonFrame int // Current frame number for progress bar animation (0-19)
+	
+	// Error handling
+	errorRequiresManualDismissal bool // True for critical errors needing user acknowledgment
+	
+	// Home folder selection state (for selective backups)
+	homeFolders     []HomeFolderInfo // Discovered home directory folders
+	selectedFolders map[string]bool  // User's folder selections (path -> selected)
+	totalBackupSize int64           // Calculated total size of selected content
 }
 
-// InitialModel creates a new model
+// InitialModel creates and returns a new Model instance with default values.
+// This sets up the initial application state with the main menu active
+// and initializes all required maps and default dimensions.
 func InitialModel() Model {
 	return Model{
-		screen:   screenMain,
-		choices:  []string{"🚀 Backup System", "🔄 Restore System", "🔍 Verify Backup", "ℹ️ About", "❌ Exit"},
-		selected: make(map[int]struct{}),
+		screen:          screenMain,
+		choices:         []string{"🚀 Backup System", "🔄 Restore System", "🔍 Verify Backup", "ℹ️ About", "❌ Exit"},
+		selected:        make(map[int]struct{}),
 		selectedFolders: make(map[string]bool),
-		width:    100,
-		height:   30,
+		width:           100,
+		height:          30,
 	}
 }
 
-// Initialize
+// Init implements tea.Model.Init() and returns any initial commands.
+// Currently returns nil as no initialization commands are needed.
 func (m Model) Init() tea.Cmd {
 	return nil
 }
 
-// Update handles messages
+// Update implements tea.Model.Update() and handles all incoming messages.
+// This is the central message router that processes user input, system events,
+// background operation updates, and screen transitions.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -202,13 +237,34 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case ProgressUpdate:
 		if msg.Error != nil {
-			// Check if this is a critical error that needs manual dismissal
+			// Check error type for appropriate handling
 			errorMsg := fmt.Sprintf("Error: %v", msg.Error)
-			if strings.Contains(errorMsg, "verification") || 
-			   strings.Contains(errorMsg, "critical") || 
-			   strings.Contains(errorMsg, "failed") ||
+			
+			// Check for verification-specific completion (success with warnings/failures)
+			if strings.Contains(m.operation, "verify") && 
+			   (strings.Contains(errorMsg, "verification failed with") ||
+			    strings.Contains(errorMsg, "errors (threshold:") ||
+			    strings.Contains(errorMsg, "systematic") ||
+			    strings.Contains(errorMsg, "integrity issues")) {
+				// Verification completed but found issues - show detailed results
+				m.message = errorMsg
+				m.errorRequiresManualDismissal = true
+				m.lastScreen = m.screen
+				m.screen = screenError  // Show as error but with verification context
+				m.progress = 0
+				m.canceling = false
+				return m, nil
+			}
+			
+			// Check for critical system errors that need manual dismissal
+			if strings.Contains(errorMsg, "cryptsetup luksOpen") ||
+			   strings.Contains(errorMsg, "LUKS drive is locked") ||
+			   strings.Contains(errorMsg, "No such file or directory") ||
+			   strings.Contains(errorMsg, "permission denied") ||
+			   strings.Contains(errorMsg, "cannot determine backup type") ||
+			   strings.Contains(errorMsg, "no valid backup found") ||
 			   strings.Contains(errorMsg, "error 32") {
-				// Critical error - needs manual dismissal
+				// Critical system error - needs manual dismissal
 				m.message = errorMsg
 				m.errorRequiresManualDismissal = true
 				m.lastScreen = m.screen
@@ -257,13 +313,32 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.screen = screenComplete
 				return m, nil
 			} else {
-				// Operation completed with error - check if critical
+				// Operation completed with error
 				errorMsg := fmt.Sprintf("Error: %v", msg.Error)
-				if strings.Contains(errorMsg, "verification") || 
-				   strings.Contains(errorMsg, "critical") || 
-				   strings.Contains(errorMsg, "failed") ||
+				
+				// Check for verification-specific completion with detected issues
+				if strings.Contains(m.operation, "verify") && 
+				   (strings.Contains(errorMsg, "verification failed with") ||
+				    strings.Contains(errorMsg, "errors (threshold:") ||
+				    strings.Contains(errorMsg, "systematic") ||
+				    strings.Contains(errorMsg, "integrity issues")) {
+					// Verification found issues - show detailed error screen
+					m.message = errorMsg
+					m.errorRequiresManualDismissal = true
+					m.lastScreen = m.screen
+					m.screen = screenError
+					return m, nil
+				}
+				
+				// Check for critical system errors
+				if strings.Contains(errorMsg, "cryptsetup luksOpen") ||
+				   strings.Contains(errorMsg, "LUKS drive is locked") ||
+				   strings.Contains(errorMsg, "No such file or directory") ||
+				   strings.Contains(errorMsg, "permission denied") ||
+				   strings.Contains(errorMsg, "cannot determine backup type") ||
+				   strings.Contains(errorMsg, "no valid backup found") ||
 				   strings.Contains(errorMsg, "error 32") {
-					// Critical error - needs manual dismissal
+					// Critical system error - needs manual dismissal
 					m.message = errorMsg
 					m.errorRequiresManualDismissal = true
 					m.lastScreen = m.screen
@@ -451,7 +526,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// Handle menu selection
+// handleSelection processes menu selections and handles screen transitions.
+// This method implements the navigation logic for all interactive screens,
+// managing state changes and initiating background operations as needed.
 func (m Model) handleSelection() (tea.Model, tea.Cmd) {
 	switch m.screen {
 	case screenMain:
@@ -703,22 +780,25 @@ func (m Model) handleSelection() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// Calculate total backup size for selected folders (including all hidden folders)
+// calculateTotalBackupSize computes the total size of all selected folders for backup.
+// This includes both user-selected visible folders and automatically included hidden folders.
+// The result is stored in m.totalBackupSize for display and space validation.
 func (m *Model) calculateTotalBackupSize() {
 	m.totalBackupSize = 0
 	
 	for _, folder := range m.homeFolders {
 		if folder.AlwaysInclude {
-			// Hidden folders are always included
+			// Hidden folders are always included (dotfiles/dotdirs)
 			m.totalBackupSize += folder.Size
 		} else if m.selectedFolders[folder.Path] {
-			// Visible folders only if selected
+			// Visible folders only if explicitly selected by user
 			m.totalBackupSize += folder.Size
 		}
 	}
 }
 
-// Get visible folders (helper for navigation)
+// getVisibleFolders returns a slice of all folders that should be shown to the user.
+// This excludes hidden folders (dotfiles/dotdirs) which are handled automatically.
 func (m Model) getVisibleFolders() []HomeFolderInfo {
 	visibleFolders := make([]HomeFolderInfo, 0)
 	for _, folder := range m.homeFolders {
@@ -729,7 +809,8 @@ func (m Model) getVisibleFolders() []HomeFolderInfo {
 	return visibleFolders
 }
 
-// Get visible non-empty folders (helper for navigation and UI)
+// getVisibleFoldersNonEmpty returns only visible folders that contain data.
+// This is used for UI display to avoid showing empty folders in the selection interface.
 func (m Model) getVisibleFoldersNonEmpty() []HomeFolderInfo {
 	visibleFolders := make([]HomeFolderInfo, 0)
 	for _, folder := range m.homeFolders {
@@ -740,7 +821,8 @@ func (m Model) getVisibleFoldersNonEmpty() []HomeFolderInfo {
 	return visibleFolders
 }
 
-// View renders the UI
+// View implements tea.Model.View() and renders the current screen.
+// This method delegates to specific render functions based on the active screen.
 func (m Model) View() string {
 	switch m.screen {
 	case screenMain:

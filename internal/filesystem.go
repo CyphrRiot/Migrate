@@ -1,3 +1,17 @@
+// Package internal provides low-level filesystem operations for backup, restore, and synchronization.
+//
+// This package implements efficient file and directory operations including:
+//   - High-performance directory synchronization (rsync-like functionality)
+//   - Smart file comparison using size-based and hash-based methods
+//   - Deletion cleanup for maintaining backup consistency (--delete behavior)
+//   - Directory size calculation with multiple strategies (du command and fallback)
+//   - Cross-filesystem boundary detection and handling
+//   - Optimized file copying with large buffer support
+//   - Thread-safe progress tracking for long-running operations
+//
+// All operations are designed for maximum performance while maintaining data integrity.
+// The sync algorithms use intelligent comparison strategies to minimize unnecessary
+// file operations during incremental backups.
 package internal
 
 import (
@@ -15,12 +29,23 @@ import (
 	"syscall"
 )
 
-// Efficient sync directories (based on your working rsync-like implementation)
+// syncDirectories performs efficient directory synchronization using default exclude patterns.
+// This is a convenience wrapper around syncDirectoriesWithExclusions using the standard ExcludePatterns.
 func syncDirectories(src, dst string, logFile *os.File) error {
 	return syncDirectoriesWithExclusions(src, dst, ExcludePatterns, logFile)
 }
 
-// Efficient sync directories with custom exclusion patterns
+// syncDirectoriesWithExclusions performs high-performance directory synchronization with custom exclusions.
+// Implements rsync-like functionality using pure Go with the following optimizations:
+//   - Size-based comparison for fast incremental sync detection
+//   - Batch atomic operations for progress tracking performance
+//   - Cross-filesystem boundary detection (-x option equivalent)
+//   - Pre-compiled exclusion patterns for hot path optimization
+//   - Periodic cancellation checking for user responsiveness
+//   - Smart directory traversal with performance logging
+//
+// The function respects filesystem boundaries, handles permissions and timestamps,
+// and provides detailed progress feedback through global counters.
 func syncDirectoriesWithExclusions(src, dst string, excludePatterns []string, logFile *os.File) error {
 	// Check for cancellation before starting
 	if shouldCancelBackup() {
@@ -190,7 +215,7 @@ func syncDirectoriesWithExclusions(src, dst string, excludePatterns []string, lo
 			// Log slow file processing to identify bottlenecks
 			if localFilesFound%1000 == 0 && logFile != nil {
 				if info, err := d.Info(); err == nil {
-					fmt.Fprintf(logFile, "Processing file %d: %s (size: %s)\n", localFilesFound, path, formatBytes(info.Size()))
+					fmt.Fprintf(logFile, "Processing file %d: %s (size: %s)\n", localFilesFound, path, FormatBytes(info.Size()))
 				} else {
 					fmt.Fprintf(logFile, "Processing file %d: %s\n", localFilesFound, path)
 				}
@@ -200,7 +225,7 @@ func syncDirectoriesWithExclusions(src, dst string, excludePatterns []string, lo
 			if localFilesFound%1000 == 0 {
 				atomic.AddInt64(&totalFilesFound, 1000)
 				if logFile != nil && localFilesFound%10000 == 0 { // Log every 10k files
-					fmt.Fprintf(logFile, "Processed %s files...\n", formatNumber(atomic.LoadInt64(&totalFilesFound)))
+					fmt.Fprintf(logFile, "Processed %s files...\n", FormatNumber(atomic.LoadInt64(&totalFilesFound)))
 				}
 			}
 
@@ -220,7 +245,7 @@ func syncDirectoriesWithExclusions(src, dst string, excludePatterns []string, lo
 					copiedFilesListMutex.Unlock()
 					if logFile != nil && filesCopied%1000 == 0 { // Log every 1000 files instead of 100
 						fmt.Fprintf(logFile, "Copied %s files, skipped %s identical files\n",
-							formatNumber(filesCopied), formatNumber(filesSkipped))
+							FormatNumber(filesCopied), FormatNumber(filesSkipped))
 					}
 				}
 				return nil
@@ -236,7 +261,7 @@ func syncDirectoriesWithExclusions(src, dst string, excludePatterns []string, lo
 			if srcInfo.Size() == dstStat.Size() {
 				atomic.AddInt64(&filesSkipped, 1)
 				if logFile != nil && filesSkipped%500 == 0 { // Less frequent logging
-					fmt.Fprintf(logFile, "Skipped %s identical files so far...\n", formatNumber(filesSkipped))
+					fmt.Fprintf(logFile, "Skipped %s identical files so far...\n", FormatNumber(filesSkipped))
 				}
 				return nil
 			}
@@ -253,7 +278,7 @@ func syncDirectoriesWithExclusions(src, dst string, excludePatterns []string, lo
 				copiedFilesListMutex.Unlock()
 				if logFile != nil && filesCopied%100 == 0 {
 					fmt.Fprintf(logFile, "Copied %s files, skipped %s identical files\n",
-						formatNumber(filesCopied), formatNumber(filesSkipped))
+						FormatNumber(filesCopied), FormatNumber(filesSkipped))
 				}
 			}
 			return nil
@@ -275,13 +300,18 @@ func syncDirectoriesWithExclusions(src, dst string, excludePatterns []string, lo
 	// Log final summary
 	if logFile != nil {
 		fmt.Fprintf(logFile, "Sync completed: copied %s files, skipped %s identical files, processed %s total\n",
-			formatNumber(filesCopied), formatNumber(filesSkipped), formatNumber(totalFilesFound))
+			FormatNumber(filesCopied), FormatNumber(filesSkipped), FormatNumber(totalFilesFound))
 	}
 
 	return err
 }
 
-// Efficient file copying (assumes files are already checked to be different)
+// copyFileEfficient performs optimized file copying with variable buffer sizes and metadata preservation.
+// Features:
+//   - Dynamic buffer sizing (64KB standard, 1MB for files >100MB)
+//   - Automatic directory creation for destination path
+//   - Complete metadata preservation (permissions, ownership, timestamps)
+//   - Assumes files have already been determined to be different (no duplicate checking)
 func copyFileEfficient(src, dst string) error {
 	// Open source file
 	srcFile, err := os.Open(src)
@@ -332,7 +362,14 @@ func copyFileEfficient(src, dst string) error {
 	return nil
 }
 
-// Check if two files are identical using fast checks first, then hash only if needed
+// filesAreIdentical performs intelligent file comparison optimized for incremental backups.
+// Uses a multi-stage approach:
+//   1. Fast size comparison (most effective for incremental backups)
+//   2. Empty file optimization (immediate return for zero-byte files)
+//   3. Size-match assumption for performance (skips expensive hash/timestamp checks)
+//
+// This approach is optimized for the common case where files are either completely
+// different or completely identical, making it ideal for backup scenarios.
 func filesAreIdentical(src, dst string) bool {
 	// Get file info for both files
 	srcInfo, err := os.Stat(src)
@@ -361,7 +398,9 @@ func filesAreIdentical(src, dst string) bool {
 	return true // Skip all expensive checks - size match is sufficient for incremental backup
 }
 
-// Hash comparison for small files only
+// filesHashIdentical performs SHA256-based file comparison for small files.
+// This method provides cryptographic verification of file identity but is expensive
+// for large files. Recommended only for files where hash comparison is necessary.
 func filesHashIdentical(src, dst string) bool {
 	srcHash, err := getFileSHA256(src)
 	if err != nil {
@@ -376,7 +415,12 @@ func filesHashIdentical(src, dst string) bool {
 	return srcHash == dstHash
 }
 
-// Fast comparison for large files using sampling
+// largFilesIdentical performs efficient sampling-based comparison for large files.
+// Uses strategic sampling at beginning, middle, end, and additional points for very large files.
+// Sampling strategy:
+//   - 4KB samples at start, middle, end positions
+//   - Additional quarter and three-quarter samples for files >100MB
+//   - Much faster than full hash comparison while maintaining high accuracy
 func largFilesIdentical(src, dst string, size int64) bool {
 	// Open both files
 	srcFile, err := os.Open(src)
@@ -437,7 +481,9 @@ func largFilesIdentical(src, dst string, size int64) bool {
 	return true
 }
 
-// Calculate SHA256 hash of a file
+// getFileSHA256 calculates the SHA256 hash of a file.
+// Uses streaming IO to handle large files efficiently without loading entire file into memory.
+// Returns hex-encoded hash string for easy comparison and storage.
 func getFileSHA256(filePath string) (string, error) {
 	file, err := os.Open(filePath)
 	if err != nil {
@@ -454,12 +500,19 @@ func getFileSHA256(filePath string) (string, error) {
 	return hex.EncodeToString(hasher.Sum(nil)), nil
 }
 
-// Delete files from backup that no longer exist in source (--delete equivalent)
+// deleteExtraFilesFromBackup removes files from backup that no longer exist in source.
+// This is a convenience wrapper using default exclude patterns, equivalent to rsync's --delete option.
 func deleteExtraFilesFromBackup(sourcePath, backupPath string, logFile *os.File) error {
 	return deleteExtraFilesFromBackupWithExclusions(sourcePath, backupPath, ExcludePatterns, logFile)
 }
 
-// Delete files from backup that no longer exist in source with custom exclusions
+// deleteExtraFilesFromBackupWithExclusions performs backup cleanup with custom exclusion patterns.
+// Implements the --delete equivalent functionality by:
+//   - Walking the backup directory tree
+//   - Checking if each file/directory exists in the source
+//   - Removing backup items that are no longer present in source
+//   - Respecting exclusion patterns during cleanup
+//   - Providing cancellation support and progress tracking
 func deleteExtraFilesFromBackupWithExclusions(sourcePath, backupPath string, excludePatterns []string, logFile *os.File) error {
 	if logFile != nil {
 		fmt.Fprintf(logFile, "Starting cleanup phase (delete files not in source)\n")
@@ -528,7 +581,9 @@ func deleteExtraFilesFromBackupWithExclusions(sourcePath, backupPath string, exc
 	})
 }
 
-// Delete files that exist in target but not in backup (equivalent to rsync --delete)
+// deleteExtraFiles removes files from target that don't exist in backup during restore operations.
+// Implements rsync --delete behavior for restore operations, ensuring the target matches the backup exactly.
+// Automatically excludes special files and respects the standard exclusion patterns.
 func deleteExtraFiles(backupPath, targetPath string, logFile *os.File) error {
 	if logFile != nil {
 		fmt.Fprintf(logFile, "Starting cleanup phase (delete extra files)\n")
@@ -581,7 +636,9 @@ func deleteExtraFiles(backupPath, targetPath string, logFile *os.File) error {
 	})
 }
 
-// Get used disk space using pure Go syscalls (no external commands)
+// GetUsedDiskSpace calculates used disk space using pure Go syscalls without external commands.
+// Returns the actual used bytes on the filesystem containing the specified path.
+// Uses syscall.Statfs for accurate filesystem statistics.
 func GetUsedDiskSpace(path string) (int64, error) {
 	var stat syscall.Statfs_t
 	err := syscall.Statfs(path, &stat)
@@ -600,12 +657,14 @@ func GetUsedDiskSpace(path string) (int64, error) {
 	return usedBytes, nil
 }
 
-// Internal version for backward compatibility
+// getUsedDiskSpace provides backward compatibility wrapper for GetUsedDiskSpace.
 func getUsedDiskSpace(path string) (int64, error) {
 	return GetUsedDiskSpace(path)
 }
 
-// Calculate directory size using system du command (fast and accurate)
+// calculateDirectorySize computes total directory size using the system du command for accuracy and speed.
+// Falls back to pure Go implementation if du command fails.
+// Uses 'du -sb' for byte-accurate size calculation following symlinks but not crossing filesystems.
 func calculateDirectorySize(path string) (int64, error) {
 	// Use du -sb to get size in bytes, following symlinks but not crossing filesystems
 	cmd := exec.Command("du", "-sb", path)
@@ -634,7 +693,9 @@ func calculateDirectorySize(path string) (int64, error) {
 	return size, nil
 }
 
-// Fallback directory size calculation (pure Go, but slower)
+// calculateDirectorySizeFallback provides pure Go directory size calculation when du command fails.
+// Walks the directory tree and sums individual file sizes.
+// Slower than du but more portable and handles permission errors gracefully.
 func calculateDirectorySizeFallback(path string) (int64, error) {
 	var totalSize int64
 	
@@ -655,7 +716,8 @@ func calculateDirectorySizeFallback(path string) (int64, error) {
 	return totalSize, err
 }
 
-// Get actual size of home directory
+// GetHomeDirSize calculates the total size of the current user's home directory.
+// Uses the efficient calculateDirectorySize function which prefers du command with Go fallback.
 func GetHomeDirSize() (int64, error) {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
@@ -666,7 +728,9 @@ func GetHomeDirSize() (int64, error) {
 	return calculateDirectorySize(homeDir)
 }
 
-// Get actual backup size using syscall to get filesystem stats (fast)
+// getActualBackupSize calculates filesystem usage for a backup mount point.
+// Uses syscalls for fast filesystem statistics instead of walking directory trees.
+// Returns the actual bytes consumed on the backup drive.
 func getActualBackupSize(backupMount string) (int64, error) {
 	// Use Go's built-in syscall to get filesystem usage
 	var stat syscall.Statfs_t
@@ -683,14 +747,18 @@ func getActualBackupSize(backupMount string) (int64, error) {
 	return int64(usedBytes), nil
 }
 
-// Get directory size using du with timeout and excludes
+// getDirectorySize is an alias for getUsedDiskSpace optimized for backup drive progress tracking.
+// For backup drives, this returns filesystem usage rather than du-style directory traversal
+// for more reliable progress monitoring.
 func getDirectorySize(path string) (int64, error) {
 	// For backup drives, use df to get actual used space on the filesystem
 	// This is much more reliable than du for progress tracking
 	return getUsedDiskSpace(path)
 }
 
-// Copy directory with limited depth (avoids infinite walking but copies substantial data)
+// copyDirectoryLimitedDepth performs recursive directory copying with depth limiting.
+// Prevents infinite recursion while still copying substantial directory structures.
+// Useful for controlled backup operations where depth needs to be restricted.
 func copyDirectoryLimitedDepth(src, dst string, maxDepth int) error {
 	return copyDirectoryLimitedDepthRecursive(src, dst, 0, maxDepth)
 }

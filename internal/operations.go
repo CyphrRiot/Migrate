@@ -1,3 +1,16 @@
+// Package internal provides the core backup, restore, and verification operations for Migrate.
+//
+// This package implements the primary business logic including:
+//   - Pure Go backup operations with no external dependencies (no rsync)
+//   - Smart restore operations with automatic backup type detection
+//   - Backup verification with sampling and integrity checking
+//   - Real-time progress tracking and cancellation support
+//   - Selective home directory backup with folder exclusion
+//   - Configuration management for different backup types
+//
+// The operations are designed to be thread-safe and provide detailed progress
+// feedback through Bubble Tea commands. All operations support graceful cancellation
+// and comprehensive logging for debugging purposes.
 package internal
 
 import (
@@ -12,31 +25,33 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// BackupConfig holds backup configuration
+// BackupConfig contains all configuration parameters for a backup operation.
+// Supports both full system backups and selective home directory backups.
 type BackupConfig struct {
-	SourcePath      string
-	DestinationPath string
-	ExcludePatterns []string
-	BackupType      string
-	// NEW: Selective backup support
-	IsSelectiveBackup bool
-	SelectedFolders   map[string]bool  // folder -> selected state
-	HomeFolders       []HomeFolderInfo // folder information
+	SourcePath        string              // Root directory to backup (e.g., "/", "/home/user")
+	DestinationPath   string              // Target directory for backup (mount point)
+	ExcludePatterns   []string            // Glob patterns for files/directories to exclude
+	BackupType        string              // Human-readable backup type ("Complete System", "Home Directory")
+	IsSelectiveBackup bool                // true for user-selected folder backups
+	SelectedFolders   map[string]bool     // folder path -> selected state (for selective backups)
+	HomeFolders       []HomeFolderInfo    // metadata about home folders (for selective backups)
 }
 
-// VerificationConfig holds verification settings
+// VerificationConfig controls how backup verification is performed.
+// Provides options for sampling, timeouts, and parallel processing.
 type VerificationConfig struct {
-	SampleRate       float64  // Default: 0.01 (1%)
-	TimeoutMinutes   int      // Default: 5  
-	ParallelWorkers  int      // Default: 4
-	CriticalFiles    []string // Critical system files to always verify
+	SampleRate      float64  // Fraction of unchanged files to verify (0.0-1.0, default 0.01 = 1%)
+	TimeoutMinutes  int      // Maximum time to spend on verification (default 5)
+	ParallelWorkers int      // Number of concurrent verification workers (default 4)
+	CriticalFiles   []string // System files that must always be verified
 }
 
-// Default verification configuration
+// DefaultVerificationConfig provides sensible defaults for backup verification.
+// Balances thoroughness with performance for typical backup sizes.
 var DefaultVerificationConfig = VerificationConfig{
-	SampleRate:      0.01, // 1% of unchanged files
-	TimeoutMinutes:  5,
-	ParallelWorkers: 4,
+	SampleRate:      0.01, // 1% random sampling of unchanged files
+	TimeoutMinutes:  5,    // 5 minute timeout
+	ParallelWorkers: 4,    // 4 concurrent workers
 	CriticalFiles: []string{
 		"/etc/fstab",
 		"/etc/passwd", 
@@ -48,64 +63,73 @@ var DefaultVerificationConfig = VerificationConfig{
 	},
 }
 
-// Verification can be disabled for debugging
-var EnableVerification = false  // DISABLED by default until we fix the issues
+// EnableVerification controls whether backup verification is performed.
+// Currently disabled by default for debugging purposes.
+var EnableVerification = false
 
-// VerificationResult holds verification results
+// VerificationResult contains the results and statistics from a verification operation.
 type VerificationResult struct {
-	Success         bool
-	FilesVerified   int64
-	NewFilesChecked int64
-	SampledFiles    int64
-	CriticalFiles   int64
-	ErrorCount      int
-	Warnings        []string
-	Duration        time.Duration
+	Success         bool          // true if verification passed without critical errors
+	FilesVerified   int64         // Total number of files that were verified
+	NewFilesChecked int64         // Number of newly copied files verified
+	SampledFiles    int64         // Number of files verified through random sampling  
+	CriticalFiles   int64         // Number of critical system files verified
+	ErrorCount      int           // Count of non-critical errors encountered
+	Warnings        []string      // List of warning messages
+	Duration        time.Duration // Total time spent on verification
 }
 
-// Progress update message
+// ProgressUpdate is a Bubble Tea message that reports operation progress.
+// Used for backup, restore, and verification operations.
 type ProgressUpdate struct {
-	Percentage float64
-	Message    string
-	Done       bool
-	Error      error
+	Percentage float64 // Progress from 0.0 to 1.0, or -1 for indeterminate
+	Message    string  // Human-readable status message
+	Done       bool    // true when operation is complete
+	Error      error   // Non-nil if operation failed
 }
 
-// Global completion tracking for TUI
-var tuiBackupCompleted = false
-var tuiBackupError error
-var tuiBackupCancelling = false // Track if cancellation is in progress
+// Global state variables for TUI operation tracking.
+// These variables coordinate between background operations and the UI.
+var (
+	// TUI coordination variables
+	tuiBackupCompleted  bool  // true when background operation completes
+	tuiBackupError      error // non-nil if operation failed
+	tuiBackupCancelling bool  // true when cancellation is in progress
 
-// Global variables to track backup progress and timing  
-var backupStartTime time.Time
-var sourceUsedSpace int64      // Source drive used space (fixed)
-var destStartUsedSpace int64   // Destination used space when backup started (fixed)
-var progressCallCounter int    // Simple counter to prove function is being called
-var totalFilesProcessed int64  // New: track files processed
-var totalFilesEstimate int64   // New: estimated total files
-var syncPhaseComplete bool     // New: track if sync phase is done
-var deletionPhaseActive bool   // New: track deletion phase
+	// Timing and baseline measurements
+	backupStartTime      time.Time // when the current operation started
+	sourceUsedSpace      int64     // source drive used space (fixed at start)
+	destStartUsedSpace   int64     // destination used space when backup started
+	progressCallCounter  int       // simple counter for progress function calls
+	totalFilesProcessed  int64     // cumulative files processed
+	totalFilesEstimate   int64     // estimated total files to process
 
-// SMART PROGRESS TRACKING - Based on actual work done
-var filesSkipped int64         // Files skipped (identical)
-var filesCopied int64          // Files actually copied  
-var filesDeleted int64         // Files deleted in cleanup
-var totalFilesFound int64      // Total files discovered during walk
-var directoryWalkComplete bool // Directory enumeration finished
+	// Phase tracking flags
+	syncPhaseComplete       bool // true when main sync phase is done
+	deletionPhaseActive     bool // true during deletion phase
+	directoryWalkComplete   bool // true when initial directory enumeration is done
+	verificationPhaseActive bool // true during verification phase
+	isStandaloneVerification bool // true for standalone verification (not part of backup)
 
-// VERIFICATION PHASE TRACKING  
-var verificationPhaseActive bool    // Track verification phase
-var isStandaloneVerification bool   // Track if this is standalone verification (not part of backup)
-var totalFilesVerified int64        // Counter for verification progress
-var copiedFilesList []string        // Files that were actually copied (for verification)
-var copiedFilesListMutex sync.Mutex // Protect copiedFilesList for thread safety
-var verificationErrors []string     // Non-critical errors to log
+	// File operation counters
+	filesSkipped     int64 // files skipped (identical between source and destination)
+	filesCopied      int64 // files actually copied/updated
+	filesDeleted     int64 // files deleted during cleanup phase
+	totalFilesFound  int64 // total files discovered during directory walk
 
-// ENHANCED PROGRESS TRACKING - Phase A: Better Messages
-var currentDirectory string    // Current directory being scanned
-var lastProgressMessage string // Last message to avoid spam
+	// Verification tracking
+	totalFilesVerified   int64        // counter for verification progress
+	copiedFilesList      []string     // list of files that were actually copied (for verification)
+	copiedFilesListMutex sync.Mutex   // protect copiedFilesList for thread safety
+	verificationErrors   []string     // non-critical errors during verification
 
-// Reset all backup progress counters and state
+	// Enhanced progress tracking
+	currentDirectory     string // current directory being scanned (for display)
+	lastProgressMessage  string // last progress message (to avoid spam)
+)
+
+// resetBackupState clears all global progress tracking variables.
+// Must be called before starting any new operation to ensure clean state.
 func resetBackupState() {
 	// Reset timing
 	backupStartTime = time.Time{}
@@ -141,7 +165,9 @@ func resetBackupState() {
 	tuiBackupCancelling = false
 }
 
-// Start backup operation - TUI ONLY (Pure Go)
+// startBackup creates a Bubble Tea command to initiate a backup operation.
+// Resets all state, starts the operation in a background goroutine, and returns
+// an initial progress message. The operation runs using pure Go (no external dependencies).
 func startBackup(config BackupConfig) tea.Cmd {
 	return func() tea.Msg {
 		// Reset all backup state before starting
@@ -153,7 +179,9 @@ func startBackup(config BackupConfig) tea.Cmd {
 	}
 }
 
-// Run backup using pure Go implementation (TUI only)
+// runBackupSilently performs the actual backup operation in the background.
+// Handles logging, progress tracking, and error reporting. Runs in pure Go
+// without external dependencies like rsync.
 func runBackupSilently(config BackupConfig) {
 	// Reset cancellation flag at start
 	resetBackupCancel()
@@ -179,7 +207,7 @@ func runBackupSilently(config BackupConfig) {
 
 	if logFile != nil {
 		fmt.Fprintf(logFile, "Using pure Go: source=%s, dest_start=%s\n",
-			formatBytes(sourceUsedSpace), formatBytes(destStartUsedSpace))
+			FormatBytes(sourceUsedSpace), FormatBytes(destStartUsedSpace))
 	}
 
 	// Use pure Go implementation for actual backup
@@ -209,7 +237,11 @@ func runBackupSilently(config BackupConfig) {
 	}
 }
 
-// Pure Go backup implementation (no external dependencies)
+// performPureGoBackup executes the three-phase backup process using only pure Go.
+// Phase 1: Sync files from source to destination (with selective exclusions)
+// Phase 2: Delete files that exist in destination but not source (--delete behavior)  
+// Phase 3: Verify backup integrity (if enabled)
+// All phases support cancellation and provide detailed progress tracking.
 func performPureGoBackup(config BackupConfig, logFile *os.File) error {
 	if logFile != nil {
 		fmt.Fprintf(logFile, "Starting pure Go backup (zero external dependencies)\n")
@@ -323,7 +355,9 @@ func performPureGoBackup(config BackupConfig, logFile *os.File) error {
 	return nil
 }
 
-// Check TUI backup progress with real disk usage monitoring
+// CheckTUIBackupProgress creates a Bubble Tea command that periodically checks operation progress.
+// Handles cancellation detection, completion status, and real-time progress calculation.
+// Returns ProgressUpdate messages with current status for the UI.
 func CheckTUIBackupProgress() tea.Cmd {
 	return tea.Tick(200*time.Millisecond, func(t time.Time) tea.Msg {
 		// Check if cancellation was requested - switch to cancelling state
@@ -365,7 +399,13 @@ func CheckTUIBackupProgress() tea.Cmd {
 	})
 }
 
-// Calculate actual backup progress - SMART FILE-BASED TRACKING
+// calculateRealProgress computes current operation progress using smart file-based tracking.
+// Uses different algorithms depending on the current phase:
+// - Directory scanning: 0-1% based on files discovered
+// - File sync: 1-95% based on files processed vs. total found
+// - Deletion: 95-99% based on cleanup progress
+// - Verification: 95-100% (backup) or 0-100% (standalone)
+// Returns progress (0.0-1.0) and a descriptive status message.
 func calculateRealProgress() (float64, string) {
 	// Initialize on first run
 	if backupStartTime.IsZero() {
@@ -441,7 +481,7 @@ func calculateRealProgress() (float64, string) {
 				progress = 0.95 // Starting backup verification
 			}
 			
-			message = fmt.Sprintf("Verifying backup integrity • %s files verified", formatNumber(totalFilesVerified))
+			message = fmt.Sprintf("Verifying backup integrity • %s files verified", FormatNumber(totalFilesVerified))
 		}
 
 	} else if deletionPhaseActive {
@@ -457,7 +497,7 @@ func calculateRealProgress() (float64, string) {
 			progress = 0.97 // Default deletion progress
 		}
 
-		message = fmt.Sprintf("Deleting removed files (%s files cleaned up)", formatNumber(filesDeleted))
+		message = fmt.Sprintf("Deleting removed files (%s files cleaned up)", FormatNumber(filesDeleted))
 
 	} else if syncPhaseComplete {
 		// Sync complete, starting deletion
@@ -480,13 +520,13 @@ func calculateRealProgress() (float64, string) {
 				// Show sync status
 				if filesCopied > 0 {
 					message = fmt.Sprintf("📁 Syncing files • %s copied, %s skipped • %s total",
-						formatNumber(filesCopied), formatNumber(filesSkipped), formatNumber(totalFilesFound))
+						FormatNumber(filesCopied), FormatNumber(filesSkipped), FormatNumber(totalFilesFound))
 				} else if filesSkipped > 1000 {
 					message = fmt.Sprintf("⚡ Comparing files • %s identical • %s total processed",
-						formatNumber(filesSkipped), formatNumber(totalFilesFound))
+						FormatNumber(filesSkipped), FormatNumber(totalFilesFound))
 				} else {
 					message = fmt.Sprintf("🔄 Processing files • %s of %s analyzed",
-						formatNumber(filesProcessed), formatNumber(totalFilesFound))
+						FormatNumber(filesProcessed), FormatNumber(totalFilesFound))
 				}
 				
 				// Add current directory info if available - FIXED WIDTH with truncation
@@ -531,9 +571,9 @@ func calculateRealProgress() (float64, string) {
 				
 				if fileDiscoveryRate > 0 {
 					message = fmt.Sprintf("🔍 Scanning filesystem • %s files found • %s files/sec", 
-						formatNumber(totalFilesFound), formatNumber(int64(fileDiscoveryRate)))
+						FormatNumber(totalFilesFound), FormatNumber(int64(fileDiscoveryRate)))
 				} else {
-					message = fmt.Sprintf("🔍 Scanning filesystem • %s files found", formatNumber(totalFilesFound))
+					message = fmt.Sprintf("🔍 Scanning filesystem • %s files found", FormatNumber(totalFilesFound))
 				}
 				
 				// Add current directory info if available - FIXED WIDTH with truncation
@@ -568,7 +608,9 @@ func calculateRealProgress() (float64, string) {
 	return progress, message
 }
 
-// Start smart restore operation - detects backup type and auto-targets appropriately
+// startRestore creates a Bubble Tea command for restore operations.
+// Automatically detects backup type (system/home) and determines the appropriate
+// target path. Handles both full system restores and custom path restores.
 func startRestore(sourcePath, targetPath string) tea.Cmd {
 	return func() tea.Msg {
 		// Setup logging in appropriate directory
@@ -647,7 +689,10 @@ func startRestore(sourcePath, targetPath string) tea.Cmd {
 	}
 }
 
-// Pure Go restore implementation
+// performPureGoRestore executes a two-phase restore process using pure Go.
+// Phase 1: Copy all files from backup to target location
+// Phase 2: Delete files that exist in target but not in backup (--delete behavior)
+// Provides comprehensive logging and error handling.
 func performPureGoRestore(backupPath, targetPath string, logFile *os.File) error {
 	if logFile != nil {
 		fmt.Fprintf(logFile, "Starting restore: %s -> %s\n", backupPath, targetPath)
@@ -677,7 +722,9 @@ func performPureGoRestore(backupPath, targetPath string, logFile *os.File) error
 	return nil
 }
 
-// Detect backup type from BACKUP-INFO.txt file
+// detectBackupType analyzes a backup directory to determine its type.
+// Checks BACKUP-INFO.txt first, then falls back to directory structure analysis.
+// Returns "system", "home", or "unknown" with an error if type cannot be determined.
 func detectBackupType(backupPath string) (string, error) {
 	infoPath := filepath.Join(backupPath, "BACKUP-INFO.txt")
 	content, err := os.ReadFile(infoPath)
@@ -704,7 +751,9 @@ func detectBackupType(backupPath string) (string, error) {
 	return "unknown", fmt.Errorf("cannot determine backup type from %s", backupPath)
 }
 
-// Get current username (handles sudo properly)
+// getCurrentUser returns the username, handling sudo context properly.
+// When running under sudo, returns the original user (SUDO_USER).
+// Falls back to USER environment variable, then "unknown".
 func getCurrentUser() string {
 	// If running under sudo, get the original user
 	if sudoUser := os.Getenv("SUDO_USER"); sudoUser != "" {
@@ -720,7 +769,9 @@ func getCurrentUser() string {
 	return "unknown"
 }
 
-// Create backup info file
+// createBackupInfo generates the BACKUP-INFO.txt file for a backup.
+// Includes system information, timestamps, backup type, and restore instructions.
+// This file is used for backup type detection and user reference.
 func createBackupInfo(mountPoint, backupType string) error {
 	hostname, _ := os.Hostname()
 

@@ -1,3 +1,17 @@
+// Package internal provides drive detection, mounting, and management functionality for Migrate.
+//
+// This package handles all aspects of external drive interaction including:
+//   - Drive discovery and enumeration using lsblk
+//   - LUKS encrypted drive support and unlocking workflows
+//   - Space requirement validation for backup and restore operations
+//   - Mount and unmount operations with proper cleanup
+//   - Home directory structure analysis for selective backups
+//   - Safety checks to prevent mounting system drives
+//
+// The drive system supports both regular and LUKS-encrypted external drives,
+// with automatic detection of mount points and proper handling of various
+// filesystem types. All operations are designed to be safe and prevent
+// accidental damage to the system drive.
 package internal
 
 import (
@@ -15,62 +29,70 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// HomeFolderInfo represents a folder in the home directory for selective backup
+// HomeFolderInfo represents metadata about a directory within the user's home folder.
+// Used for selective backup operations to track folder size, visibility, and user selections.
 type HomeFolderInfo struct {
-	Name        string
-	Path        string
-	Size        int64
-	IsVisible   bool    // false for dotfiles/dotdirs
-	Selected    bool    // user selection state
-	AlwaysInclude bool  // true for dotfiles (non-selectable)
+	Name          string // Directory name (e.g., "Documents", ".config")
+	Path          string // Full absolute path to the directory
+	Size          int64  // Total size in bytes (calculated recursively)
+	IsVisible     bool   // false for dotfiles/dotdirs (hidden folders)
+	Selected      bool   // Current user selection state for backup inclusion
+	AlwaysInclude bool   // true for dotdirs (automatically included, non-selectable)
 }
 
-// Drive information
+// DriveInfo contains metadata about an external drive available for backup operations.
+// Represents both the physical device and its current mount status.
 type DriveInfo struct {
-	Device     string
-	Size       string
-	Label      string
-	UUID       string
-	Filesystem string
-	Encrypted  bool
+	Device     string // Mount point path (e.g., "/run/media/user/drive") or device path
+	Size       string // Human-readable size string (e.g., "1.5T", "500G")
+	Label      string // Volume label or friendly name
+	UUID       string // Filesystem UUID for identification
+	Filesystem string // Filesystem type (e.g., "ext4", "ntfs", "crypto_LUKS")
+	Encrypted  bool   // true if this is an encrypted drive (LUKS)
 }
 
-// Message types for drive operations
+// DrivesLoaded is a Bubble Tea message containing the results of drive enumeration.
 type DrivesLoaded struct {
-	drives []DriveInfo
+	drives []DriveInfo // List of discovered external drives
 }
 
+// DriveOperation reports the result of a drive mount/unmount operation.
 type DriveOperation struct {
-	message string
-	success bool
+	message string // Human-readable status or error message
+	success bool   // true if the operation completed successfully
 }
 
-// Backup drive status message
+// BackupDriveStatus provides detailed information about drive mounting for backup operations.
+// Contains all necessary data for the UI to display confirmation dialogs and proceed with operations.
 type BackupDriveStatus struct {
-	drivePath  string
-	driveSize  string
-	driveType  string
-	mountPoint string
-	needsMount bool
-	error      error
+	drivePath  string // Original drive identifier
+	driveSize  string // Human-readable size
+	driveType  string // Descriptive type string (e.g., "External Drive [ext4]", "Encrypted [LUKS]")
+	mountPoint string // Current mount point path
+	needsMount bool   // true if drive still needs mounting (typically false after mounting)
+	error      error  // Non-nil if mounting failed or space check failed
 }
 
-// Special message type for requesting password input outside TUI
+// PasswordRequiredMsg signals that LUKS password input is needed outside the TUI.
+// This message type is used to coordinate password entry workflows.
 type PasswordRequiredMsg struct {
-	drivePath string
-	driveSize string
-	driveType string
+	drivePath string // Path to the encrypted drive
+	driveSize string // Human-readable size for display
+	driveType string // Drive type description
 }
 
-// New message type for password interaction
+// passwordInteractionMsg handles password interaction workflows for LUKS drives.
+// Used internally for coordinating password entry and subsequent operations.
 type passwordInteractionMsg struct {
-	drivePath  string
-	driveSize  string
-	driveType  string
-	originalOp string
+	drivePath  string // Path to the encrypted drive
+	driveSize  string // Human-readable size for display  
+	driveType  string // Drive type description
+	originalOp string // The original operation that required password input
 }
 
-// Check if any backup drive is mounted (pure Go - no external commands)
+// checkAnyBackupMounted scans for mounted external drives using pure Go (no external commands).
+// Returns the mount point and true if an external backup drive is currently mounted.
+// Parses /proc/mounts directly for efficiency and reliability.
 func checkAnyBackupMounted() (string, bool) {
 	// Parse /proc/mounts directly instead of using findmnt command
 	file, err := os.Open("/proc/mounts")
@@ -99,12 +121,15 @@ func checkAnyBackupMounted() (string, bool) {
 	return "", false
 }
 
-// Mount backup drive with proper interactive password handling (DEPRECATED - use mountLUKSDrive/mountRegularDrive instead)
+// mountBackupDrive is deprecated in favor of the new drive selection system.
+// Use LoadDrives() and mountDriveForBackup() instead for proper drive selection.
 func mountBackupDrive() (string, error) {
 	return "", fmt.Errorf("deprecated function - use drive selection instead")
 }
 
-// Unmount backup drive using pure Go
+// unmountBackupDrive safely unmounts and cleans up an external backup drive.
+// Handles both regular drives and LUKS encrypted drives with proper cleanup.
+// Performs filesystem sync before unmounting for data safety.
 func unmountBackupDrive(mountPoint string) error {
 	// Sync first
 	syscall.Sync()
@@ -133,7 +158,9 @@ func unmountBackupDrive(mountPoint string) error {
 	return nil
 }
 
-// Get device path for a mount point from /proc/mounts (pure Go)
+// getDeviceFromProcMounts finds the device path for a given mount point using pure Go.
+// Parses /proc/mounts to avoid external command dependencies.
+// Returns the device path (e.g., "/dev/sdb1") for the specified mount point.
 func getDeviceFromProcMounts(mountPoint string) (string, error) {
 	file, err := os.Open("/proc/mounts")
 	if err != nil {
@@ -157,7 +184,9 @@ func getDeviceFromProcMounts(mountPoint string) (string, error) {
 	return "", fmt.Errorf("mount point %s not found", mountPoint)
 }
 
-// Parse drive size string (like "32G", "1.5T") to bytes
+// parseDriveSize converts human-readable size strings to bytes.
+// Supports standard units: B, K, M, G, T, P (case-insensitive).
+// Examples: "1.5T" -> 1,649,267,441,664 bytes, "500G" -> 537,109,987,328 bytes
 func parseDriveSize(sizeStr string) (int64, error) {
 	sizeStr = strings.TrimSpace(sizeStr)
 	if len(sizeStr) < 2 {
@@ -197,7 +226,9 @@ func parseDriveSize(sizeStr string) (int64, error) {
 	return int64(number * float64(multiplier)), nil
 }
 
-// Check if external drive has enough space for backup
+// checkBackupSpaceRequirements validates that an external drive has sufficient space for system backup.
+// Compares the used space on the root filesystem against the total capacity of the external drive.
+// Returns an error with detailed space information if the drive is too small.
 func checkBackupSpaceRequirements(externalDriveSize string) error {
 	// Get used space on internal drive (what we need to backup)
 	internalUsedSpace, err := getUsedDiskSpace("/")
@@ -214,9 +245,9 @@ func checkBackupSpaceRequirements(externalDriveSize string) error {
 	// Check: internal_used_space <= external_total_size
 	if internalUsedSpace > externalTotalSize {
 		return fmt.Errorf("⚠️ INSUFFICIENT SPACE for backup\n\nInternal drive used: %s\nExternal drive total: %s\n\nThe external drive is too small to hold your backup.\nYou need at least %s of total drive capacity.",
-			formatBytes(internalUsedSpace),
-			formatBytes(externalTotalSize), 
-			formatBytes(internalUsedSpace))
+			FormatBytes(internalUsedSpace),
+			FormatBytes(externalTotalSize), 
+			FormatBytes(internalUsedSpace))
 	}
 	
 	return nil
@@ -297,13 +328,17 @@ func checkRestoreSpaceRequirements(externalDriveSize string, externalMountPoint 
 	// Check: external_used_space <= internal_total_size  
 	if externalUsedSpace > internalTotalSize {
 		return fmt.Errorf("⚠️ INSUFFICIENT SPACE for restore\n\nBackup size: %s\nInternal drive total: %s\n\nThe backup is too large to fit on your internal drive.\nYou need at least %s of total drive capacity.",
-			formatBytes(externalUsedSpace),
-			formatBytes(internalTotalSize),
-			formatBytes(externalUsedSpace))
+			FormatBytes(externalUsedSpace),
+			FormatBytes(internalTotalSize),
+			FormatBytes(externalUsedSpace))
 	}
 	
 	return nil
 }
+// LoadDrives scans for available external drives and returns them as a Bubble Tea command.
+// Uses lsblk to enumerate drives with safety checks to prevent listing system drives.
+// Supports multiple detection criteria: hotplug flag, device naming, and mount location analysis.
+// Only returns drives that are currently mounted and accessible.
 func LoadDrives() tea.Cmd {
 	return func() tea.Msg {
 		// Get all block devices including hotplug info
@@ -599,7 +634,9 @@ func mountSelectedDrive(drive DriveInfo) tea.Cmd {
 	}
 }
 
-// Mount LUKS encrypted drive
+// mountLUKSDrive handles mounting of LUKS-encrypted external drives.
+// Manages the two-step process: unlocking the LUKS container, then mounting the filesystem.
+// Checks for existing unlock/mount status to avoid duplicate operations.
 func mountLUKSDrive(drive DriveInfo) (string, error) {
 	// Check if already unlocked
 	mapperName := "luks-" + drive.UUID
@@ -653,7 +690,9 @@ func mountLUKSDrive(drive DriveInfo) (string, error) {
 	return "/media/unknown", nil
 }
 
-// Mount regular drive
+// mountRegularDrive handles mounting of standard (non-encrypted) external drives.
+// Checks for existing mount status and uses udisksctl for safe mounting.
+// Returns the mount point path on success.
 func mountRegularDrive(drive DriveInfo) (string, error) {
 	// Check if already mounted first
 	cmd := exec.Command("findmnt", "-rn", "-o", "TARGET", drive.Device)
@@ -1053,7 +1092,10 @@ func PerformBackupUnmount() tea.Cmd {
 	}
 }
 
-// Discover home directory structure for selective backup
+// discoverHomeFolders analyzes the user's home directory for selective backup operations.
+// Scans all directories, calculates sizes, and categorizes them as visible or hidden.
+// Logs details to the application log file for debugging purposes.
+// Returns a sorted list with visible folders first, then hidden folders alphabetically.
 func discoverHomeFolders() ([]HomeFolderInfo, error) {
 	// Get the original user's home directory, not root's
 	homeDir := os.Getenv("SUDO_USER")
@@ -1135,13 +1177,14 @@ func discoverHomeFolders() ([]HomeFolderInfo, error) {
 	return folders, nil
 }
 
-// Message type for home folder discovery
+// HomeFoldersDiscovered is a Bubble Tea message containing home directory analysis results.
 type HomeFoldersDiscovered struct {
-	folders []HomeFolderInfo
-	error   error
+	folders []HomeFolderInfo // Discovered directories with size and metadata
+	error   error            // Non-nil if directory scanning failed
 }
 
-// Command to discover home folders asynchronously
+// DiscoverHomeFoldersCmd creates a Bubble Tea command to asynchronously analyze the home directory.
+// Returns a HomeFoldersDiscovered message when the analysis completes.
 func DiscoverHomeFoldersCmd() tea.Cmd {
 	return func() tea.Msg {
 		folders, err := discoverHomeFolders()

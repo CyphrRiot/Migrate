@@ -1,3 +1,15 @@
+// Package main implements the entry point and system initialization for Migrate.
+//
+// This package handles:
+//   - Privilege elevation and root access verification
+//   - Single instance checking to prevent concurrent operations  
+//   - System dependency validation (lsblk, udisksctl, cryptsetup, etc.)
+//   - Signal handling for clean shutdown
+//   - TUI initialization and execution
+//
+// The application requires root privileges for drive mounting, LUKS operations,
+// and system-level backup operations. When not running as root, it automatically
+// re-executes itself with sudo.
 package main
 
 import (
@@ -13,10 +25,13 @@ import (
 	"migrate/internal"
 )
 
-// Singleton instance checking
+// lockFilePath defines the location of the singleton instance lock file.
+// This prevents multiple migrate processes from running concurrently.
 const lockFilePath = "/tmp/migrate.lock"
 
-// Check if another migrate is running
+// checkSingleInstance verifies that no other migrate process is currently running.
+// It checks for the existence of a lock file and validates that the PID is still active.
+// Stale lock files are automatically cleaned up if the process no longer exists.
 func checkSingleInstance() error {
 	// Check if lock file exists
 	if _, err := os.Stat(lockFilePath); err == nil {
@@ -37,13 +52,15 @@ func checkSingleInstance() error {
 	return nil
 }
 
-// Create instance lock
+// createInstanceLock creates a lock file containing the current process ID.
+// This prevents other migrate instances from starting while this one is running.
 func createInstanceLock() error {
 	pid := fmt.Sprintf("%d", os.Getpid())
 	return os.WriteFile(lockFilePath, []byte(pid), 0644)
 }
 
-// Remove instance lock
+// removeInstanceLock deletes the singleton lock file to allow new instances.
+// This should be called when the application exits, either normally or via signal.
 func removeInstanceLock() {
 	os.Remove(lockFilePath)
 }
@@ -63,7 +80,9 @@ func main() {
 	runAsRoot()
 }
 
-// Elevate to root privileges by re-running with sudo
+// elevateToRoot handles privilege escalation by re-executing the program with sudo.
+// It displays a user-friendly prompt explaining why root access is needed,
+// then re-runs the current executable with all arguments preserved.
 func elevateToRoot() error {
 	// Get the path to the current executable
 	execPath, err := os.Executable()
@@ -108,7 +127,8 @@ func elevateToRoot() error {
 	return nil // Never reached
 }
 
-// Main program logic when running as root
+// runAsRoot contains the main program logic when running with root privileges.
+// It handles singleton checking, dependency validation, signal handling, and TUI initialization.
 func runAsRoot() {
 	// Check for another instance
 	if err := checkSingleInstance(); err != nil {
@@ -168,14 +188,17 @@ func runAsRoot() {
 	}
 }
 
-// Check if we already have sudo access
+// hasSudoAccess checks if the current user has cached sudo credentials.
+// Returns true if sudo can be used without password prompt.
 func hasSudoAccess() bool {
 	cmd := exec.Command("sudo", "-n", "true")
 	err := cmd.Run()
 	return err == nil
 }
 
-// Check all required system dependencies
+// checkSystemDependencies validates that all required system programs are available.
+// It checks for critical programs (lsblk, udisksctl, cryptsetup) and optional ones,
+// providing installation instructions for missing dependencies.
 func checkSystemDependencies() error {
 	// Required programs for core functionality
 	requiredPrograms := []struct{
