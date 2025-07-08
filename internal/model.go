@@ -721,79 +721,104 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // handleSelection processes menu selections and handles screen transitions.
 // This method implements the navigation logic for all interactive screens,
 // managing state changes and initiating background operations as needed.
+
+// handleMainMenuSelection handles selection logic for the main menu screen
+func (m Model) handleMainMenuSelection() (tea.Model, tea.Cmd) {
+	switch m.cursor {
+	case 0: // Backup
+		m.screen = screenBackup
+		m.choices = []string{"📁 Complete System Backup", "🏠 Home Directory Only", "⬅️ Back"}
+		m.cursor = 0
+	case 1: // Verify Backup
+		m.screen = screenVerify
+		m.choices = []string{"🔍 Auto-Detect & Verify Backup", "⬅️ Back"}
+		m.cursor = 0
+	case 2: // Restore
+		m.screen = screenRestore
+		m.choices = []string{"🔄 Restore to Current System", "📂 Restore to Custom Path", "⬅️ Back"}
+		m.cursor = 0
+	case 3: // About
+		m.screen = screenAbout
+	case 4: // Exit
+		return m, tea.Quit
+	}
+	return m, nil
+}
+
+// handleBackupMenuSelection handles selection logic for the backup menu screen
+func (m Model) handleBackupMenuSelection() (tea.Model, tea.Cmd) {
+	switch m.cursor {
+	case 0: // Complete System Backup
+		m.operation = "system_backup"
+		// Go to drive selection instead of hardcoded drive checking
+		m.screen = screenDriveSelect
+		m.cursor = 0
+		return m, LoadDrives()
+	case 1: // Home Directory Only
+		m.operation = "home_backup"
+		// Go to home folder selection instead of directly to drive selection
+		m.screen = screenHomeFolderSelect
+		m.cursor = 0
+		return m, DiscoverHomeFoldersCmd()
+	case 2: // Back
+		m.screen = screenMain
+		m.choices = mainMenuChoices
+		m.cursor = 0
+	}
+	return m, nil
+}
+
+// handleRestoreMenuSelection handles selection logic for the restore menu screen
+func (m Model) handleRestoreMenuSelection() (tea.Model, tea.Cmd) {
+	switch m.cursor {
+	case 0: // Restore to Current System
+		m.operation = "system_restore"
+		// Go to restore options screen first
+		m.screen = screenRestoreOptions
+		m.cursor = 0
+		m.choices = []string{"☑️ Restore Configuration (~/.config)", "☑️ Restore Window Managers (Hyprland, GNOME, etc.)", "✅ Continue", "⬅️ Back"}
+	case 1: // Restore to Custom Path
+		m.operation = "custom_restore"
+		// Go to restore options screen first
+		m.screen = screenRestoreOptions
+		m.cursor = 0
+		m.choices = []string{"☑️ Restore Configuration (~/.config)", "☑️ Restore Window Managers (Hyprland, GNOME, etc.)", "✅ Continue", "⬅️ Back"}
+	case 2: // Back
+		resetBackupState() // Reset state when going back to main from restore menu
+		m.screen = screenMain
+		m.choices = mainMenuChoices
+		m.cursor = 0
+	}
+	return m, nil
+}
+
+// handleVerifyMenuSelection handles selection logic for the verify menu screen
+func (m Model) handleVerifyMenuSelection() (tea.Model, tea.Cmd) {
+	switch m.cursor {
+	case 0: // Auto-detect backup type and verify
+		m.operation = "auto_verify"
+		// Go to drive selection for backup source
+		m.screen = screenDriveSelect
+		m.cursor = 0
+		return m, LoadDrives()
+	case 1: // Back
+		m.screen = screenMain
+		m.choices = mainMenuChoices
+		m.cursor = 0
+	}
+	return m, nil
+}
+
 func (m Model) handleSelection() (tea.Model, tea.Cmd) {
 	switch m.screen {
 	case screenMain:
-		switch m.cursor {
-		case 0: // Backup
-			m.screen = screenBackup
-			m.choices = []string{"📁 Complete System Backup", "🏠 Home Directory Only", "⬅️ Back"}
-			m.cursor = 0
-		case 1: // Verify Backup
-			m.screen = screenVerify
-			m.choices = []string{"🔍 Auto-Detect & Verify Backup", "⬅️ Back"}
-			m.cursor = 0
-		case 2: // Restore
-			m.screen = screenRestore
-			m.choices = []string{"🔄 Restore to Current System", "📂 Restore to Custom Path", "⬅️ Back"}
-			m.cursor = 0
-		case 3: // About
-			m.screen = screenAbout
-		case 4: // Exit
-			return m, tea.Quit
-		}
+		return m.handleMainMenuSelection()
 	case screenBackup:
-		switch m.cursor {
-		case 0: // Complete System Backup
-			m.operation = "system_backup"
-			// Go to drive selection instead of hardcoded drive checking
-			m.screen = screenDriveSelect
-			m.cursor = 0
-			return m, LoadDrives()
-		case 1: // Home Directory Only
-			m.operation = "home_backup"
-			// Go to home folder selection instead of directly to drive selection
-			m.screen = screenHomeFolderSelect
-			m.cursor = 0
-			return m, DiscoverHomeFoldersCmd()
-		case 2: // Back
-			m.screen = screenMain
-			m.choices = mainMenuChoices
-			m.cursor = 0
-		}
+		return m.handleBackupMenuSelection()
 	case screenRestore:
-		switch m.cursor {
-		case 0: // Restore to Current System
-			m.operation = "system_restore"
-			// Go to restore options screen first
-			m.screen = screenRestoreOptions
-			m.cursor = 0
-			m.choices = []string{"☑️ Restore Configuration (~/.config)", "☑️ Restore Window Managers (Hyprland, GNOME, etc.)", "✅ Continue", "⬅️ Back"}
-		case 1: // Restore to Custom Path
-			m.operation = "custom_restore"
-			// Go to restore options screen first
-			m.screen = screenRestoreOptions
-			m.cursor = 0
-			m.choices = []string{"☑️ Restore Configuration (~/.config)", "☑️ Restore Window Managers (Hyprland, GNOME, etc.)", "✅ Continue", "⬅️ Back"}
-		case 2: // Back
-			resetBackupState() // Reset state when going back to main from restore menu
-			m.screen = screenMain
-			m.choices = mainMenuChoices
-			m.cursor = 0
-		}
+		return m.handleRestoreMenuSelection()
 	case screenVerify:
-		switch m.cursor {
-		case 0: // Auto-detect backup type and verify
-			m.operation = "auto_verify"
-			// Go to drive selection for backup source
-			m.screen = screenDriveSelect
-			m.cursor = 0
-			return m, LoadDrives()
-		case 1: // Back
-			m.screen = screenMain
-			m.choices = mainMenuChoices
-			m.cursor = 0
-		}
+		return m.handleVerifyMenuSelection()
 	case screenConfirm:
 		switch m.cursor {
 		case 0: // Yes
