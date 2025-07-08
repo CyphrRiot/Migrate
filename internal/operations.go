@@ -1057,20 +1057,9 @@ func createBackupConfig(operationType, mountPoint string, selectedFolders map[st
 		}
 
 		config = BackupConfig{
-			SourcePath:      homeDir,
-			DestinationPath: mountPoint,
-			ExcludePatterns: []string{
-				".cache/*",
-				".local/share/Trash/*",
-				".local/share/Steam/*",
-				".cache/yay/*",
-				".cache/paru/*",
-				".cache/mozilla/*",
-				".cache/google-chrome/*",
-				".cache/chromium/*",
-				".local/share/flatpak/*",
-				".local/share/containers/*",
-			},
+			SourcePath:        homeDir,
+			DestinationPath:   mountPoint,
+			ExcludePatterns:   GetHomeBackupExclusions(),
 			BackupType:        "Home Directory",
 			IsSelectiveBackup: true,
 			SelectedFolders:   selectedFolders,
@@ -1233,57 +1222,8 @@ func runVerificationSilently(operationType, mountPoint string) {
 	// Determine exclusion patterns based on backup type
 	var excludePatterns []string
 
-	// Browser cache patterns that should NEVER be verified (they change constantly)
-	browserCachePatterns := []string{
-		"*/.config/BraveSoftware/*/Default/IndexedDB/*",
-		"*/.config/BraveSoftware/*/Default/Local Storage/*",
-		"*/.config/BraveSoftware/*/Default/GPUCache/*",
-		"*/.config/BraveSoftware/*/Default/Sessions/*",
-		"*/.config/BraveSoftware/*/Default/Session Storage/*",
-		"*/.config/BraveSoftware/*/Default/Local Extension Settings/*",
-		"*/.config/BraveSoftware/*/Default/DawnWebGPUCache/*",
-		"*/.config/BraveSoftware/*/Default/WebStorage/*",
-		"*/.config/BraveSoftware/*/Default/Service Worker/*",
-		"*/.config/BraveSoftware/*/Default/blob_storage/*",
-		"*/.config/BraveSoftware/*/Default/Application Cache/*",
-		"*/.config/BraveSoftware/*/Default/File System/*",
-		"*/.config/BraveSoftware/*",
-		"*/.config/google-chrome/*/Default/IndexedDB/*",
-		"*/.config/google-chrome/*/Default/Local Storage/*",
-		"*/.config/google-chrome/*/Default/GPUCache/*",
-		"*/.config/chromium/*/Default/IndexedDB/*",
-		"*/.config/chromium/*/Default/Local Storage/*",
-		"*/.config/chromium/*/Default/GPUCache/*",
-		"*/.mozilla/firefox/*/storage/*",
-		"*/.mozilla/firefox/*/cache2/*",
-		"*/.cache/mozilla/*",
-		"*/.cache/google-chrome/*",
-		"*/.cache/chromium/*",
-		"*/.cache/BraveSoftware/*",
-	}
-
-	switch backupType {
-	case "system":
-		// System verification: Use system exclusions PLUS cache exclusions
-		// Cache files change constantly and should never be verified
-		excludePatterns = append(ExcludePatterns,
-			"/home/*/.cache/*", // User cache directories
-			"/root/.cache/*",   // Root cache directory
-			"/.cache/*",        // Any other cache directories
-			"/var/cache/*",     // System package cache
-			"/tmp/*",           // Already in ExcludePatterns but being explicit
-		)
-		// Add browser cache exclusions
-		excludePatterns = append(excludePatterns, browserCachePatterns...)
-	case "home":
-		excludePatterns = []string{".cache/*", ".local/share/Trash/*"} // Use home exclusions
-		// Add browser cache exclusions for home backups
-		excludePatterns = append(excludePatterns, browserCachePatterns...)
-		// Add selective backup exclusions if any
-		excludePatterns = append(excludePatterns, selectiveExclusions...)
-	default:
-		excludePatterns = []string{} // No exclusions for unknown types
-	}
+	// Use shared verification exclusions function
+	excludePatterns = GetVerificationExclusions(backupType, selectiveExclusions)
 
 	if logFile != nil {
 		fmt.Fprintf(logFile, "Backup type detected: %s\n", backupType)

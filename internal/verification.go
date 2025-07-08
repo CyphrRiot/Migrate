@@ -70,7 +70,7 @@ func shouldExcludeFile(filePath string, excludePatterns []string, sourcePath str
 
 // isDirectoryEmptyDueToExclusions checks if a directory would be empty after applying exclusion patterns
 // This helps distinguish between truly missing directories and directories that are empty due to exclusions
-func isDirectoryEmptyDueToExclusions(dirPath string, excludePatterns []string, sourcePath string) bool {
+func isDirectoryEmptyDueToExclusions(dirPath string, excludePatterns []string, sourcePath string, logFile *os.File) bool {
 	// Check if the directory itself is excluded
 	if shouldExcludeFile(dirPath, excludePatterns, sourcePath) {
 		return true
@@ -83,9 +83,9 @@ func isDirectoryEmptyDueToExclusions(dirPath string, excludePatterns []string, s
 	}
 
 	// Debug logging for flatpak directory
-	if strings.Contains(relPath, "flatpak") {
-		fmt.Printf("DEBUG: Checking flatpak directory: %s\n", relPath)
-		fmt.Printf("DEBUG: Patterns: %v\n", excludePatterns)
+	if strings.Contains(relPath, "flatpak") && logFile != nil {
+		fmt.Fprintf(logFile, "DEBUG: Checking flatpak directory: %s\n", relPath)
+		fmt.Fprintf(logFile, "DEBUG: Patterns: %v\n", excludePatterns)
 	}
 
 	// Check if all potential contents would be excluded
@@ -94,20 +94,20 @@ func isDirectoryEmptyDueToExclusions(dirPath string, excludePatterns []string, s
 		// Check if pattern would exclude all contents of this directory
 		if strings.HasSuffix(pattern, "/*") {
 			dirPattern := strings.TrimSuffix(pattern, "/*")
-			if strings.Contains(relPath, "flatpak") {
-				fmt.Printf("DEBUG: Comparing '%s' with pattern '%s'\n", relPath, dirPattern)
+			if strings.Contains(relPath, "flatpak") && logFile != nil {
+				fmt.Fprintf(logFile, "DEBUG: Comparing '%s' with pattern '%s'\n", relPath, dirPattern)
 			}
 			if relPath == dirPattern {
-				if strings.Contains(relPath, "flatpak") {
-					fmt.Printf("DEBUG: MATCH FOUND - Directory should be empty\n")
+				if strings.Contains(relPath, "flatpak") && logFile != nil {
+					fmt.Fprintf(logFile, "DEBUG: MATCH FOUND - Directory should be empty\n")
 				}
 				return true
 			}
 		}
 	}
 
-	if strings.Contains(relPath, "flatpak") {
-		fmt.Printf("DEBUG: No match found - Directory should NOT be empty\n")
+	if strings.Contains(relPath, "flatpak") && logFile != nil {
+		fmt.Fprintf(logFile, "DEBUG: No match found - Directory should NOT be empty\n")
 	}
 	return false
 }
@@ -900,7 +900,7 @@ func verifyRandomSampleOfBackup(sourcePath, destPath string, sampleRate float64,
 		// Check if corresponding backup directory exists
 		if _, err := os.Stat(backupDirPath); os.IsNotExist(err) {
 			// Check if this directory should be empty due to exclusions
-			if isDirectoryEmptyDueToExclusions(sourceFilePath, excludePatterns, sourcePath) {
+			if isDirectoryEmptyDueToExclusions(sourceFilePath, excludePatterns, sourcePath, logFile) {
 				// This directory is missing but should be empty due to exclusions - not an error
 				if logFile != nil {
 					fmt.Fprintf(logFile, "EXPECTED EMPTY DIRECTORY (excluded contents): %s\n", relPath)

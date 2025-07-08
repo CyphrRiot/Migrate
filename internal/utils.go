@@ -28,14 +28,97 @@ var (
 	// ExcludePatterns defines the default filesystem paths to exclude during system backups.
 	// These patterns exclude system-managed directories that should not be backed up.
 	ExcludePatterns = []string{
-		"/dev/*",        // Device files
-		"/proc/*",       // Process filesystem
-		"/sys/*",        // System filesystem 
-		"/tmp/*",        // Temporary files
-		"/var/tmp/*",    // Variable temporary files
-		"/lost+found",   // Filesystem recovery directory
+		"/dev/*",      // Device files
+		"/proc/*",     // Process filesystem
+		"/sys/*",      // System filesystem
+		"/tmp/*",      // Temporary files
+		"/var/tmp/*",  // Variable temporary files
+		"/lost+found", // Filesystem recovery directory
 	}
 )
+
+// GetHomeBackupExclusions returns the complete list of exclusion patterns for home directory backups.
+// This centralizes all exclusion logic to eliminate copy-paste issues.
+func GetHomeBackupExclusions() []string {
+	return []string{
+		".cache/*",
+		".local/share/Trash/*",
+		".local/share/Steam/*",
+		".cache/yay/*",
+		".cache/paru/*",
+		".cache/mozilla/*",
+		".cache/google-chrome/*",
+		".cache/chromium/*",
+		".local/share/flatpak/*",
+		".local/share/containers/*",
+	}
+}
+
+// GetBrowserCacheExclusions returns exclusion patterns for browser cache files.
+// These files change constantly and should never be verified.
+func GetBrowserCacheExclusions() []string {
+	return []string{
+		"*/.config/BraveSoftware/*/Default/IndexedDB/*",
+		"*/.config/BraveSoftware/*/Default/Local Storage/*",
+		"*/.config/BraveSoftware/*/Default/GPUCache/*",
+		"*/.config/BraveSoftware/*/Default/Sessions/*",
+		"*/.config/BraveSoftware/*/Default/Session Storage/*",
+		"*/.config/BraveSoftware/*/Default/Local Extension Settings/*",
+		"*/.config/BraveSoftware/*/Default/DawnWebGPUCache/*",
+		"*/.config/BraveSoftware/*/Default/WebStorage/*",
+		"*/.config/BraveSoftware/*/Default/Service Worker/*",
+		"*/.config/BraveSoftware/*/Default/blob_storage/*",
+		"*/.config/BraveSoftware/*/Default/Application Cache/*",
+		"*/.config/BraveSoftware/*/Default/File System/*",
+		"*/.config/BraveSoftware/*",
+		"*/.config/google-chrome/*/Default/IndexedDB/*",
+		"*/.config/google-chrome/*/Default/Local Storage/*",
+		"*/.config/google-chrome/*/Default/GPUCache/*",
+		"*/.config/chromium/*/Default/IndexedDB/*",
+		"*/.config/chromium/*/Default/Local Storage/*",
+		"*/.config/chromium/*/Default/GPUCache/*",
+		"*/.mozilla/firefox/*/storage/*",
+		"*/.mozilla/firefox/*/cache2/*",
+		"*/.cache/mozilla/*",
+		"*/.cache/google-chrome/*",
+		"*/.cache/chromium/*",
+		"*/.cache/BraveSoftware/*",
+	}
+}
+
+// GetSystemCacheExclusions returns exclusion patterns for system cache directories.
+// These should be excluded from system backups.
+func GetSystemCacheExclusions() []string {
+	return []string{
+		"/home/*/.cache/*", // User cache directories
+		"/root/.cache/*",   // Root cache directory
+		"/.cache/*",        // Any other cache directories
+		"/var/cache/*",     // System package cache
+		"/tmp/*",           // Already in ExcludePatterns but being explicit
+	}
+}
+
+// GetVerificationExclusions returns the complete exclusion list for verification operations.
+// This ensures backup and verification use identical exclusion patterns.
+func GetVerificationExclusions(backupType string, selectiveExclusions []string) []string {
+	var excludePatterns []string
+
+	switch backupType {
+	case "system":
+		// System verification: Use system exclusions PLUS cache exclusions
+		excludePatterns = append(ExcludePatterns, GetSystemCacheExclusions()...)
+		excludePatterns = append(excludePatterns, GetBrowserCacheExclusions()...)
+	case "home":
+		// Home verification: Use home exclusions PLUS browser cache exclusions
+		excludePatterns = append(GetHomeBackupExclusions(), GetBrowserCacheExclusions()...)
+		// Add selective backup exclusions if any
+		excludePatterns = append(excludePatterns, selectiveExclusions...)
+	default:
+		excludePatterns = []string{} // No exclusions for unknown types
+	}
+
+	return excludePatterns
+}
 
 // backupCancelFlag is a thread-safe cancellation flag for backup operations.
 // Use shouldCancelBackup(), CancelBackup(), and resetBackupCancel() to interact with this flag.
@@ -64,9 +147,10 @@ func resetBackupCancel() {
 // It accepts int64 values and formats them with thousands separators.
 //
 // Examples:
-//   FormatNumber(1234) -> "1,234"
-//   FormatNumber(1234567) -> "1,234,567"  
-//   FormatNumber(999) -> "999" (no comma for numbers < 1000)
+//
+//	FormatNumber(1234) -> "1,234"
+//	FormatNumber(1234567) -> "1,234,567"
+//	FormatNumber(999) -> "999" (no comma for numbers < 1000)
 func FormatNumber(n int64) string {
 	if n < 1000 {
 		return strconv.FormatInt(n, 10)
@@ -107,11 +191,12 @@ func getLogFilePath() string {
 // It uses binary units (1024-based) and intelligently chooses precision based on the magnitude.
 //
 // Examples:
-//   FormatBytes(1024) -> "1.0 KB"
-//   FormatBytes(1536) -> "1.5 KB"
-//   FormatBytes(1048576) -> "1.0 MB"
-//   FormatBytes(1073741824) -> "1.0 GB"
-//   FormatBytes(999) -> "999 B"
+//
+//	FormatBytes(1024) -> "1.0 KB"
+//	FormatBytes(1536) -> "1.5 KB"
+//	FormatBytes(1048576) -> "1.0 MB"
+//	FormatBytes(1073741824) -> "1.0 GB"
+//	FormatBytes(999) -> "999 B"
 //
 // The function automatically promotes units (e.g., 1000GB becomes 1.0TB) for readability.
 func FormatBytes(bytes int64) string {
