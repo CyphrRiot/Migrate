@@ -68,6 +68,36 @@ func shouldExcludeFile(filePath string, excludePatterns []string, sourcePath str
 	return false
 }
 
+// isDirectoryEmptyDueToExclusions checks if a directory would be empty after applying exclusion patterns
+// This helps distinguish between truly missing directories and directories that are empty due to exclusions
+func isDirectoryEmptyDueToExclusions(dirPath string, excludePatterns []string, sourcePath string) bool {
+	// Check if the directory itself is excluded
+	if shouldExcludeFile(dirPath, excludePatterns, sourcePath) {
+		return true
+	}
+
+	// Check if all potential contents would be excluded
+	// Look for exclusion patterns that would exclude everything in this directory
+	for _, pattern := range excludePatterns {
+		var fullPattern string
+		if strings.HasPrefix(pattern, "/") {
+			fullPattern = pattern
+		} else {
+			fullPattern = filepath.Join(sourcePath, pattern)
+		}
+
+		// Check if pattern would exclude all contents of this directory
+		if strings.HasSuffix(fullPattern, "/*") {
+			dirPattern := strings.TrimSuffix(fullPattern, "/*")
+			if dirPath == dirPattern {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
 // performBackupVerification executes the comprehensive smart incremental verification process.
 // This is the main verification function called during backup operations to ensure data integrity.
 //
@@ -855,6 +885,15 @@ func verifyRandomSampleOfBackup(sourcePath, destPath string, sampleRate float64,
 
 		// Check if corresponding backup directory exists
 		if _, err := os.Stat(backupDirPath); os.IsNotExist(err) {
+			// Check if this directory should be empty due to exclusions
+			if isDirectoryEmptyDueToExclusions(sourceFilePath, excludePatterns, sourcePath) {
+				// This directory is missing but should be empty due to exclusions - not an error
+				if logFile != nil {
+					fmt.Fprintf(logFile, "EXPECTED EMPTY DIRECTORY (excluded contents): %s\n", relPath)
+				}
+				return nil
+			}
+
 			// Check if this is a subdirectory of an already missing parent
 			isSubdirOfMissing := false
 			for existingMissing := range missingDirSet {
