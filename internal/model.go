@@ -203,14 +203,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.folderBreadcrumb = config.LastBreadcrumb
 			}
 
-			// Show success message about restored selections
-			selectedCount := 0
-			for _, selected := range m.selectedFolders {
-				if selected {
-					selectedCount++
+			// Only show "Restored" message during restore operations, not backup operations
+			if strings.Contains(m.operation, "restore") {
+				selectedCount := 0
+				for _, selected := range m.selectedFolders {
+					if selected {
+						selectedCount++
+					}
 				}
+				m.message = fmt.Sprintf("✅ Restored previous folder selections (%d folders)", selectedCount)
+			} else {
+				// For backup operations, don't show confusing "Restored" message
+				m.message = ""
 			}
-			m.message = fmt.Sprintf("✅ Restored previous folder selections (%d folders)", selectedCount)
 		}
 
 		// Calculate initial total backup size
