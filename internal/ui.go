@@ -301,41 +301,49 @@ var (
 
 	// Clean status styles with dark Tokyo Night backgrounds
 	warningStyle = lipgloss.NewStyle().
-			Foreground(textColor).       // Use normal text color
-			Background(backgroundColor). // Use true Tokyo Night background (#1a1b26)
+			Foreground(textColor).                 // Use normal text color
+			Background(lipgloss.Color("#1a1b26")). // Force Tokyo Night background
 			Bold(true).
 			Align(lipgloss.Center).
 			Padding(0, 2). // Back to minimal padding
 			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("#e0af68")) // Keep orange border as loved!
+			BorderForeground(lipgloss.Color("#e0af68")). // Keep orange border as loved!
+			UnsetBackground().
+			Background(lipgloss.Color("#1a1b26")) // Force dark background
 
 	// Info style for neutral confirmations (like unmount)
 	infoStyle = lipgloss.NewStyle().
-			Foreground(textColor).       // Use normal text color
-			Background(backgroundColor). // Use true Tokyo Night background (#1a1b26)
+			Foreground(textColor).                 // Use normal text color
+			Background(lipgloss.Color("#1a1b26")). // Force Tokyo Night background
 			Bold(true).
 			Align(lipgloss.Center).
 			Padding(0, 2).
 			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("#e0af68")) // Keep orange border consistent
+			BorderForeground(lipgloss.Color("#e0af68")). // Keep orange border consistent
+			UnsetBackground().
+			Background(lipgloss.Color("#1a1b26")) // Force dark background
 
 	errorStyle = lipgloss.NewStyle().
-			Foreground(textColor).       // Use normal text color
-			Background(backgroundColor). // Use true Tokyo Night background (#1a1b26)
+			Foreground(textColor).                 // Use normal text color
+			Background(lipgloss.Color("#1a1b26")). // Force Tokyo Night background
 			Bold(true).
 			Align(lipgloss.Center).
 			Padding(0, 2).
 			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("#e0af68")) // Keep orange border consistent
+			BorderForeground(lipgloss.Color("#e0af68")). // Keep orange border consistent
+			UnsetBackground().
+			Background(lipgloss.Color("#1a1b26")) // Force dark background
 
 	successStyle = lipgloss.NewStyle().
-			Foreground(textColor).       // Use normal text color
-			Background(backgroundColor). // Use true Tokyo Night background (#1a1b26)
+			Foreground(textColor).                 // Use normal text color
+			Background(lipgloss.Color("#1a1b26")). // Force Tokyo Night background
 			Bold(true).
 			Align(lipgloss.Center).
 			Padding(0, 2).
 			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("#9ece6a")) // Tokyo Night green border
+			BorderForeground(lipgloss.Color("#9ece6a")). // Tokyo Night green border
+			UnsetBackground().
+			Background(lipgloss.Color("#1a1b26")) // Force dark background
 
 	// Tokyo Night menu selection styling
 	selectedMenuItemStyle = lipgloss.NewStyle().
