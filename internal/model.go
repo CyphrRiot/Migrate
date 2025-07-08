@@ -645,9 +645,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else if m.screen == screenVerificationErrors {
 				// Scroll down in verification errors list
 				contentHeight := m.height - 8 // Compact header + help + padding
-				if contentHeight < 5 {
-					contentHeight = 5
-				}
+				contentHeight = max(contentHeight, 5)
 				maxScrollOffset := len(m.verificationErrors) - contentHeight
 				if maxScrollOffset > 0 && m.errorScrollOffset < maxScrollOffset {
 					m.errorScrollOffset++

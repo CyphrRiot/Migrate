@@ -1373,9 +1373,12 @@ func (m Model) renderVerificationErrors() string {
 	}
 
 	// Calculate display area (leave room for header and help)
-	contentHeight := m.height - 8 // Compact header + help + padding
-	if contentHeight < 5 {
-		contentHeight = 5
+	// Header: title + version + 2 newlines = 4 lines
+	// Help: help text + 2 newlines = 3 lines
+	// Border padding: 2 lines
+	contentHeight := m.height - 9 // More accurate line accounting
+	if contentHeight < 3 {
+		contentHeight = 3
 	}
 
 	// Calculate safe scroll offset (don't mutate model in UI)
@@ -1465,14 +1468,13 @@ func (m Model) renderVerificationErrors() string {
 		s.WriteString(errorStyle.Render(line) + "\n")
 	}
 
-	// Navigation help
-	s.WriteString("\n")
+	// Navigation help (no extra newlines to prevent overflow)
 	if errorCount > contentHeight {
 		help := helpStyle.Render("↑/↓: scroll through errors • ESC: back to main menu")
-		s.WriteString(help)
+		s.WriteString("\n" + help)
 	} else {
 		help := helpStyle.Render("ESC: back to main menu")
-		s.WriteString(help)
+		s.WriteString("\n" + help)
 	}
 
 	// Center the content with beautiful border

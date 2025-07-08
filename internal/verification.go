@@ -37,6 +37,37 @@ import (
 	"time"
 )
 
+// shouldExcludeFile checks if a file should be excluded based on exclude patterns
+// Uses the same proven exclusion logic as the backup system
+func shouldExcludeFile(filePath string, excludePatterns []string, sourcePath string) bool {
+	for _, pattern := range excludePatterns {
+		// Handle relative patterns by making them relative to source
+		var fullPattern string
+		if strings.HasPrefix(pattern, "/") {
+			// Absolute path pattern
+			fullPattern = pattern
+		} else {
+			// Relative pattern - make it relative to source
+			fullPattern = filepath.Join(sourcePath, pattern)
+		}
+
+		// Use filepath.Match for proper glob pattern matching
+		matched, err := filepath.Match(fullPattern, filePath)
+		if err == nil && matched {
+			return true
+		}
+
+		// Also check if the file is within a directory that matches the pattern
+		if strings.HasSuffix(fullPattern, "/*") {
+			dirPattern := strings.TrimSuffix(fullPattern, "/*")
+			if strings.HasPrefix(filePath, dirPattern+"/") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // performBackupVerification executes the comprehensive smart incremental verification process.
 // This is the main verification function called during backup operations to ensure data integrity.
 //
@@ -212,36 +243,7 @@ func verifyNewFiles(copiedFiles []string, sourcePath, destPath string, excludePa
 				}
 
 				// Skip excluded patterns - comprehensive browser cache exclusion
-				shouldSkip := false
-				for _, pattern := range excludePatterns {
-					// Handle ALL BraveSoftware cache files comprehensively
-					if strings.Contains(pattern, ".config/BraveSoftware/") {
-						if strings.Contains(filePath, ".config/BraveSoftware/") {
-							shouldSkip = true
-							break
-						}
-					} else if strings.Contains(pattern, ".cache/") {
-						if strings.Contains(filePath, ".cache/") {
-							shouldSkip = true
-							break
-						}
-					} else if strings.Contains(pattern, "/*") {
-						// Handle simple wildcard patterns
-						patternBase := strings.TrimSuffix(pattern, "/*")
-						if strings.Contains(filePath, patternBase) {
-							shouldSkip = true
-							break
-						}
-					} else {
-						// Simple string matching for exact patterns
-						if strings.Contains(filePath, pattern) {
-							shouldSkip = true
-							break
-						}
-					}
-				}
-
-				if shouldSkip {
+				if shouldExcludeFile(filePath, excludePatterns, sourcePath) {
 					continue
 				}
 
@@ -431,28 +433,8 @@ func verifySampledFiles(sourcePath, destPath string, sampleRate float64, exclude
 		}
 
 		// Skip excluded patterns - comprehensive browser cache exclusion
-		for _, pattern := range excludePatterns {
-			// Handle ALL BraveSoftware cache files comprehensively
-			if strings.Contains(pattern, ".config/BraveSoftware/") {
-				if strings.Contains(path, ".config/BraveSoftware/") {
-					return nil
-				}
-			} else if strings.Contains(pattern, ".cache/") {
-				if strings.Contains(path, ".cache/") {
-					return nil
-				}
-			} else if strings.Contains(pattern, "/*") {
-				// Handle simple wildcard patterns
-				patternBase := strings.TrimSuffix(pattern, "/*")
-				if strings.Contains(path, patternBase) {
-					return nil
-				}
-			} else {
-				// Simple string matching for exact patterns
-				if strings.Contains(path, pattern) {
-					return nil
-				}
-			}
+		if shouldExcludeFile(path, excludePatterns, sourcePath) {
+			return nil
 		}
 
 		// Check if file exists in destination
@@ -582,7 +564,11 @@ func verifyDirectoryStructure(sourcePath, destPath string, logFile *os.File) err
 	// Allow for some variation (backup info files, etc.)
 	dirDifference := destDirs - sourceDirs
 	if dirDifference > 10 || dirDifference < -10 {
-		return fmt.Errorf("significant directory count mismatch: source=%d, dest=%d", sourceDirs, destDirs)
+		// Directory count mismatch is not helpful for users - just log it
+		if logFile != nil {
+			fmt.Fprintf(logFile, "INFO: Directory count difference: source=%d, dest=%d (difference=%d)\n", sourceDirs, destDirs, dirDifference)
+		}
+		// Don't return error - this is not actionable for users
 	}
 
 	atomic.AddInt64(&totalFilesVerified, 1) // Count structure check as one verification
@@ -783,10 +769,8 @@ func performStandaloneVerification(sourcePath, destPath string, excludePatterns 
 	// Mark verification as complete
 	verificationPhaseActive = false
 
-	// For standalone verification, be more lenient with error thresholds
-	maxAllowedErrors := 10 // Allow up to 10 errors for standalone verification
-
-	if len(verificationErrors) > maxAllowedErrors {
+	// For standalone verification, ANY missing files should cause failure
+	if len(verificationErrors) > 0 {
 		// Instead of returning generic error, populate detailed error screen
 		// The TUI will check verificationErrors global and show detailed screen
 		return fmt.Errorf("VERIFICATION_DETAILED_ERRORS:%d", len(verificationErrors))
@@ -837,41 +821,104 @@ func verifyRandomSampleOfBackup(sourcePath, destPath string, sampleRate float64,
 	}
 
 	if logFile != nil {
-		fmt.Fprintf(logFile, "Starting random sample verification with %.1f%% sample rate\n", sampleRate*100)
-		fmt.Fprintf(logFile, "Validating SOURCE (%s) is properly represented in BACKUP (%s)\n", sourcePath, destPath)
+		fmt.Fprintf(logFile, "Starting smart two-phase verification\n")
+		fmt.Fprintf(logFile, "Phase 1: Directory structure check\n")
+		fmt.Fprintf(logFile, "Phase 2: File sampling verification\n")
+		fmt.Fprintf(logFile, "Source: %s, Backup: %s\n", sourcePath, destPath)
 	}
 
-	// Walk the SOURCE directory to find all files that should be in backup
-	var candidateFiles []string
-
+	// PHASE 1: Check directory structure first (fast)
+	var missingDirs []string
+	missingDirSet := make(map[string]bool)
 	err := filepath.WalkDir(sourcePath, func(sourceFilePath string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+
+		// Only check directories, not files
+		if !d.IsDir() {
+			return nil
+		}
+
+		// Skip excluded patterns for directories
+		if shouldExcludeFile(sourceFilePath, excludePatterns, sourcePath) {
+			return filepath.SkipDir
+		}
+
+		// Convert source dir path to backup dir path
+		relPath, err := filepath.Rel(sourcePath, sourceFilePath)
+		if err != nil {
+			return nil
+		}
+
+		backupDirPath := filepath.Join(destPath, relPath)
+
+		// Check if corresponding backup directory exists
+		if _, err := os.Stat(backupDirPath); os.IsNotExist(err) {
+			// Check if this is a subdirectory of an already missing parent
+			isSubdirOfMissing := false
+			for existingMissing := range missingDirSet {
+				if strings.HasPrefix(relPath, existingMissing+"/") {
+					isSubdirOfMissing = true
+					break
+				}
+			}
+
+			// Only add top-level missing directories
+			if !isSubdirOfMissing {
+				missingDirs = append(missingDirs, relPath)
+				missingDirSet[relPath] = true
+				if logFile != nil {
+					fmt.Fprintf(logFile, "MISSING DIRECTORY: %s\n", relPath)
+				}
+				// Add to verification errors
+				verificationErrors = append(verificationErrors, fmt.Sprintf("Missing directory: %s", relPath))
+
+				// Skip walking subdirectories since parent is missing
+				return filepath.SkipDir
+			}
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return fmt.Errorf("directory structure check failed: %v", err)
+	}
+
+	if logFile != nil {
+		fmt.Fprintf(logFile, "Phase 1 complete: Found %d missing directories\n", len(missingDirs))
+		if len(missingDirs) > 0 {
+			fmt.Fprintf(logFile, "Missing directories:\n")
+			for _, dir := range missingDirs {
+				fmt.Fprintf(logFile, "  - %s\n", dir)
+			}
+		}
+	}
+
+	// PHASE 2: Spot-check files in existing directories (sampling)
+	var candidateFiles []string
+	filesProcessed := 0
+	const maxFilesToCheck = 50000 // Reasonable limit for file sampling
+
+	if logFile != nil {
+		fmt.Fprintf(logFile, "Phase 2: Starting file sampling verification\n")
+	}
+
+	err = filepath.WalkDir(sourcePath, func(sourceFilePath string, d os.DirEntry, err error) error {
 		if err != nil || !d.Type().IsRegular() {
 			return nil
 		}
 
-		// Skip excluded patterns - comprehensive browser cache exclusion
-		for _, pattern := range excludePatterns {
-			// Handle ALL BraveSoftware cache files comprehensively
-			if strings.Contains(pattern, ".config/BraveSoftware/") {
-				if strings.Contains(sourceFilePath, ".config/BraveSoftware/") {
-					return nil
-				}
-			} else if strings.Contains(pattern, ".cache/") {
-				if strings.Contains(sourceFilePath, ".cache/") {
-					return nil
-				}
-			} else if strings.Contains(pattern, "/*") {
-				// Handle simple wildcard patterns
-				patternBase := strings.TrimSuffix(pattern, "/*")
-				if strings.Contains(sourceFilePath, patternBase) {
-					return nil
-				}
-			} else {
-				// Simple string matching for exact patterns
-				if strings.Contains(sourceFilePath, pattern) {
-					return nil
-				}
-			}
+		// Limit total files processed for performance
+		filesProcessed++
+		if filesProcessed > maxFilesToCheck {
+			return fmt.Errorf("enough files processed")
+		}
+
+		// Skip excluded patterns
+		if shouldExcludeFile(sourceFilePath, excludePatterns, sourcePath) {
+			return nil
 		}
 
 		// Convert source path to relative path, then to backup path
@@ -885,32 +932,28 @@ func verifyRandomSampleOfBackup(sourcePath, destPath string, sampleRate float64,
 		// Check if corresponding backup file exists
 		if _, err := os.Stat(backupFilePath); err == nil {
 			// Backup file exists - add to candidates for verification
-			candidateFiles = append(candidateFiles, sourceFilePath)
-		} else {
-			// CRITICAL: Backup file is missing - this should be reported!
-			if logFile != nil {
-				fmt.Fprintf(logFile, "MISSING FROM BACKUP: %s (backup path: %s)\n", sourceFilePath, backupFilePath)
+			if len(candidateFiles) < 10000 {
+				candidateFiles = append(candidateFiles, sourceFilePath)
 			}
-			// Add to verification errors - this is a significant issue
-			verificationErrors = append(verificationErrors, fmt.Sprintf("Missing from backup: %s", relPath))
-		}
-
-		// Limit candidates for performance (sample max 10,000 files)
-		if len(candidateFiles) >= 10000 {
-			return fmt.Errorf("enough candidates") // Stop walking
+		} else {
+			// File is missing from backup
+			if logFile != nil {
+				fmt.Fprintf(logFile, "MISSING FILE: %s\n", relPath)
+			}
+			verificationErrors = append(verificationErrors, fmt.Sprintf("Missing file: %s", relPath))
 		}
 
 		return nil
 	})
 
-	if err != nil && err.Error() != "enough candidates" {
+	if err != nil && err.Error() != "enough files processed" {
 		return err
 	}
 
 	if logFile != nil {
-		fmt.Fprintf(logFile, "Found %d files in source for potential verification\n", len(candidateFiles))
+		fmt.Fprintf(logFile, "Phase 2 complete: Processed %d files, found %d candidates\n", filesProcessed, len(candidateFiles))
 		if len(verificationErrors) > 0 {
-			fmt.Fprintf(logFile, "CRITICAL: %d files are missing from backup!\n", len(verificationErrors))
+			fmt.Fprintf(logFile, "TOTAL VERIFICATION ISSUES: %d\n", len(verificationErrors))
 		}
 	}
 
