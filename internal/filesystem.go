@@ -253,6 +253,11 @@ func syncDirectoriesWithSelectiveInclusions(src, dst string,
 					if logFile != nil {
 						fmt.Fprintf(logFile, "Error copying %s: %v\n", path, err)
 					}
+					// Check for fatal disk space errors
+					if isSpaceError(err) {
+						spaceInfo := getSpaceErrorDetails(filepath.Dir(dstPath))
+						return fmt.Errorf("⚠️ OUT OF SPACE during backup\n\nError copying file: %s\nSpace error: %v\n\n%s\n\nThe backup drive is full. Please use a larger drive or select fewer folders.", path, err, spaceInfo)
+					}
 				} else {
 					atomic.AddInt64(&filesCopied, 1)
 					// Track copied files for verification (thread-safe)
@@ -301,6 +306,11 @@ func syncDirectoriesWithSelectiveInclusions(src, dst string,
 			if err != nil {
 				if logFile != nil {
 					fmt.Fprintf(logFile, "Error copying %s: %v\n", path, err)
+				}
+				// Check for fatal disk space errors
+				if isSpaceError(err) {
+					spaceInfo := getSpaceErrorDetails(filepath.Dir(dstPath))
+					return fmt.Errorf("⚠️ OUT OF SPACE during backup\n\nError copying file: %s\nSpace error: %v\n\n%s\n\nThe backup drive is full. Please use a larger drive or select fewer folders.", path, err, spaceInfo)
 				}
 			} else {
 				atomic.AddInt64(&filesCopied, 1)
@@ -542,6 +552,11 @@ func syncDirectoriesWithExclusions(src, dst string, excludePatterns []string, lo
 					if logFile != nil {
 						fmt.Fprintf(logFile, "Error copying %s: %v\n", path, err)
 					}
+					// Check for fatal disk space errors
+					if isSpaceError(err) {
+						spaceInfo := getSpaceErrorDetails(filepath.Dir(dstPath))
+						return fmt.Errorf("⚠️ OUT OF SPACE during backup\n\nError copying file: %s\nSpace error: %v\n\n%s\n\nThe backup drive is full. Please use a larger drive or select fewer folders.", path, err, spaceInfo)
+					}
 				} else {
 					atomic.AddInt64(&filesCopied, 1)
 					// Track copied files for verification (thread-safe)
@@ -590,6 +605,11 @@ func syncDirectoriesWithExclusions(src, dst string, excludePatterns []string, lo
 			if err != nil {
 				if logFile != nil {
 					fmt.Fprintf(logFile, "Error copying %s: %v\n", path, err)
+				}
+				// Check for fatal disk space errors
+				if isSpaceError(err) {
+					spaceInfo := getSpaceErrorDetails(filepath.Dir(dstPath))
+					return fmt.Errorf("⚠️ OUT OF SPACE during backup\n\nError copying file: %s\nSpace error: %v\n\n%s\n\nThe backup drive is full. Please use a larger drive or select fewer folders.", path, err, spaceInfo)
 				}
 			} else {
 				atomic.AddInt64(&filesCopied, 1)
@@ -835,8 +855,19 @@ func deleteExtraFilesFromBackup(sourcePath, backupPath string, logFile *os.File)
 //   - Respecting exclusion patterns during cleanup
 //   - Providing cancellation support and progress tracking
 func deleteExtraFilesFromBackupWithExclusions(sourcePath, backupPath string, excludePatterns []string, logFile *os.File) error {
+	return deleteExtraFilesFromBackupWithSelectiveSupport(sourcePath, backupPath, excludePatterns, nil, logFile)
+}
+
+// deleteExtraFilesFromBackupWithSelectiveSupport performs backup cleanup with selective folder support.
+// For selective backups, it checks both file existence and folder selection.
+// For regular backups, it only checks file existence (selectedFolders = nil).
+func deleteExtraFilesFromBackupWithSelectiveSupport(sourcePath, backupPath string, excludePatterns []string, selectedFolders map[string]bool, logFile *os.File) error {
 	if logFile != nil {
-		fmt.Fprintf(logFile, "Starting cleanup phase (delete files not in source)\n")
+		if selectedFolders != nil {
+			fmt.Fprintf(logFile, "Starting cleanup phase (delete files not in source or not selected)\n")
+		} else {
+			fmt.Fprintf(logFile, "Starting cleanup phase (delete files not in source)\n")
+		}
 	}
 
 	deletedCount := 0
@@ -873,13 +904,28 @@ func deleteExtraFilesFromBackupWithExclusions(sourcePath, backupPath string, exc
 		}
 		sourceFile := filepath.Join(sourcePath, relPath)
 
-		// If file doesn't exist in source, delete it from backup
+		// Check if file should be deleted
+		shouldDelete := false
+		deleteReason := ""
+
+		// First check: file doesn't exist in source
 		if _, err := os.Stat(sourceFile); os.IsNotExist(err) {
+			shouldDelete = true
+			deleteReason = "not in source"
+		} else if selectedFolders != nil {
+			// Second check: for selective backups, check if file is in selected folders
+			if !isFileInSelectedFolders(sourceFile, selectedFolders) {
+				shouldDelete = true
+				deleteReason = "not in selected folders"
+			}
+		}
+
+		if shouldDelete {
 			deletedCount++
 			atomic.AddInt64(&filesDeleted, 1) // Track deletion for progress
 
 			if logFile != nil {
-				fmt.Fprintf(logFile, "Deleting: %s (not in source)\n", backupFile)
+				fmt.Fprintf(logFile, "Deleting: %s (%s)\n", backupFile, deleteReason)
 			}
 
 			if d.IsDir() {
@@ -1134,6 +1180,70 @@ func copyDirectoryLimitedDepthRecursive(src, dst string, currentDepth, maxDepth 
 	}
 
 	return nil
+}
+
+// isSpaceError checks if an error is related to disk space issues
+func isSpaceError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	errStr := strings.ToLower(err.Error())
+
+	// Common disk space error patterns
+	spaceErrors := []string{
+		"no space left on device",
+		"disk full",
+		"out of space",
+		"insufficient disk space",
+		"device out of space",
+		"write failed: no space left",
+		"enospc",
+	}
+
+	for _, spaceErr := range spaceErrors {
+		if strings.Contains(errStr, spaceErr) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// getSpaceErrorDetails provides detailed space information for error messages
+func getSpaceErrorDetails(path string) string {
+	var stat syscall.Statfs_t
+	if err := syscall.Statfs(path, &stat); err != nil {
+		return "Unable to get disk space information"
+	}
+
+	totalBytes := stat.Blocks * uint64(stat.Bsize)
+	freeBytes := stat.Bavail * uint64(stat.Bsize)
+	usedBytes := totalBytes - freeBytes
+
+	return fmt.Sprintf("Disk Space Information:\n  Total: %s\n  Used:  %s\n  Free:  %s",
+		FormatBytes(int64(totalBytes)),
+		FormatBytes(int64(usedBytes)),
+		FormatBytes(int64(freeBytes)))
+}
+
+// isFileInSelectedFolders checks if a file path is within any selected folder
+func isFileInSelectedFolders(filePath string, selectedFolders map[string]bool) bool {
+	if selectedFolders == nil {
+		return true // No selection filtering
+	}
+
+	// Check if the file path is within any selected folder
+	for folderPath, selected := range selectedFolders {
+		if selected {
+			// Check if filePath is within this selected folder
+			if strings.HasPrefix(filePath, folderPath+"/") || filePath == folderPath {
+				return true
+			}
+		}
+	}
+
+	return false
 }
 
 // Copy single file safely

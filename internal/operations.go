@@ -324,8 +324,9 @@ func performPureGoBackup(config BackupConfig, logFile *os.File) error {
 			}
 		}
 
-		// Update config with enhanced exclusions
+		// Update config with enhanced exclusions and selected subfolders
 		config.ExcludePatterns = enhancedExcludes
+		config.SelectedSubfolders = selectedSubfolders
 		if logFile != nil {
 			fmt.Fprintf(logFile, "Enhanced exclusion patterns: %v\n", enhancedExcludes)
 			fmt.Fprintf(logFile, "Selected subfolders for inclusion: %v\n", selectedSubfolders)
@@ -356,6 +357,8 @@ func performPureGoBackup(config BackupConfig, logFile *os.File) error {
 	// Mark deletion phase as active
 	deletionPhaseActive = true
 
+	// EMERGENCY HOTFIX: Disable selective cleanup to prevent data loss
+	// Use regular cleanup for all backups until selective cleanup is fixed
 	err = deleteExtraFilesFromBackupWithExclusions(config.SourcePath, config.DestinationPath, config.ExcludePatterns, logFile)
 	if err != nil {
 		if logFile != nil {

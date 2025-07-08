@@ -300,12 +300,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if strings.Contains(m.operation, "backup") {
 				// Backup confirmation
 				backupTypeDesc := "ENTIRE SYSTEM (1:1)"
+				sourceSize := ""
+
 				if m.operation == "home_backup" {
 					backupTypeDesc = "HOME DIRECTORY"
+					if m.totalBackupSize > 0 {
+						sourceSize = fmt.Sprintf("Source: %s\n", FormatBytes(m.totalBackupSize))
+					}
+				} else {
+					// For system backup, get used space on root filesystem
+					if usedSpace, err := getUsedDiskSpace("/"); err == nil {
+						sourceSize = fmt.Sprintf("Source: %s\n", FormatBytes(usedSpace))
+					}
 				}
 
-				m.confirmation = fmt.Sprintf("Ready to backup %s\n\nDrive: %s (%s)\nType: %s\nMounted at: %s\n\nProceed with backup?",
-					backupTypeDesc, msg.drivePath, msg.driveSize, msg.driveType, msg.mountPoint)
+				m.confirmation = fmt.Sprintf("Ready to backup %s\n\n%sDestination: %s (%s)\nType: %s\nMounted at: %s\n\nProceed with backup?",
+					backupTypeDesc, sourceSize, msg.drivePath, msg.driveSize, msg.driveType, msg.mountPoint)
 			} else if strings.Contains(m.operation, "restore") {
 				// Restore confirmation
 				restoreTypeDesc := "ENTIRE SYSTEM"
