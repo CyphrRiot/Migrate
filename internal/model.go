@@ -399,7 +399,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.confirmation = "🎉 Backup completed successfully!\n\nDo you want to unmount the backup drive?\n\nNote: Unmounting is recommended for safe removal."
 				m.operation = "unmount_backup"
 				m.screen = screenConfirm
-				m.cursor = 0
+				m.cursor = 1
 				return m, nil
 			} else if msg.Error == nil {
 				// Other operation completed successfully - show completion screen
