@@ -41,10 +41,14 @@ const (
 	screenDriveSelect                       // External drive selection interface
 	screenError                             // Error display requiring manual dismissal
 	screenComplete                          // Success completion requiring manual dismissal
-	screenHomeFolderSelect                  // Selective home folder backup interface
-	screenHomeSubfolderSelect               // NEW: Sub-folder selection within a parent
-	screenRestoreOptions                    // NEW: Restore options selection screen
+	screenRestoreOptions                    // Restore configuration options
+	screenHomeFolderSelect                  // Home folder selection for backup
+	screenHomeSubfolderSelect               // Subfolder selection within home folders
+	screenVerificationErrors                // Detailed verification error display
 )
+
+// mainMenuChoices defines the main menu options in the correct order
+var mainMenuChoices = []string{"🚀 Backup System", "🔍 Verify Backup", "🔄 Restore System", "ℹ️ About", "❌ Exit"}
 
 // Model represents the complete application state for the Migrate TUI.
 // It implements the tea.Model interface and contains all data needed to
@@ -93,6 +97,10 @@ type Model struct {
 	// Restore options
 	restoreConfig     bool // Restore ~/.config directory
 	restoreWindowMgrs bool // Restore window managers (Hyprland, GNOME, etc.)
+
+	// Verification error display
+	verificationErrors []string // List of verification errors for display
+	errorScrollOffset  int      // Current scroll position in error list
 }
 
 // InitialModel creates and returns a new Model instance with default values.
@@ -101,7 +109,7 @@ type Model struct {
 func InitialModel() Model {
 	return Model{
 		screen:            screenMain,
-		choices:           []string{"🚀 Backup System", "🔄 Restore System", "🔍 Verify Backup", "ℹ️ About", "❌ Exit"},
+		choices:           mainMenuChoices,
 		selected:          make(map[int]struct{}),
 		selectedFolders:   make(map[string]bool),
 		subfolderCache:    make(map[string][]HomeFolderInfo), // NEW: Initialize subfolder cache
@@ -346,18 +354,30 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			// Check for verification-specific completion (success with warnings/failures)
 			if strings.Contains(m.operation, "verify") &&
-				(strings.Contains(errorMsg, "verification failed with") ||
+				(strings.Contains(errorMsg, "VERIFICATION_DETAILED_ERRORS:") ||
+					strings.Contains(errorMsg, "verification failed with") ||
 					strings.Contains(errorMsg, "errors (threshold:") ||
 					strings.Contains(errorMsg, "systematic") ||
 					strings.Contains(errorMsg, "integrity issues")) {
 				// Verification completed but found issues - show detailed results
-				m.message = errorMsg
-				m.errorRequiresManualDismissal = true
-				m.lastScreen = m.screen
-				m.screen = screenError // Show as error but with verification context
-				m.progress = 0
-				m.canceling = false
-				return m, nil
+				if strings.Contains(errorMsg, "VERIFICATION_DETAILED_ERRORS:") {
+					// Copy verification errors to model for detailed display
+					m.verificationErrors = GetVerificationErrors()
+					m.errorScrollOffset = 0
+					m.screen = screenVerificationErrors
+					m.progress = 0
+					m.canceling = false
+					return m, nil
+				} else {
+					// Legacy error handling
+					m.message = errorMsg
+					m.errorRequiresManualDismissal = true
+					m.lastScreen = m.screen
+					m.screen = screenError
+					m.progress = 0
+					m.canceling = false
+					return m, nil
+				}
 			}
 
 			// Check for critical system errors that need manual dismissal
@@ -422,16 +442,28 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 				// Check for verification-specific completion with detected issues
 				if strings.Contains(m.operation, "verify") &&
-					(strings.Contains(errorMsg, "verification failed with") ||
+					(strings.Contains(errorMsg, "VERIFICATION_DETAILED_ERRORS:") ||
+						strings.Contains(errorMsg, "verification failed with") ||
 						strings.Contains(errorMsg, "errors (threshold:") ||
 						strings.Contains(errorMsg, "systematic") ||
 						strings.Contains(errorMsg, "integrity issues")) {
 					// Verification found issues - show detailed error screen
-					m.message = errorMsg
-					m.errorRequiresManualDismissal = true
-					m.lastScreen = m.screen
-					m.screen = screenError
-					return m, nil
+					if strings.Contains(errorMsg, "VERIFICATION_DETAILED_ERRORS:") {
+						// Copy verification errors to model for detailed display
+						m.verificationErrors = GetVerificationErrors()
+						m.errorScrollOffset = 0
+						m.screen = screenVerificationErrors
+						m.progress = 0
+						m.canceling = false
+						return m, nil
+					} else {
+						// Legacy error handling
+						m.message = errorMsg
+						m.errorRequiresManualDismissal = true
+						m.lastScreen = m.screen
+						m.screen = screenError
+						return m, nil
+					}
 				}
 
 				// Check for critical system errors
@@ -487,7 +519,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.screen = screenMain
 			m.message = ""
 			m.cursor = 0
-			m.choices = []string{"🚀 Backup System", "🔄 Restore System", "🔍 Verify Backup", "ℹ️ About", "❌ Exit"}
+			m.choices = mainMenuChoices
 			m.errorRequiresManualDismissal = false
 			return m, nil
 		}
@@ -499,7 +531,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.screen = screenMain
 			m.message = ""
 			m.cursor = 0
-			m.choices = []string{"🚀 Backup System", "🔄 Restore System", "🔍 Verify Backup", "ℹ️ About", "❌ Exit"}
+			m.choices = mainMenuChoices
 			return m, nil
 		}
 
@@ -520,7 +552,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Go back to main menu from other screens
 			m.screen = screenMain
 			m.cursor = 0
-			m.choices = []string{"🚀 Backup System", "🔄 Restore System", "🔍 Verify Backup", "ℹ️ About", "❌ Exit"}
+			m.choices = mainMenuChoices
 			return m, nil
 
 		case "esc":
@@ -530,7 +562,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.screen = screenMain
 				m.message = ""
 				m.cursor = 0
-				m.choices = []string{"🚀 Backup System", "🔄 Restore System", "🔍 Verify Backup", "ℹ️ About", "❌ Exit"}
+				m.choices = mainMenuChoices
 				m.errorRequiresManualDismissal = false
 				return m, nil
 			} else if m.screen == screenHomeSubfolderSelect {
@@ -541,12 +573,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.cursor = 0
 				m.message = "" // Clear any temporary messages
 				return m, nil
+			} else if m.screen == screenVerificationErrors {
+				// NEW: Return to main menu from verification errors screen
+				resetBackupState()
+				m.screen = screenMain
+				m.cursor = 0
+				m.choices = mainMenuChoices
+				m.verificationErrors = []string{} // Clear error list
+				m.errorScrollOffset = 0
+				return m, nil
 			} else if m.screen != screenMain {
 				// Reset backup state when returning to main menu
 				resetBackupState()
 				m.screen = screenMain
 				m.cursor = 0
-				m.choices = []string{"🚀 Backup System", "🔄 Restore System", "🔍 Verify Backup", "ℹ️ About", "❌ Exit"}
+				m.choices = mainMenuChoices
 			}
 			return m, nil
 
@@ -554,6 +595,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.screen == screenConfirm {
 				if m.cursor > 0 {
 					m.cursor--
+				}
+			} else if m.screen == screenVerificationErrors {
+				// Scroll up in verification errors list
+				if m.errorScrollOffset > 0 {
+					m.errorScrollOffset--
 				}
 			} else if m.screen == screenMain {
 				// Main menu: wrap around navigation
@@ -595,6 +641,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.screen == screenConfirm {
 				if m.cursor < 1 {
 					m.cursor++
+				}
+			} else if m.screen == screenVerificationErrors {
+				// Scroll down in verification errors list
+				contentHeight := m.height - 15 // More room for header, scroll info, and help
+				if contentHeight < 3 {
+					contentHeight = 3
+				}
+				maxScrollOffset := len(m.verificationErrors) - contentHeight
+				if maxScrollOffset > 0 && m.errorScrollOffset < maxScrollOffset {
+					m.errorScrollOffset++
 				}
 			} else if m.screen == screenMain {
 				// Main menu: wrap around navigation
@@ -675,13 +731,13 @@ func (m Model) handleSelection() (tea.Model, tea.Cmd) {
 			m.screen = screenBackup
 			m.choices = []string{"📁 Complete System Backup", "🏠 Home Directory Only", "⬅️ Back"}
 			m.cursor = 0
-		case 1: // Restore
-			m.screen = screenRestore
-			m.choices = []string{"🔄 Restore to Current System", "📂 Restore to Custom Path", "⬅️ Back"}
-			m.cursor = 0
-		case 2: // Verify Backup
+		case 1: // Verify Backup
 			m.screen = screenVerify
 			m.choices = []string{"🔍 Auto-Detect & Verify Backup", "⬅️ Back"}
+			m.cursor = 0
+		case 2: // Restore
+			m.screen = screenRestore
+			m.choices = []string{"🔄 Restore to Current System", "📂 Restore to Custom Path", "⬅️ Back"}
 			m.cursor = 0
 		case 3: // About
 			m.screen = screenAbout
@@ -704,7 +760,7 @@ func (m Model) handleSelection() (tea.Model, tea.Cmd) {
 			return m, DiscoverHomeFoldersCmd()
 		case 2: // Back
 			m.screen = screenMain
-			m.choices = []string{"🚀 Backup System", "🔄 Restore System", "🔍 Verify Backup", "ℹ️ About", "❌ Exit"}
+			m.choices = mainMenuChoices
 			m.cursor = 0
 		}
 	case screenRestore:
@@ -724,7 +780,7 @@ func (m Model) handleSelection() (tea.Model, tea.Cmd) {
 		case 2: // Back
 			resetBackupState() // Reset state when going back to main from restore menu
 			m.screen = screenMain
-			m.choices = []string{"🚀 Backup System", "🔄 Restore System", "🔍 Verify Backup", "ℹ️ About", "❌ Exit"}
+			m.choices = mainMenuChoices
 			m.cursor = 0
 		}
 	case screenVerify:
@@ -737,7 +793,7 @@ func (m Model) handleSelection() (tea.Model, tea.Cmd) {
 			return m, LoadDrives()
 		case 1: // Back
 			m.screen = screenMain
-			m.choices = []string{"🚀 Backup System", "🔄 Restore System", "🔍 Verify Backup", "ℹ️ About", "❌ Exit"}
+			m.choices = mainMenuChoices
 			m.cursor = 0
 		}
 	case screenConfirm:
@@ -828,7 +884,7 @@ func (m Model) handleSelection() (tea.Model, tea.Cmd) {
 			m.selectedDrive = ""
 			m.progress = 0
 			m.screen = screenMain
-			m.choices = []string{"🚀 Backup System", "🔄 Restore System", "🔍 Verify Backup", "ℹ️ About", "❌ Exit"}
+			m.choices = mainMenuChoices
 			m.cursor = 0
 
 			// Set appropriate message
@@ -841,7 +897,7 @@ func (m Model) handleSelection() (tea.Model, tea.Cmd) {
 	case screenAbout:
 		resetBackupState() // Reset state when returning from about screen
 		m.screen = screenMain
-		m.choices = []string{"🚀 Backup System", "🔄 Restore System", "🔍 Verify Backup", "ℹ️ About", "❌ Exit"}
+		m.choices = mainMenuChoices
 		m.cursor = 0
 	case screenHomeFolderSelect:
 		// NEW LAYOUT: Controls first (0-1), then folders (2+)
@@ -997,7 +1053,7 @@ func (m Model) handleSelection() (tea.Model, tea.Cmd) {
 			} else {
 				// Go back to main menu
 				m.screen = screenMain
-				m.choices = []string{"🚀 Backup System", "🔄 Restore System", "🔍 Verify Backup", "ℹ️ About", "❌ Exit"}
+				m.choices = mainMenuChoices
 			}
 			m.cursor = 0
 		}
@@ -1295,6 +1351,8 @@ func (m Model) View() string {
 		return m.renderError()
 	case screenComplete:
 		return m.renderComplete()
+	case screenVerificationErrors:
+		return m.renderVerificationErrors()
 	default:
 		return "Unknown screen"
 	}

@@ -167,7 +167,19 @@ func resetBackupState() {
 	// Reset enhanced progress tracking
 	currentDirectory = ""
 	lastProgressMessage = ""
+}
 
+// GetVerificationErrors returns a copy of the current verification errors list.
+// This is used by the UI to display detailed error information in the verification errors screen.
+func GetVerificationErrors() []string {
+	// Return a copy to prevent external modification
+	errorsCopy := make([]string, len(verificationErrors))
+	copy(errorsCopy, verificationErrors)
+	return errorsCopy
+}
+
+// resetTUIState resets the TUI coordination variables.
+func resetTUIState() {
 	// Reset TUI state
 	tuiBackupCompleted = false
 	tuiBackupError = nil
@@ -1220,6 +1232,28 @@ func runVerificationSilently(operationType, mountPoint string) {
 
 	// Determine exclusion patterns based on backup type
 	var excludePatterns []string
+
+	// Browser cache patterns that should NEVER be verified (they change constantly)
+	browserCachePatterns := []string{
+		"*/.config/BraveSoftware/*/Default/IndexedDB/*",
+		"*/.config/BraveSoftware/*/Default/Local Storage/*",
+		"*/.config/BraveSoftware/*/Default/GPUCache/*",
+		"*/.config/BraveSoftware/*/Default/Sessions/*",
+		"*/.config/BraveSoftware/*/Default/Session Storage/*",
+		"*/.config/google-chrome/*/Default/IndexedDB/*",
+		"*/.config/google-chrome/*/Default/Local Storage/*",
+		"*/.config/google-chrome/*/Default/GPUCache/*",
+		"*/.config/chromium/*/Default/IndexedDB/*",
+		"*/.config/chromium/*/Default/Local Storage/*",
+		"*/.config/chromium/*/Default/GPUCache/*",
+		"*/.mozilla/firefox/*/storage/*",
+		"*/.mozilla/firefox/*/cache2/*",
+		"*/.cache/mozilla/*",
+		"*/.cache/google-chrome/*",
+		"*/.cache/chromium/*",
+		"*/.cache/BraveSoftware/*",
+	}
+
 	switch backupType {
 	case "system":
 		// System verification: Use system exclusions PLUS cache exclusions
@@ -1231,8 +1265,12 @@ func runVerificationSilently(operationType, mountPoint string) {
 			"/var/cache/*",     // System package cache
 			"/tmp/*",           // Already in ExcludePatterns but being explicit
 		)
+		// Add browser cache exclusions
+		excludePatterns = append(excludePatterns, browserCachePatterns...)
 	case "home":
 		excludePatterns = []string{".cache/*", ".local/share/Trash/*"} // Use home exclusions
+		// Add browser cache exclusions for home backups
+		excludePatterns = append(excludePatterns, browserCachePatterns...)
 		// Add selective backup exclusions if any
 		excludePatterns = append(excludePatterns, selectiveExclusions...)
 	default:

@@ -285,12 +285,12 @@ var (
 
 	// Clean info panels with Tokyo Night colors
 	infoBoxStyle = lipgloss.NewStyle().
-			Background(lipgloss.Color("#24283b")). // Tokyo Night panel bg
+			Background(backgroundColor). // Use true Tokyo Night background (#1a1b26)
 			Foreground(textColor).
 			Padding(0, 1). // Minimal padding
 			Margin(0).     // No margins
 			Border(lipgloss.RoundedBorder()).
-			BorderForeground(borderColor) // Tokyo Night border
+			BorderForeground(accentColor) // Tokyo Night dark purple border
 
 	// Clean status styles with dark Tokyo Night backgrounds
 	warningStyle = lipgloss.NewStyle().
@@ -322,8 +322,8 @@ var (
 			BorderForeground(lipgloss.Color("#e0af68")) // Keep orange border consistent
 
 	successStyle = lipgloss.NewStyle().
-			Foreground(textColor).                 // Use normal text color
-			Background(lipgloss.Color("#1e2030")). // Same dark background
+			Foreground(textColor).       // Use normal text color
+			Background(backgroundColor). // Use true Tokyo Night background (#1a1b26)
 			Bold(true).
 			Align(lipgloss.Center).
 			Padding(0, 2).
@@ -1344,6 +1344,134 @@ func (m Model) renderHomeSubfolderSelect() string {
 	// Center the content with beautiful border
 	content := borderStyle.Width(m.width - 8).Render(s.String())
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
+}
+
+// renderVerificationErrors displays a properly formatted, scrollable list of verification errors.
+func (m Model) renderVerificationErrors() string {
+	var s strings.Builder
+
+	// App branding header (smaller)
+	ascii := asciiStyle.Render(MigrateASCII)
+	s.WriteString(ascii + "\n")
+	title := titleStyle.Render("🔍 Verification Errors")
+	s.WriteString(title + "\n\n")
+
+	// Error summary
+	errorCount := len(m.verificationErrors)
+	if errorCount == 0 {
+		s.WriteString(infoStyle.Render("No verification errors found") + "\n\n")
+		help := helpStyle.Render("ESC: back to main menu")
+		s.WriteString(help)
+		return s.String()
+	}
+
+	// Calculate display area (leave room for header and help)
+	contentHeight := m.height - 15 // More room for header, scroll info, and help
+	if contentHeight < 3 {
+		contentHeight = 3
+	}
+
+	// Calculate safe scroll offset (don't mutate model in UI)
+	scrollOffset := m.errorScrollOffset
+	if scrollOffset >= errorCount {
+		scrollOffset = errorCount - 1
+	}
+	if scrollOffset < 0 {
+		scrollOffset = 0
+	}
+
+	// Summary with scroll position
+	scrollInfo := fmt.Sprintf("Showing errors %d-%d of %d total",
+		scrollOffset+1,
+		min(scrollOffset+contentHeight, errorCount),
+		errorCount)
+	dimStyle := lipgloss.NewStyle().Foreground(dimColor)
+	s.WriteString(dimStyle.Render(scrollInfo) + "\n\n")
+
+	// Display errors (properly formatted and truncated)
+	for i := 0; i < contentHeight && (scrollOffset+i) < errorCount; i++ {
+		errorIdx := scrollOffset + i
+		errorText := m.verificationErrors[errorIdx]
+
+		// Parse error type and format accordingly
+		var prefix, message string
+		if strings.Contains(errorText, "Missing from backup:") {
+			prefix = "❌ MISSING:"
+			message = strings.TrimPrefix(errorText, "Missing from backup: ")
+		} else if strings.Contains(errorText, "Content mismatch:") {
+			prefix = "⚠️  MISMATCH:"
+			message = strings.TrimPrefix(errorText, "Content mismatch: ")
+		} else if strings.Contains(errorText, "Directory structure:") {
+			prefix = "📁 STRUCTURE:"
+			message = strings.TrimPrefix(errorText, "Directory structure: ")
+		} else {
+			prefix = "🔍 ERROR:"
+			message = errorText
+		}
+
+		// Calculate available width for the message
+		prefixWidth := len(fmt.Sprintf("%2d. %s ", errorIdx+1, prefix))
+		maxWidth := m.width - prefixWidth - 5 // Leave room for borders and padding
+		if maxWidth < 30 {
+			maxWidth = 30
+		}
+
+		// Truncate long messages intelligently
+		if len(message) > maxWidth {
+			if strings.Contains(message, "/") {
+				// For file paths, show beginning and end
+				if maxWidth > 40 {
+					keepStart := maxWidth / 3
+					keepEnd := maxWidth - keepStart - 5
+					message = message[:keepStart] + "..." + message[len(message)-keepEnd:]
+				} else {
+					// For very narrow terminals, just show the end
+					message = "..." + message[len(message)-maxWidth+3:]
+				}
+			} else {
+				// For other messages, truncate with ellipsis
+				message = message[:maxWidth-3] + "..."
+			}
+		}
+
+		// Style each error type differently
+		var errorStyle lipgloss.Style
+		if strings.Contains(prefix, "MISSING") {
+			errorStyle = lipgloss.NewStyle().Foreground(errorColor)
+		} else if strings.Contains(prefix, "MISMATCH") {
+			errorStyle = lipgloss.NewStyle().Foreground(warningColor)
+		} else if strings.Contains(prefix, "STRUCTURE") {
+			errorStyle = lipgloss.NewStyle().Foreground(primaryColor)
+		} else {
+			errorStyle = lipgloss.NewStyle().Foreground(textColor)
+		}
+
+		// Format the line
+		line := fmt.Sprintf("%2d. %s %s", errorIdx+1, prefix, message)
+		s.WriteString(errorStyle.Render(line) + "\n")
+	}
+
+	// Navigation help
+	s.WriteString("\n")
+	if errorCount > contentHeight {
+		help := helpStyle.Render("↑/↓: scroll through errors • ESC: back to main menu")
+		s.WriteString(help)
+	} else {
+		help := helpStyle.Render("ESC: back to main menu")
+		s.WriteString(help)
+	}
+
+	// Center the content with beautiful border
+	content := borderStyle.Width(m.width - 8).Render(s.String())
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
+}
+
+// min returns the smaller of two integers
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 // progressMsg is a message type for triggering progress updates in the TUI.

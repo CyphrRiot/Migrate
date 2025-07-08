@@ -161,8 +161,9 @@ func performBackupVerification(sourcePath, destPath string, excludePatterns []st
 	criticalErrorThreshold := max(10, copiedFilesCount/20)
 
 	if len(verificationErrors) > criticalErrorThreshold {
-		return fmt.Errorf("verification failed with %d errors (threshold: %d)",
-			len(verificationErrors), criticalErrorThreshold)
+		// Instead of returning generic error, populate detailed error screen
+		// The TUI will check verificationErrors global and show detailed screen
+		return fmt.Errorf("VERIFICATION_DETAILED_ERRORS:%d", len(verificationErrors))
 	}
 
 	return nil
@@ -210,19 +211,29 @@ func verifyNewFiles(copiedFiles []string, sourcePath, destPath string, excludePa
 					return
 				}
 
-				// Skip excluded patterns - use simple string matching
+				// Skip excluded patterns - use proper glob matching
 				shouldSkip := false
 				for _, pattern := range excludePatterns {
-					// Check if file path contains the pattern (like .cache)
-					if strings.Contains(filePath, pattern) {
+					// Use proper glob matching
+					matched, err := filepath.Match(pattern, filePath)
+					if err == nil && matched {
 						shouldSkip = true
 						break
 					}
-					// Also check pattern without wildcards
-					cleanPattern := strings.TrimSuffix(strings.TrimPrefix(pattern, "*"), "*")
-					if cleanPattern != "" && strings.Contains(filePath, cleanPattern) {
-						shouldSkip = true
-						break
+					// Also check if any parent directory matches the pattern
+					relPath := strings.TrimPrefix(filePath, "/")
+					if relPath != filePath {
+						dir := filepath.Dir(relPath)
+						for dir != "." && dir != "/" {
+							if matched, err := filepath.Match(strings.TrimSuffix(pattern, "/*"), dir); err == nil && matched {
+								shouldSkip = true
+								break
+							}
+							dir = filepath.Dir(dir)
+						}
+						if shouldSkip {
+							break
+						}
 					}
 				}
 
@@ -767,8 +778,9 @@ func performStandaloneVerification(sourcePath, destPath string, excludePatterns 
 	maxAllowedErrors := 10 // Allow up to 10 errors for standalone verification
 
 	if len(verificationErrors) > maxAllowedErrors {
-		return fmt.Errorf("verification failed with %d errors (threshold: %d)",
-			len(verificationErrors), maxAllowedErrors)
+		// Instead of returning generic error, populate detailed error screen
+		// The TUI will check verificationErrors global and show detailed screen
+		return fmt.Errorf("VERIFICATION_DETAILED_ERRORS:%d", len(verificationErrors))
 	}
 
 	return nil
@@ -830,8 +842,18 @@ func verifyRandomSampleOfBackup(sourcePath, destPath string, sampleRate float64,
 
 		// Skip excluded patterns (same logic as backup process)
 		for _, pattern := range excludePatterns {
-			if strings.Contains(sourceFilePath, strings.TrimSuffix(pattern, "/*")) {
+			// Use proper glob matching
+			matched, err := filepath.Match(pattern, sourceFilePath)
+			if err == nil && matched {
 				return nil
+			}
+			// Also check if file is within an excluded directory
+			if strings.Contains(pattern, "*") {
+				// Convert glob pattern to simple substring check for directories
+				dirPattern := strings.TrimSuffix(pattern, "/*")
+				if strings.Contains(sourceFilePath, dirPattern) {
+					return nil
+				}
 			}
 		}
 
