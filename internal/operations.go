@@ -68,7 +68,6 @@ var DefaultVerificationConfig = VerificationConfig{
 		"/etc/group",
 		"/boot/grub/grub.cfg",
 		"/boot/loader/loader.conf",
-		"/etc/systemd/system",
 	},
 }
 
@@ -1222,8 +1221,14 @@ func runVerificationSilently(operationType, mountPoint string) {
 	// Determine exclusion patterns based on backup type
 	var excludePatterns []string
 
-	// Use shared verification exclusions function
-	excludePatterns = GetVerificationExclusions(backupType, selectiveExclusions)
+	// Use shared verification exclusions function with runtime directory exclusions for system
+	if backupType == "system" {
+		excludePatterns = append(GetVerificationExclusions(backupType, selectiveExclusions),
+			"/run/*", "/var/run/*", "/var/log/*", "/root/.cache/*", "/root/.config/*",
+			"/root/.ssh/*", "/root/go/*", "/srv/*", "/var/lib/machines/*", "/var/lib/portables/*")
+	} else {
+		excludePatterns = GetVerificationExclusions(backupType, selectiveExclusions)
+	}
 
 	if logFile != nil {
 		fmt.Fprintf(logFile, "Backup type detected: %s\n", backupType)

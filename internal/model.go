@@ -307,7 +307,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Drive successfully mounted, confirm operation
 			if strings.Contains(m.operation, "backup") {
 				// Backup confirmation
-				backupTypeDesc := "ENTIRE SYSTEM (1:1)"
+				backupTypeDesc := "ENTIRE SYSTEM"
 				sourceSize := ""
 
 				if m.operation == "home_backup" {
@@ -567,6 +567,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			} else if m.screen == screenHomeSubfolderSelect {
 				// NEW: Return to parent folder view from subfolder screen
+
 				m.currentFolderPath = ""
 				m.folderBreadcrumb = []string{}
 				m.screen = screenHomeFolderSelect

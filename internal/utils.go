@@ -25,8 +25,8 @@ const (
 )
 
 var (
-	// ExcludePatterns defines the default filesystem paths to exclude during system backups.
-	// These patterns exclude system-managed directories that should not be backed up.
+	// ExcludePatterns defines the basic filesystem paths to exclude (legacy - use GetSystemBackupExclusions for system backups).
+	// These patterns exclude only the most essential system-managed directories.
 	ExcludePatterns = []string{
 		"/dev/*",      // Device files
 		"/proc/*",     // Process filesystem
@@ -36,6 +36,51 @@ var (
 		"/lost+found", // Filesystem recovery directory
 	}
 )
+
+// GetSystemBackupExclusions returns comprehensive exclusion patterns for system backups.
+// This excludes all runtime, cache, log, and temporary directories that should not be backed up.
+func GetSystemBackupExclusions() []string {
+	return []string{
+		// Basic system directories
+		"/dev/*",
+		"/proc/*",
+		"/sys/*",
+		"/tmp/*",
+		"/var/tmp/*",
+		"/lost+found",
+
+		// Runtime directories (constantly changing)
+		"/run/*",
+		"/var/run/*",
+
+		// Log directories (constantly changing, huge, and recoverable)
+		"/var/log/*",
+
+		// Cache directories (recoverable and huge)
+		"/var/cache/*",
+		"/home/*/.cache/*",
+		"/root/.cache/*",
+
+		// Lock and PID files
+		"/var/lock/*",
+
+		// Trash directories
+		"/home/*/.local/share/Trash/*",
+		"/root/.local/share/Trash/*",
+
+		// Container and virtualization runtime
+		"/var/lib/docker/containers/*",
+		"/var/lib/docker/tmp/*",
+		"/var/lib/machines/*",
+		"/var/lib/portables/*",
+
+		// Package manager cache and temporary files
+		"/var/lib/pacman/sync/*",
+		"/home/*/.local/share/Steam/*",
+		"/home/*/.local/share/flatpak/*",
+		"/home/*/.local/share/containers/*",
+	}
+}
 
 // GetHomeBackupExclusions returns the complete list of exclusion patterns for home directory backups.
 // This centralizes all exclusion logic to eliminate copy-paste issues.
@@ -105,8 +150,9 @@ func GetVerificationExclusions(backupType string, selectiveExclusions []string) 
 
 	switch backupType {
 	case "system":
-		// System verification: Use system exclusions PLUS cache exclusions
-		excludePatterns = append(ExcludePatterns, GetSystemCacheExclusions()...)
+		// System verification: Use comprehensive system exclusions
+		excludePatterns = GetSystemBackupExclusions()
+		// Add browser cache exclusions
 		excludePatterns = append(excludePatterns, GetBrowserCacheExclusions()...)
 	case "home":
 		// Home verification: Use home exclusions PLUS browser cache exclusions

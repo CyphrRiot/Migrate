@@ -302,48 +302,48 @@ var (
 	// Clean status styles with dark Tokyo Night backgrounds
 	warningStyle = lipgloss.NewStyle().
 			Foreground(textColor).                 // Use normal text color
-			Background(lipgloss.Color("#1a1b26")). // Force Tokyo Night background
+			Background(lipgloss.Color("#16161e")). // Darker Tokyo Night background for better contrast
 			Bold(true).
 			Align(lipgloss.Center).
 			Padding(0, 2). // Back to minimal padding
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(lipgloss.Color("#e0af68")). // Keep orange border as loved!
 			UnsetBackground().
-			Background(lipgloss.Color("#1a1b26")) // Force dark background
+			Background(lipgloss.Color("#16161e")) // Force darker background
 
 	// Info style for neutral confirmations (like unmount)
 	infoStyle = lipgloss.NewStyle().
 			Foreground(textColor).                 // Use normal text color
-			Background(lipgloss.Color("#1a1b26")). // Force Tokyo Night background
+			Background(lipgloss.Color("#16161e")). // Darker Tokyo Night background for better contrast
 			Bold(true).
 			Align(lipgloss.Center).
 			Padding(0, 2).
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(lipgloss.Color("#e0af68")). // Keep orange border consistent
 			UnsetBackground().
-			Background(lipgloss.Color("#1a1b26")) // Force dark background
+			Background(lipgloss.Color("#16161e")) // Force darker background
 
 	errorStyle = lipgloss.NewStyle().
 			Foreground(textColor).                 // Use normal text color
-			Background(lipgloss.Color("#1a1b26")). // Force Tokyo Night background
+			Background(lipgloss.Color("#16161e")). // Darker Tokyo Night background for better contrast
 			Bold(true).
 			Align(lipgloss.Center).
 			Padding(0, 2).
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(lipgloss.Color("#e0af68")). // Keep orange border consistent
 			UnsetBackground().
-			Background(lipgloss.Color("#1a1b26")) // Force dark background
+			Background(lipgloss.Color("#16161e")) // Force darker background
 
 	successStyle = lipgloss.NewStyle().
 			Foreground(textColor).                 // Use normal text color
-			Background(lipgloss.Color("#1a1b26")). // Force Tokyo Night background
+			Background(lipgloss.Color("#16161e")). // Darker Tokyo Night background for better contrast
 			Bold(true).
 			Align(lipgloss.Center).
 			Padding(0, 2).
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(lipgloss.Color("#9ece6a")). // Tokyo Night green border
 			UnsetBackground().
-			Background(lipgloss.Color("#1a1b26")) // Force dark background
+			Background(lipgloss.Color("#16161e")) // Force darker background
 
 	// Tokyo Night menu selection styling
 	selectedMenuItemStyle = lipgloss.NewStyle().
@@ -1443,19 +1443,36 @@ func (m Model) renderVerificationErrors() string {
 					message = "BraveSoftware/..." + filename
 				}
 			} else if strings.Contains(message, "/") {
-				// For other paths, show just the filename
-				parts := strings.Split(message, "/")
-				if len(parts) > 0 {
-					filename := parts[len(parts)-1]
-					if len(filename) > maxWidth-5 {
-						message = "..." + filename[len(filename)-(maxWidth-5):]
-					} else {
-						message = "..." + filename
+				// For system paths, show beginning and end
+				if strings.HasPrefix(message, "/") {
+					// System path like "/etc/systemd/system"
+					if len(message) > maxWidth-6 {
+						// Show first part + "..." + last part
+						prefixLen := (maxWidth - 6) / 2
+						suffixLen := maxWidth - 6 - prefixLen
+						if prefixLen > 0 && suffixLen > 0 {
+							message = message[:prefixLen] + "..." + message[len(message)-suffixLen:]
+						} else {
+							message = message[:maxWidth-3] + "..."
+						}
+					}
+				} else {
+					// Relative path - show just filename
+					parts := strings.Split(message, "/")
+					if len(parts) > 0 {
+						filename := parts[len(parts)-1]
+						if len(filename) > maxWidth-5 {
+							message = "..." + filename[len(filename)-(maxWidth-5):]
+						} else {
+							message = "..." + filename
+						}
 					}
 				}
 			} else {
 				// For non-path messages, truncate with ellipsis
-				message = message[:maxWidth-3] + "..."
+				if len(message) > maxWidth-3 {
+					message = message[:maxWidth-3] + "..."
+				}
 			}
 		}
 

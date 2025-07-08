@@ -30,6 +30,63 @@ import (
 	"time"
 )
 
+// matchesExclusionPattern checks if a path matches an exclusion pattern with support for complex wildcards.
+// This handles patterns like "/home/*/.cache/*" that filepath.Match() can't handle properly.
+func matchesExclusionPattern(path, pattern string) bool {
+	// Handle patterns with multiple wildcards like "/home/*/.cache/*"
+	if strings.Contains(pattern, "/*") {
+		// Split pattern into segments by /*
+		segments := strings.Split(pattern, "/*")
+
+		// For pattern "/home/*/.cache/*", segments = ["/home", "/.cache", ""]
+		if len(segments) >= 2 {
+			// Check if path starts with first segment
+			if !strings.HasPrefix(path, segments[0]) {
+				return false
+			}
+
+			// For each middle segment, check if it exists in the remaining path
+			remaining := path[len(segments[0]):]
+			for i := 1; i < len(segments)-1; i++ {
+				segment := segments[i]
+				if segment == "" {
+					continue
+				}
+
+				// Find the segment in the remaining path
+				segmentIndex := strings.Index(remaining, segment)
+				if segmentIndex == -1 {
+					return false
+				}
+
+				// Move past this segment
+				remaining = remaining[segmentIndex+len(segment):]
+			}
+
+			// If last segment is empty (pattern ends with /*), we have a match
+			if len(segments) > 1 && segments[len(segments)-1] == "" {
+				return true
+			}
+		}
+	}
+
+	// Fallback to simple pattern matching for patterns without multiple wildcards
+	matched, err := filepath.Match(pattern, path)
+	if err == nil && matched {
+		return true
+	}
+
+	// Also check if the file is within a directory that matches the pattern
+	if strings.HasSuffix(pattern, "/*") {
+		dirPattern := strings.TrimSuffix(pattern, "/*")
+		if strings.HasPrefix(path, dirPattern+"/") {
+			return true
+		}
+	}
+
+	return false
+}
+
 // syncDirectories performs efficient directory synchronization using default exclude patterns.
 // This is a convenience wrapper around syncDirectoriesWithExclusions using the standard ExcludePatterns.
 func syncDirectories(src, dst string, logFile *os.File) error {
@@ -76,14 +133,8 @@ func syncDirectoriesWithSelectiveInclusions(src, dst string,
 	fileCounter := 0
 	localFilesFound := 0 // Local counter to batch atomic operations
 
-	// Pre-compile exclusion patterns for performance (avoid string ops in hot path)
-	exclusionPrefixes := make([]string, len(excludePatterns))
-	for i, pattern := range excludePatterns {
-		exclusionPrefixes[i] = strings.TrimSuffix(pattern, "/*")
-	}
-
 	if logFile != nil {
-		fmt.Fprintf(logFile, "Exclusion patterns compiled: %v\n", exclusionPrefixes)
+		fmt.Fprintf(logFile, "Using exclusion patterns: %v\n", excludePatterns)
 	}
 
 	// Walk through the source directory efficiently with hierarchical awareness
@@ -129,30 +180,27 @@ func syncDirectoriesWithSelectiveInclusions(src, dst string,
 
 		// Step 2: If not an explicit include, apply ALL exclusions strictly
 		if !isExplicitSubfolderInclude {
-			for _, prefix := range exclusionPrefixes {
+			for _, pattern := range excludePatterns {
 				// Convert to absolute path for proper matching
 				var fullPattern string
-				if strings.HasPrefix(prefix, "/") {
+				if strings.HasPrefix(pattern, "/") {
 					// Absolute path pattern
-					fullPattern = prefix
+					fullPattern = pattern
 				} else {
 					// Relative pattern - make it relative to source
-					fullPattern = filepath.Join(src, prefix)
+					fullPattern = filepath.Join(src, pattern)
 				}
 
-				// STRICT EXCLUSION: If path matches ANY exclusion pattern, exclude it immediately
-				if strings.HasPrefix(path, fullPattern) {
+				// Custom pattern matching for complex exclusion patterns
+				if matchesExclusionPattern(path, fullPattern) {
 					if d.IsDir() {
-						if logFile != nil && fileCounter%1000 == 0 {
-							fmt.Fprintf(logFile, "EXCLUDING DIRECTORY: %s (pattern: %s)\n", path, fullPattern)
+						if logFile != nil && fileCounter%50000 == 0 {
+							fmt.Fprintf(logFile, "Skipping excluded directory: %s (matched pattern: %s)\n", path, fullPattern)
 						}
 						return filepath.SkipDir
-					} else {
-						if logFile != nil && fileCounter%10000 == 0 {
-							fmt.Fprintf(logFile, "EXCLUDING FILE: %s (pattern: %s)\n", path, fullPattern)
-						}
-						return nil
 					}
+					// File matches exclusion pattern
+					return nil
 				}
 			}
 		}
@@ -384,14 +432,8 @@ func syncDirectoriesWithExclusions(src, dst string, excludePatterns []string, lo
 	fileCounter := 0
 	localFilesFound := 0 // Local counter to batch atomic operations
 
-	// Pre-compile exclusion patterns for performance (avoid string ops in hot path)
-	exclusionPrefixes := make([]string, len(excludePatterns))
-	for i, pattern := range excludePatterns {
-		exclusionPrefixes[i] = strings.TrimSuffix(pattern, "/*")
-	}
-
 	if logFile != nil {
-		fmt.Fprintf(logFile, "Exclusion patterns compiled: %v\n", exclusionPrefixes)
+		fmt.Fprintf(logFile, "Using exclusion patterns: %v\n", excludePatterns)
 	}
 
 	// Walk through the source directory efficiently
@@ -422,29 +464,20 @@ func syncDirectoriesWithExclusions(src, dst string, excludePatterns []string, lo
 			return nil
 		}
 
-		// Skip excluded patterns (using pre-compiled prefixes for performance)
-		// PERFORMANCE OPTIMIZATION: Quick check for non-cache paths first
-		isInHomeDir := strings.HasPrefix(path, src)
-
-		for _, prefix := range exclusionPrefixes {
+		// Skip excluded patterns using proper glob pattern matching
+		for _, pattern := range excludePatterns {
 			// Convert to absolute path for proper matching
 			var fullPattern string
-			if strings.HasPrefix(prefix, "/") {
-				// Absolute path pattern (like "/home/grendel/Videos")
-				fullPattern = prefix
+			if strings.HasPrefix(pattern, "/") {
+				// Absolute path pattern
+				fullPattern = pattern
 			} else {
-				// Relative pattern (like ".cache") - make it relative to source
-				fullPattern = filepath.Join(src, prefix)
-
-				// PERFORMANCE BYPASS: Skip cache pattern checks if we're not in a cache-like directory
-				if isInHomeDir && !strings.Contains(path, "/.cache") && !strings.Contains(path, "/.local") &&
-					(strings.Contains(prefix, ".cache") || strings.Contains(prefix, ".local")) {
-					continue // Skip cache patterns when not in cache directories
-				}
+				// Relative pattern - make it relative to source
+				fullPattern = filepath.Join(src, pattern)
 			}
 
-			// Check for exact path prefix match (much more efficient)
-			if strings.HasPrefix(path, fullPattern) {
+			// Custom pattern matching for complex exclusion patterns
+			if matchesExclusionPattern(path, fullPattern) {
 				if d.IsDir() {
 					if logFile != nil && fileCounter%50000 == 0 {
 						fmt.Fprintf(logFile, "Skipping excluded directory: %s (matched pattern: %s)\n", path, fullPattern)
