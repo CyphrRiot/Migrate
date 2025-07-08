@@ -76,25 +76,39 @@ func isDirectoryEmptyDueToExclusions(dirPath string, excludePatterns []string, s
 		return true
 	}
 
+	// Get relative path from source for pattern matching
+	relPath, err := filepath.Rel(sourcePath, dirPath)
+	if err != nil {
+		return false
+	}
+
+	// Debug logging for flatpak directory
+	if strings.Contains(relPath, "flatpak") {
+		fmt.Printf("DEBUG: Checking flatpak directory: %s\n", relPath)
+		fmt.Printf("DEBUG: Patterns: %v\n", excludePatterns)
+	}
+
 	// Check if all potential contents would be excluded
 	// Look for exclusion patterns that would exclude everything in this directory
 	for _, pattern := range excludePatterns {
-		var fullPattern string
-		if strings.HasPrefix(pattern, "/") {
-			fullPattern = pattern
-		} else {
-			fullPattern = filepath.Join(sourcePath, pattern)
-		}
-
 		// Check if pattern would exclude all contents of this directory
-		if strings.HasSuffix(fullPattern, "/*") {
-			dirPattern := strings.TrimSuffix(fullPattern, "/*")
-			if dirPath == dirPattern {
+		if strings.HasSuffix(pattern, "/*") {
+			dirPattern := strings.TrimSuffix(pattern, "/*")
+			if strings.Contains(relPath, "flatpak") {
+				fmt.Printf("DEBUG: Comparing '%s' with pattern '%s'\n", relPath, dirPattern)
+			}
+			if relPath == dirPattern {
+				if strings.Contains(relPath, "flatpak") {
+					fmt.Printf("DEBUG: MATCH FOUND - Directory should be empty\n")
+				}
 				return true
 			}
 		}
 	}
 
+	if strings.Contains(relPath, "flatpak") {
+		fmt.Printf("DEBUG: No match found - Directory should NOT be empty\n")
+	}
 	return false
 }
 
