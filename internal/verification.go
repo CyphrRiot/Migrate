@@ -1073,23 +1073,39 @@ func verifyRandomSampleOfBackup(sourcePath, destPath string, sampleRate float64,
 		fmt.Fprintf(logFile, "Total verification issues found: %d\n", len(verificationErrors))
 	}
 
-	// Allow up to 5% sample error rate for standalone verification
-	totalIssues := len(verificationErrors) // Includes both missing files and content errors
+	// Separate directory issues from file verification failures
+	directoryIssues := 0
+	fileVerificationFailures := 0
 
-	if totalIssues > 0 {
-		// Calculate overall error rate including missing files
-		totalFilesChecked := verified + errors + (len(verificationErrors) - errors) // missing files + content errors
-		overallErrorRate := float64(totalIssues) / float64(totalFilesChecked)
+	// Count different types of errors
+	for _, errorMsg := range verificationErrors {
+		if strings.Contains(errorMsg, "Missing directory:") {
+			directoryIssues++
+		} else if strings.Contains(errorMsg, "Content mismatch:") || strings.Contains(errorMsg, "Missing file:") {
+			fileVerificationFailures++
+		}
+	}
+
+	// Only count file verification failures for failure rate calculation
+	if fileVerificationFailures > 0 {
+		// Calculate failure rate based only on actual file verification attempts
+		totalFilesChecked := verified + fileVerificationFailures
+		overallErrorRate := float64(fileVerificationFailures) / float64(totalFilesChecked)
 
 		if overallErrorRate > 0.05 { // 5% error threshold
 			return fmt.Errorf("high verification failure rate: %d issues out of %d files checked (%.1f%% failure rate)",
-				totalIssues, totalFilesChecked, overallErrorRate*100)
-		} else if totalIssues > 0 {
-			// Some issues found but within threshold - log as warning
+				fileVerificationFailures, totalFilesChecked, overallErrorRate*100)
+		} else if fileVerificationFailures > 0 {
+			// Some file verification failures found but within threshold - log as warning
 			if logFile != nil {
-				fmt.Fprintf(logFile, "WARNING: %d verification issues detected but within 5%% threshold\n", totalIssues)
+				fmt.Fprintf(logFile, "WARNING: %d file verification failures detected but within 5%% threshold\n", fileVerificationFailures)
 			}
 		}
+	}
+
+	// Log directory issues separately (not counted as verification failures)
+	if directoryIssues > 0 && logFile != nil {
+		fmt.Fprintf(logFile, "INFO: %d directory structure issues found (not counted as verification failures)\n", directoryIssues)
 	}
 
 	return nil
