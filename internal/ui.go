@@ -35,6 +35,13 @@ var (
 	// 🌃 AUTHENTIC TOKYO NIGHT COLOR PALETTE 🌃
 	// Based on the official Tokyo Night theme specification
 
+	// 🔄 OLD COLORS (for potential reversion):
+	// To revert to original theme, change these values back:
+	//   - secondaryColor: change from #bb9af7 back to #9ece6a
+	//   - accentColor: change from #73daca back to #bb9af7
+	//   - titleStyle.Foreground: change from textColor back to secondaryColor
+	// Original issue: bright green tagline (#9ece6a) was too prominent
+
 	// Tokyo Night Blue - Primary brand color
 	blueGradient = GradientColors{
 		Start: lipgloss.Color("#7aa2f7"), // Tokyo Night blue (primary)
@@ -75,15 +82,15 @@ var (
 	infoGradient     = blueGradient   // Tokyo Night blue for info
 	progressGradient = purpleGradient // Tokyo Night purple for progress
 
-	// Base Tokyo Night colors - authentic theme foundation
-	primaryColor    = lipgloss.Color("#7aa2f7") // Tokyo Night blue
-	secondaryColor  = lipgloss.Color("#9ece6a") // Tokyo Night green
-	accentColor     = lipgloss.Color("#bb9af7") // Tokyo Night purple
+	// Base Tokyo Night colors - authentic theme foundation with proper hierarchy
+	primaryColor    = lipgloss.Color("#7aa2f7") // Tokyo Night blue - primary branding
+	secondaryColor  = lipgloss.Color("#bb9af7") // Tokyo Night purple - secondary branding (was green)
+	accentColor     = lipgloss.Color("#73daca") // Tokyo Night cyan - special highlights
 	warningColor    = lipgloss.Color("#e0af68") // Tokyo Night orange
 	errorColor      = lipgloss.Color("#f7768e") // Tokyo Night red/pink
-	successColor    = lipgloss.Color("#9ece6a") // Tokyo Night green
-	textColor       = lipgloss.Color("#c0caf5") // Tokyo Night foreground
-	dimColor        = lipgloss.Color("#565f89") // Tokyo Night comment/dim
+	successColor    = lipgloss.Color("#9ece6a") // Tokyo Night green - success states ONLY
+	textColor       = lipgloss.Color("#c0caf5") // Tokyo Night foreground - main text
+	dimColor        = lipgloss.Color("#565f89") // Tokyo Night comment/dim - secondary text
 	backgroundColor = lipgloss.Color("#1a1b26") // Tokyo Night background
 	borderColor     = lipgloss.Color("#414868") // Tokyo Night border/line
 )
@@ -252,7 +259,7 @@ var (
 			MarginBottom(1)
 
 	titleStyle = lipgloss.NewStyle().
-			Foreground(secondaryColor).
+			Foreground(textColor).
 			Bold(true).
 			Align(lipgloss.Center).
 			MarginBottom(1)
