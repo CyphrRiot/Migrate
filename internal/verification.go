@@ -211,27 +211,31 @@ func verifyNewFiles(copiedFiles []string, sourcePath, destPath string, excludePa
 					return
 				}
 
-				// Skip excluded patterns - use proper glob matching
+				// Skip excluded patterns - comprehensive browser cache exclusion
 				shouldSkip := false
 				for _, pattern := range excludePatterns {
-					// Use proper glob matching
-					matched, err := filepath.Match(pattern, filePath)
-					if err == nil && matched {
-						shouldSkip = true
-						break
-					}
-					// Also check if any parent directory matches the pattern
-					relPath := strings.TrimPrefix(filePath, "/")
-					if relPath != filePath {
-						dir := filepath.Dir(relPath)
-						for dir != "." && dir != "/" {
-							if matched, err := filepath.Match(strings.TrimSuffix(pattern, "/*"), dir); err == nil && matched {
-								shouldSkip = true
-								break
-							}
-							dir = filepath.Dir(dir)
+					// Handle ALL BraveSoftware cache files comprehensively
+					if strings.Contains(pattern, ".config/BraveSoftware/") {
+						if strings.Contains(filePath, ".config/BraveSoftware/") {
+							shouldSkip = true
+							break
 						}
-						if shouldSkip {
+					} else if strings.Contains(pattern, ".cache/") {
+						if strings.Contains(filePath, ".cache/") {
+							shouldSkip = true
+							break
+						}
+					} else if strings.Contains(pattern, "/*") {
+						// Handle simple wildcard patterns
+						patternBase := strings.TrimSuffix(pattern, "/*")
+						if strings.Contains(filePath, patternBase) {
+							shouldSkip = true
+							break
+						}
+					} else {
+						// Simple string matching for exact patterns
+						if strings.Contains(filePath, pattern) {
+							shouldSkip = true
 							break
 						}
 					}
@@ -426,22 +430,27 @@ func verifySampledFiles(sourcePath, destPath string, sampleRate float64, exclude
 			return nil
 		}
 
-		// Skip excluded patterns
+		// Skip excluded patterns - comprehensive browser cache exclusion
 		for _, pattern := range excludePatterns {
-			// Use proper glob matching
-			matched, err := filepath.Match(pattern, path)
-			if err == nil && matched {
-				return nil
-			}
-			// Also check if any parent directory matches the pattern
-			relPath, _ := filepath.Rel(sourcePath, path)
-			if relPath != "." {
-				dir := filepath.Dir(relPath)
-				for dir != "." && dir != "/" {
-					if matched, err := filepath.Match(strings.TrimSuffix(pattern, "/*"), dir); err == nil && matched {
-						return nil
-					}
-					dir = filepath.Dir(dir)
+			// Handle ALL BraveSoftware cache files comprehensively
+			if strings.Contains(pattern, ".config/BraveSoftware/") {
+				if strings.Contains(path, ".config/BraveSoftware/") {
+					return nil
+				}
+			} else if strings.Contains(pattern, ".cache/") {
+				if strings.Contains(path, ".cache/") {
+					return nil
+				}
+			} else if strings.Contains(pattern, "/*") {
+				// Handle simple wildcard patterns
+				patternBase := strings.TrimSuffix(pattern, "/*")
+				if strings.Contains(path, patternBase) {
+					return nil
+				}
+			} else {
+				// Simple string matching for exact patterns
+				if strings.Contains(path, pattern) {
+					return nil
 				}
 			}
 		}
@@ -840,18 +849,26 @@ func verifyRandomSampleOfBackup(sourcePath, destPath string, sampleRate float64,
 			return nil
 		}
 
-		// Skip excluded patterns (same logic as backup process)
+		// Skip excluded patterns - comprehensive browser cache exclusion
 		for _, pattern := range excludePatterns {
-			// Use proper glob matching
-			matched, err := filepath.Match(pattern, sourceFilePath)
-			if err == nil && matched {
-				return nil
-			}
-			// Also check if file is within an excluded directory
-			if strings.Contains(pattern, "*") {
-				// Convert glob pattern to simple substring check for directories
-				dirPattern := strings.TrimSuffix(pattern, "/*")
-				if strings.Contains(sourceFilePath, dirPattern) {
+			// Handle ALL BraveSoftware cache files comprehensively
+			if strings.Contains(pattern, ".config/BraveSoftware/") {
+				if strings.Contains(sourceFilePath, ".config/BraveSoftware/") {
+					return nil
+				}
+			} else if strings.Contains(pattern, ".cache/") {
+				if strings.Contains(sourceFilePath, ".cache/") {
+					return nil
+				}
+			} else if strings.Contains(pattern, "/*") {
+				// Handle simple wildcard patterns
+				patternBase := strings.TrimSuffix(pattern, "/*")
+				if strings.Contains(sourceFilePath, patternBase) {
+					return nil
+				}
+			} else {
+				// Simple string matching for exact patterns
+				if strings.Contains(sourceFilePath, pattern) {
 					return nil
 				}
 			}

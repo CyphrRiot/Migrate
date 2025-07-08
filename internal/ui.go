@@ -1357,11 +1357,11 @@ func (m Model) renderHomeSubfolderSelect() string {
 func (m Model) renderVerificationErrors() string {
 	var s strings.Builder
 
-	// App branding header (smaller)
-	ascii := asciiStyle.Render(MigrateASCII)
-	s.WriteString(ascii + "\n")
+	// App branding header (compact for more error display space)
 	title := titleStyle.Render("🔍 Verification Errors")
-	s.WriteString(title + "\n\n")
+	s.WriteString(title + "\n")
+	version := versionStyle.Render(GetSubtitle())
+	s.WriteString(version + "\n\n")
 
 	// Error summary
 	errorCount := len(m.verificationErrors)
@@ -1373,9 +1373,9 @@ func (m Model) renderVerificationErrors() string {
 	}
 
 	// Calculate display area (leave room for header and help)
-	contentHeight := m.height - 15 // More room for header, scroll info, and help
-	if contentHeight < 3 {
-		contentHeight = 3
+	contentHeight := m.height - 8 // Compact header + help + padding
+	if contentHeight < 5 {
+		contentHeight = 5
 	}
 
 	// Calculate safe scroll offset (don't mutate model in UI)
@@ -1417,26 +1417,33 @@ func (m Model) renderVerificationErrors() string {
 		}
 
 		// Calculate available width for the message
-		prefixWidth := len(fmt.Sprintf("%2d. %s ", errorIdx+1, prefix))
-		maxWidth := m.width - prefixWidth - 5 // Leave room for borders and padding
+		maxWidth := m.width - 20 // Leave room for number, prefix, borders, and padding
 		if maxWidth < 30 {
 			maxWidth = 30
 		}
 
-		// Truncate long messages intelligently
+		// Smart truncation for file paths to prevent line wrapping
 		if len(message) > maxWidth {
-			if strings.Contains(message, "/") {
-				// For file paths, show beginning and end
-				if maxWidth > 40 {
-					keepStart := maxWidth / 3
-					keepEnd := maxWidth - keepStart - 5
-					message = message[:keepStart] + "..." + message[len(message)-keepEnd:]
-				} else {
-					// For very narrow terminals, just show the end
-					message = "..." + message[len(message)-maxWidth+3:]
+			if strings.Contains(message, ".config/BraveSoftware/") {
+				// For browser cache, show just "BraveSoftware/...filename"
+				parts := strings.Split(message, "/")
+				if len(parts) > 0 {
+					filename := parts[len(parts)-1]
+					message = "BraveSoftware/..." + filename
+				}
+			} else if strings.Contains(message, "/") {
+				// For other paths, show just the filename
+				parts := strings.Split(message, "/")
+				if len(parts) > 0 {
+					filename := parts[len(parts)-1]
+					if len(filename) > maxWidth-5 {
+						message = "..." + filename[len(filename)-(maxWidth-5):]
+					} else {
+						message = "..." + filename
+					}
 				}
 			} else {
-				// For other messages, truncate with ellipsis
+				// For non-path messages, truncate with ellipsis
 				message = message[:maxWidth-3] + "..."
 			}
 		}

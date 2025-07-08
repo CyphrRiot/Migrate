@@ -22,7 +22,7 @@ const (
 
 	// AppVersion follows semantic versioning (major.minor.patch)
 	// ⬅️ CHANGE VERSION HERE ONLY - this updates everywhere automatically
-	AppVersion = "1.0.36"
+	AppVersion = "1.0.38"
 
 	// AppAuthor contains author information with social media reference
 	AppAuthor = "Cypher Riot - https://x.com/CyphrRiot"
