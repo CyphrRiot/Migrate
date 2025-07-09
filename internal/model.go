@@ -73,6 +73,11 @@ type Model struct {
 	restoreConfig     bool // Restore ~/.config directory
 	restoreWindowMgrs bool // Restore window managers (Hyprland, GNOME, etc.)
 
+	// Restore folder selection state (for selective restores)
+	restoreFolders         []HomeFolderInfo // Discovered folders from backup
+	selectedRestoreFolders map[string]bool  // User's restore folder selections
+	totalRestoreSize       int64            // Calculated total size of selected restore content
+
 	// Verification error display
 	verificationErrors []string // List of verification errors for display
 	errorScrollOffset  int      // Current scroll position in error list
@@ -244,6 +249,28 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		return m, nil
 
+	case RestoreFoldersDiscovered:
+		if msg.error != nil {
+			m.message = fmt.Sprintf("Failed to discover restore folders: %v", msg.error)
+			return m, tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
+				return tea.KeyMsg{Type: tea.KeyEsc}
+			})
+		}
+
+		// Store discovered folders and initialize selections
+		m.restoreFolders = msg.folders
+		if m.selectedRestoreFolders == nil {
+			m.selectedRestoreFolders = make(map[string]bool)
+		}
+
+		// Default: select all folders for restore
+		for _, folder := range m.restoreFolders {
+			m.selectedRestoreFolders[folder.Path] = true
+		}
+
+		m.calculateTotalRestoreSize()
+		return m, nil
+
 	case PasswordRequiredMsg:
 		// Exit the entire program to handle password, then restart
 		return m, tea.Quit
@@ -319,7 +346,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.confirmation = fmt.Sprintf("Ready to backup %s\n\n%sDestination: %s (%s)\nType: %s\nMounted at: %s\n\nProceed with backup?",
 					backupTypeDesc, sourceSize, msg.drivePath, msg.driveSize, msg.driveType, msg.mountPoint)
 			} else if strings.Contains(m.operation, "restore") {
-				// Restore confirmation
+				// For restore, first detect backup type
+				backupType, err := detectBackupType(msg.mountPoint)
+				if err == nil && backupType == "home" {
+					// It's a home backup - show folder selection
+					m.selectedDrive = msg.mountPoint
+					m.screen = screens.ScreenRestoreFolderSelect
+					m.cursor = 0
+					// Initialize restore folder state
+					m.selectedRestoreFolders = make(map[string]bool)
+					m.totalRestoreSize = 0
+					// Start discovering folders from backup
+					return m, DiscoverRestoreFoldersCmd(msg.mountPoint)
+				}
+
+				// System restore or detection failed - proceed with normal confirmation
 				restoreTypeDesc := "ENTIRE SYSTEM"
 				if m.operation == "custom_restore" {
 					restoreTypeDesc = "CUSTOM PATH"
@@ -568,6 +609,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.cursor = 0
 				m.message = "" // Clear any temporary messages
 				return m, nil
+			} else if m.screen == screens.ScreenRestoreFolderSelect {
+				// Return to restore menu from folder selection
+				resetBackupState()
+				m.screen = screens.ScreenRestore
+				m.cursor = 0
+				m.choices = screens.RestoreMenuChoices
+				m.selectedRestoreFolders = make(map[string]bool)
+				m.totalRestoreSize = 0
+				return m, nil
 			} else if m.screen == screens.ScreenVerificationErrors {
 				// NEW: Return to main menu from verification errors screen
 				resetBackupState()
@@ -628,6 +678,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				} else {
 					m.cursor = maxCursor // Wrap to bottom
 				}
+			} else if m.screen == screens.ScreenRestoreFolderSelect {
+				// Restore folder selection navigation
+				numControls := 2
+				visibleFolders := m.getVisibleRestoreFolders()
+				maxCursor := numControls + len(visibleFolders) - 1
+				if m.cursor > 0 {
+					m.cursor--
+				} else {
+					m.cursor = maxCursor // Wrap to bottom
+				}
 			} else if m.cursor > 0 {
 				m.cursor--
 			}
@@ -680,6 +740,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				} else {
 					m.cursor = 0 // Wrap to top
 				}
+			} else if m.screen == screens.ScreenRestoreFolderSelect {
+				// Restore folder selection navigation
+				numControls := 2
+				visibleFolders := m.getVisibleRestoreFolders()
+				maxCursor := numControls + len(visibleFolders) - 1
+				if m.cursor < maxCursor {
+					m.cursor++
+				} else {
+					m.cursor = 0 // Wrap to top
+				}
 			} else if m.cursor < len(m.choices)-1 {
 				m.cursor++
 			}
@@ -697,6 +767,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				m.calculateTotalBackupSize()
 				m.autoSaveSelections() // Auto-save when user selects all
+			} else if m.screen == screens.ScreenRestoreFolderSelect {
+				// Select all visible folders for restore
+				for _, folder := range m.restoreFolders {
+					if folder.IsVisible && !folder.AlwaysInclude {
+						m.selectedRestoreFolders[folder.Path] = true
+					}
+				}
+				m.calculateTotalRestoreSize()
 			}
 			return m, nil
 
@@ -709,6 +787,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				m.calculateTotalBackupSize()
 				m.autoSaveSelections() // Auto-save when user deselects all
+			} else if m.screen == screens.ScreenRestoreFolderSelect {
+				// Deselect all visible folders for restore
+				for _, folder := range m.restoreFolders {
+					if folder.IsVisible && !folder.AlwaysInclude {
+						m.selectedRestoreFolders[folder.Path] = false
+					}
+				}
+				m.calculateTotalRestoreSize()
 			}
 			return m, nil
 
@@ -825,21 +911,54 @@ func (m Model) handleRestoreMenuSelection() (tea.Model, tea.Cmd) {
 	switch m.cursor {
 	case 0: // Restore to Current System
 		m.operation = "system_restore"
-		// Go to restore options screen first
-		m.screen = screens.ScreenRestoreOptions
-		m.cursor = 0
-		m.choices = screens.RestoreOptionsChoices
+		// Go to drive selection first
+		return m, LoadDrives()
 	case 1: // Restore to Custom Path
 		m.operation = "custom_restore"
-		// Go to restore options screen first
-		m.screen = screens.ScreenRestoreOptions
-		m.cursor = 0
-		m.choices = screens.RestoreOptionsChoices
+		// Go to drive selection first
+		return m, LoadDrives()
 	case 2: // Back
-		resetBackupState() // Reset state when going back to main from restore menu
+		resetBackupState() // Reset state when going back to main from verify menu
 		m.screen = screens.ScreenMain
 		m.choices = screens.MainMenuChoices
 		m.cursor = 0
+	}
+	return m, nil
+}
+
+// handleRestoreFolderSelection handles folder selection for selective restore
+func (m Model) handleRestoreFolderSelection() (tea.Model, tea.Cmd) {
+	numControls := 2
+	visibleFolders := m.getVisibleRestoreFolders()
+
+	if m.cursor == 0 {
+		// Continue button - proceed with restore
+		if m.totalRestoreSize == 0 {
+			m.message = "⚠️ Please select at least one folder to restore"
+			return m, nil
+		}
+
+		// Proceed to restore options
+		m.screen = screens.ScreenRestoreOptions
+		m.cursor = 0
+		m.choices = screens.RestoreOptionsChoices
+		return m, nil
+	} else if m.cursor == 1 {
+		// Back button
+		m.screen = screens.ScreenRestore
+		m.cursor = 0
+		m.choices = screens.RestoreMenuChoices
+		return m, nil
+	} else if m.cursor >= numControls && m.cursor < numControls+len(visibleFolders) {
+		// Toggle folder selection
+		folderIdx := m.cursor - numControls
+		folder := visibleFolders[folderIdx]
+
+		// Toggle selection (except for always-included folders)
+		if !folder.AlwaysInclude {
+			m.selectedRestoreFolders[folder.Path] = !m.selectedRestoreFolders[folder.Path]
+			m.calculateTotalRestoreSize()
+		}
 	}
 	return m, nil
 }
@@ -869,6 +988,8 @@ func (m Model) handleSelection() (tea.Model, tea.Cmd) {
 		return m.handleBackupMenuSelection()
 	case screens.ScreenRestore:
 		return m.handleRestoreMenuSelection()
+	case screens.ScreenRestoreFolderSelect:
+		return m.handleRestoreFolderSelection()
 	case screens.ScreenVerify:
 		return m.handleVerifyMenuSelection()
 	case screens.ScreenConfirm:
@@ -913,6 +1034,10 @@ func (m Model) handleSelection() (tea.Model, tea.Cmd) {
 						}),
 					)
 				case "system_restore":
+					// Check if we have selected restore folders (means it's a home backup)
+					if len(m.selectedRestoreFolders) > 0 {
+						return m, startSelectiveRestore(m.selectedDrive, m.selectedRestoreFolders, m.restoreFolders, m.restoreConfig, m.restoreWindowMgrs)
+					}
 					return m, startRestore(m.selectedDrive, "/", m.restoreConfig, m.restoreWindowMgrs)
 				case "custom_restore":
 					return m, startRestore(m.selectedDrive, "/tmp/restore", m.restoreConfig, m.restoreWindowMgrs)
@@ -1285,7 +1410,29 @@ func (m Model) getCurrentSubfolders() []HomeFolderInfo {
 		}
 		return nonEmptySubfolders
 	}
-	return []HomeFolderInfo{} // Return empty list if no cache
+	return nil
+}
+
+// getVisibleRestoreFolders returns only non-empty, visible folders for the restore UI.
+func (m Model) getVisibleRestoreFolders() []HomeFolderInfo {
+	visibleFolders := []HomeFolderInfo{}
+	for _, folder := range m.restoreFolders {
+		if folder.Size > 0 && folder.IsVisible {
+			visibleFolders = append(visibleFolders, folder)
+		}
+	}
+	return visibleFolders
+}
+
+// calculateTotalRestoreSize calculates the total size of selected folders for restore.
+func (m *Model) calculateTotalRestoreSize() {
+	var total int64
+	for _, folder := range m.restoreFolders {
+		if folder.AlwaysInclude || m.selectedRestoreFolders[folder.Path] {
+			total += folder.Size
+		}
+	}
+	m.totalRestoreSize = total
 }
 
 // NEW: Smart selection state management functions
@@ -1428,6 +1575,8 @@ func (m Model) View() string {
 		return m.renderComplete()
 	case screens.ScreenVerificationErrors:
 		return m.renderVerificationErrors()
+	case screens.ScreenRestoreFolderSelect:
+		return m.renderRestoreFolderSelect()
 	default:
 		return "Unknown screen"
 	}

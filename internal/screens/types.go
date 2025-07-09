@@ -19,6 +19,7 @@ const (
 	ScreenHomeFolderSelect
 	ScreenHomeSubfolderSelect
 	ScreenVerificationErrors
+	ScreenRestoreFolderSelect
 )
 
 // String returns the string representation of a screen
@@ -52,6 +53,8 @@ func (s Screen) String() string {
 		return "Home Subfolder Selection"
 	case ScreenVerificationErrors:
 		return "Verification Errors"
+	case ScreenRestoreFolderSelect:
+		return "Restore Folder Selection"
 	default:
 		return "Unknown"
 	}

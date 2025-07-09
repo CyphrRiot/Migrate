@@ -751,6 +751,164 @@ func startRestore(sourcePath, targetPath string, restoreConfig, restoreWindowMgr
 	}
 }
 
+// startSelectiveRestore creates a command for selective folder restore from a home backup.
+// Similar to startRestore but only restores selected folders from the backup.
+func startSelectiveRestore(sourcePath string, selectedFolders map[string]bool, allFolders []HomeFolderInfo, restoreConfig, restoreWindowMgrs bool) tea.Cmd {
+	return func() tea.Msg {
+		// Setup logging
+		logPath := getLogFilePath()
+		logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+		if err == nil {
+			fmt.Fprintf(logFile, "\n=== SELECTIVE RESTORE STARTED: %s ===\n", time.Now().Format(time.RFC3339))
+			fmt.Fprintf(logFile, "Log file: %s\n", logPath)
+			defer logFile.Close()
+		}
+
+		// Get home directory as target
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			return ProgressUpdate{Error: fmt.Errorf("failed to get home directory: %v", err)}
+		}
+
+		if logFile != nil {
+			fmt.Fprintf(logFile, "Restore source: %s\n", sourcePath)
+			fmt.Fprintf(logFile, "Restore target: %s\n", homeDir)
+			fmt.Fprintf(logFile, "Restore config: %v\n", restoreConfig)
+			fmt.Fprintf(logFile, "Restore window managers: %v\n", restoreWindowMgrs)
+
+			// Log selected folders
+			fmt.Fprintf(logFile, "\nSelected folders for restore:\n")
+			for _, folder := range allFolders {
+				if selectedFolders[folder.Path] || folder.AlwaysInclude {
+					fmt.Fprintf(logFile, "  - %s (%s)\n", folder.Name, FormatBytes(folder.Size))
+				}
+			}
+		}
+
+		// Perform selective restore
+		err = performSelectiveRestore(sourcePath, homeDir, selectedFolders, allFolders, restoreConfig, restoreWindowMgrs, logFile)
+		if err != nil {
+			return ProgressUpdate{Error: fmt.Errorf("selective restore failed: %v", err)}
+		}
+
+		return ProgressUpdate{Percentage: 1.0, Message: "Selective restore completed successfully!", Done: true}
+	}
+}
+
+// performSelectiveRestore restores only selected folders from a home backup.
+func performSelectiveRestore(backupPath, targetPath string, selectedFolders map[string]bool, allFolders []HomeFolderInfo, restoreConfig, restoreWindowMgrs bool, logFile *os.File) error {
+	if logFile != nil {
+		fmt.Fprintf(logFile, "Starting selective restore: %s -> %s\n", backupPath, targetPath)
+	}
+
+	// Create a list of folders to restore
+	var foldersToRestore []string
+	for _, folder := range allFolders {
+		// Get the folder name from the backup path
+		folderName := filepath.Base(folder.Path)
+
+		// Skip if not selected and not always included
+		if !selectedFolders[folder.Path] && !folder.AlwaysInclude {
+			continue
+		}
+
+		// Apply config/window manager filters
+		if !restoreConfig && folderName == ".config" {
+			if logFile != nil {
+				fmt.Fprintf(logFile, "Skipping .config (restore config disabled)\n")
+			}
+			continue
+		}
+
+		if !restoreWindowMgrs && isWindowManagerFolder(folderName) {
+			if logFile != nil {
+				fmt.Fprintf(logFile, "Skipping window manager: %s\n", folderName)
+			}
+			continue
+		}
+
+		foldersToRestore = append(foldersToRestore, folderName)
+	}
+
+	// Restore each selected folder
+	for _, folderName := range foldersToRestore {
+		sourceFolderPath := filepath.Join(backupPath, folderName)
+		targetFolderPath := filepath.Join(targetPath, folderName)
+
+		if logFile != nil {
+			fmt.Fprintf(logFile, "\nRestoring folder: %s\n", folderName)
+			fmt.Fprintf(logFile, "  Source: %s\n", sourceFolderPath)
+			fmt.Fprintf(logFile, "  Target: %s\n", targetFolderPath)
+		}
+
+		// Use syncDirectoriesWithExclusions for each folder
+		err := syncDirectoriesWithExclusions(sourceFolderPath, targetFolderPath, nil, logFile)
+		if err != nil {
+			if logFile != nil {
+				fmt.Fprintf(logFile, "Error restoring %s: %v\n", folderName, err)
+			}
+			return fmt.Errorf("failed to restore %s: %v", folderName, err)
+		}
+
+		// Phase 2: Delete extra files for this folder
+		err = deleteExtraFiles(sourceFolderPath, targetFolderPath, logFile)
+		if err != nil {
+			if logFile != nil {
+				fmt.Fprintf(logFile, "Warning: cleanup failed for %s: %v\n", folderName, err)
+			}
+			// Don't fail the entire restore for cleanup issues
+		}
+	}
+
+	if logFile != nil {
+		fmt.Fprintf(logFile, "\nSelective restore completed successfully\n")
+	}
+
+	return nil
+}
+
+// isWindowManagerFolder checks if a folder name corresponds to a window manager.
+func isWindowManagerFolder(folderName string) bool {
+	windowManagers := []string{
+		".config/hypr",
+		".config/sway",
+		".config/i3",
+		".config/bspwm",
+		".config/awesome",
+		".config/openbox",
+		".config/qtile",
+		".config/xmonad",
+		".config/dwm",
+		".config/gnome",
+		".config/kde",
+		".config/xfce",
+		".config/lxde",
+		".config/lxqt",
+		".config/mate",
+		".config/cinnamon",
+		".config/budgie",
+		".config/pantheon",
+		".config/enlightenment",
+	}
+
+	// Check if the folder name matches any window manager
+	for _, wm := range windowManagers {
+		if strings.HasSuffix(wm, "/"+folderName) || folderName == filepath.Base(wm) {
+			return true
+		}
+	}
+
+	// Also check for exact matches without .config prefix
+	bareWMs := []string{"hypr", "sway", "i3", "bspwm", "awesome", "openbox", "qtile", "xmonad", "dwm"}
+	for _, wm := range bareWMs {
+		if folderName == wm {
+			return true
+		}
+	}
+
+	return false
+}
+
 // performPureGoRestore executes a two-phase restore process using pure Go.
 // Phase 1: Copy all files from backup to target location
 // Phase 2: Delete files that exist in target but not in backup (--delete behavior)

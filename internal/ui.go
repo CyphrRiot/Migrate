@@ -1631,6 +1631,96 @@ func (m Model) renderVerificationErrors() string {
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
 }
 
+// renderRestoreFolderSelect renders the folder selection screen for selective restore.
+// Similar to renderHomeFolderSelect but reads from backup folders instead of live system.
+func (m Model) renderRestoreFolderSelect() string {
+	var s strings.Builder
+
+	// Compact header
+	s.WriteString(titleStyle.Render("📁 Select Folders to Restore") + "\n")
+
+	// If still loading
+	if len(m.restoreFolders) == 0 {
+		s.WriteString(infoBoxStyle.Render("🔍 Scanning backup...") + "\n")
+		help := helpStyle.Render("Please wait...")
+		s.WriteString("\n" + help)
+		content := borderStyle.Width(safeRenderWidth(m.width)).Render(s.String())
+		return safeCenterContent(m.width, m.height, content)
+	}
+
+	// Instructions
+	dimStyle := lipgloss.NewStyle().Foreground(dimColor)
+	instructions := dimStyle.Render("Select folders to restore from backup • A=all N=none")
+	s.WriteString(instructions + "\n\n")
+
+	// Control buttons at top
+	controls := []string{"✅ Continue", "⬅️ Back"}
+	for i, control := range controls {
+		if m.cursor == i {
+			s.WriteString(selectedMenuItemStyle.Render("❯ "+control) + "\n")
+		} else {
+			s.WriteString(menuItemStyle.Render("  "+control) + "\n")
+		}
+	}
+
+	s.WriteString("\n") // Separator between controls and folders
+
+	// Display only non-empty, visible folders
+	visibleFolders := m.getVisibleRestoreFolders()
+	numControls := 2
+
+	// Always show hidden folders summary at top
+	hiddenCount := 0
+	var hiddenSize int64
+	for _, folder := range m.restoreFolders {
+		if !folder.IsVisible && folder.Size > 0 {
+			hiddenCount++
+			hiddenSize += folder.Size
+		}
+	}
+
+	if hiddenCount > 0 {
+		hiddenInfo := fmt.Sprintf("🔒 %d hidden folders (%s) - always included",
+			hiddenCount, FormatBytes(hiddenSize))
+		s.WriteString(dimStyle.Render(hiddenInfo) + "\n\n")
+	}
+
+	// List visible folders with selection status
+	for i, folder := range visibleFolders {
+		cursorPos := numControls + i
+		isSelected := m.cursor == cursorPos
+		isChecked := m.selectedRestoreFolders[folder.Path]
+
+		var checkbox string
+		if isChecked {
+			checkbox = "☑️"
+		} else {
+			checkbox = "☐"
+		}
+
+		folderLine := fmt.Sprintf("%s %s (%s)", checkbox, folder.Name, FormatBytes(folder.Size))
+
+		if isSelected {
+			s.WriteString(selectedMenuItemStyle.Render("❯ "+folderLine) + "\n")
+		} else {
+			s.WriteString(menuItemStyle.Render("  "+folderLine) + "\n")
+		}
+	}
+
+	// Show total size at bottom
+	s.WriteString("\n")
+	totalInfo := fmt.Sprintf("📊 Total restore size: %s", FormatBytes(m.totalRestoreSize))
+	s.WriteString(infoBoxStyle.Render(totalInfo) + "\n")
+
+	// Help text
+	help := helpStyle.Render("SPACE: select • A: all • N: none • ↑/↓: navigate • ESC: back")
+	s.WriteString(help)
+
+	// Center the content with beautiful border
+	content := borderStyle.Width(safeRenderWidth(m.width)).Render(s.String())
+	return safeCenterContent(m.width, m.height, content)
+}
+
 // formatOperationName converts technical operation names to human-readable strings
 func formatOperationName(operation string) string {
 	switch operation {

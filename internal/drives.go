@@ -39,11 +39,11 @@ type HomeFolderInfo struct {
 	IsVisible     bool   // false for dotfiles/dotdirs (hidden folders)
 	Selected      bool   // Current user selection state for backup inclusion
 	AlwaysInclude bool   // true for dotdirs (automatically included, non-selectable)
-	
+
 	// NEW: Sub-folder support for granular selection
-	HasSubfolders bool               // true if this folder contains discoverable subfolders
-	Subfolders    []HomeFolderInfo   // Only 1 level deep, populated on-demand
-	ParentPath    string             // For breadcrumb navigation (empty for root level)
+	HasSubfolders bool             // true if this folder contains discoverable subfolders
+	Subfolders    []HomeFolderInfo // Only 1 level deep, populated on-demand
+	ParentPath    string           // For breadcrumb navigation (empty for root level)
 }
 
 // DriveInfo contains metadata about an external drive available for backup operations.
@@ -91,7 +91,7 @@ type PasswordRequiredMsg struct {
 // Used internally for coordinating password entry and subsequent operations.
 type passwordInteractionMsg struct {
 	drivePath  string // Path to the encrypted drive
-	driveSize  string // Human-readable size for display  
+	driveSize  string // Human-readable size for display
 	driveType  string // Drive type description
 	originalOp string // The original operation that required password input
 }
@@ -198,18 +198,18 @@ func parseDriveSize(sizeStr string) (int64, error) {
 	if len(sizeStr) < 2 {
 		return 0, fmt.Errorf("invalid size string: %s", sizeStr)
 	}
-	
+
 	// Get the unit (last character)
 	unit := strings.ToUpper(sizeStr[len(sizeStr)-1:])
 	numberStr := sizeStr[:len(sizeStr)-1]
-	
+
 	// Parse the number part
 	var number float64
 	var err error
 	if _, err = fmt.Sscanf(numberStr, "%f", &number); err != nil {
 		return 0, fmt.Errorf("invalid number in size: %s", numberStr)
 	}
-	
+
 	// Convert based on unit
 	var multiplier int64
 	switch unit {
@@ -228,7 +228,7 @@ func parseDriveSize(sizeStr string) (int64, error) {
 	default:
 		return 0, fmt.Errorf("unknown size unit: %s", unit)
 	}
-	
+
 	return int64(number * float64(multiplier)), nil
 }
 
@@ -241,21 +241,21 @@ func checkBackupSpaceRequirements(externalDriveSize string) error {
 	if err != nil {
 		return fmt.Errorf("failed to get internal drive usage: %v", err)
 	}
-	
+
 	// Parse external drive total size
 	externalTotalSize, err := parseDriveSize(externalDriveSize)
 	if err != nil {
 		return fmt.Errorf("failed to parse external drive size: %v", err)
 	}
-	
+
 	// Check: internal_used_space <= external_total_size
 	if internalUsedSpace > externalTotalSize {
 		return fmt.Errorf("⚠️ INSUFFICIENT SPACE for backup\n\nInternal drive used: %s\nExternal drive total: %s\n\nThe external drive is too small to hold your backup.\nYou need at least %s of total drive capacity.",
 			FormatBytes(internalUsedSpace),
-			FormatBytes(externalTotalSize), 
+			FormatBytes(externalTotalSize),
 			FormatBytes(internalUsedSpace))
 	}
-	
+
 	return nil
 }
 
@@ -266,7 +266,7 @@ func CheckSelectiveHomeBackupSpaceRequirements(homeFolders []HomeFolderInfo, sel
 	// Use the same logic as calculateTotalBackupSize() for consistency
 	var totalSelectedSize int64
 	processedParents := make(map[string]bool)
-	
+
 	for _, folder := range homeFolders {
 		if folder.AlwaysInclude {
 			// Hidden folders are always included (dotfiles/dotdirs)
@@ -279,14 +279,14 @@ func CheckSelectiveHomeBackupSpaceRequirements(homeFolders []HomeFolderInfo, sel
 					// User has drilled down - calculate based on individual subfolder selections
 					subfolderTotal := int64(0)
 					anySubfolderSelected := false
-					
+
 					for _, subfolder := range subfolders {
 						if subfolder.Size > 0 && selectedFolders[subfolder.Path] {
 							subfolderTotal += subfolder.Size
 							anySubfolderSelected = true
 						}
 					}
-					
+
 					// Only add subfolders if at least one is selected
 					if anySubfolderSelected {
 						totalSelectedSize += subfolderTotal
@@ -308,13 +308,13 @@ func CheckSelectiveHomeBackupSpaceRequirements(homeFolders []HomeFolderInfo, sel
 			}
 		}
 	}
-	
+
 	// Additional: Add any individually selected subfolders whose parents weren't processed
 	for folderPath, isSelected := range selectedFolders {
 		if !isSelected {
 			continue
 		}
-		
+
 		// Check if this is a subfolder (has a parent path that was processed)
 		parentProcessed := false
 		for processedParent := range processedParents {
@@ -323,7 +323,7 @@ func CheckSelectiveHomeBackupSpaceRequirements(homeFolders []HomeFolderInfo, sel
 				break
 			}
 		}
-		
+
 		// If no parent was processed, this might be a standalone subfolder selection
 		if !parentProcessed {
 			// Find the subfolder in cache and add its size
@@ -337,21 +337,21 @@ func CheckSelectiveHomeBackupSpaceRequirements(homeFolders []HomeFolderInfo, sel
 			}
 		}
 	}
-	
+
 	// Parse external drive total size
 	externalTotalSize, err := parseDriveSize(externalDriveSize)
 	if err != nil {
 		return fmt.Errorf("failed to parse external drive size: %v", err)
 	}
-	
+
 	// Check: selected_folders_size <= external_total_size
 	if totalSelectedSize > externalTotalSize {
 		return fmt.Errorf("⚠️ INSUFFICIENT SPACE for selective home backup\n\nSelected folders size: %s\nExternal drive total: %s\n\nThe external drive is too small to hold your selected folders.\nYou need at least %s of total drive capacity.",
 			FormatBytes(totalSelectedSize),
-			FormatBytes(externalTotalSize), 
+			FormatBytes(externalTotalSize),
 			FormatBytes(totalSelectedSize))
 	}
-	
+
 	return nil
 }
 
@@ -362,50 +362,51 @@ func CheckHomeBackupSpaceRequirements(externalDriveSize string) error {
 	if err != nil {
 		return fmt.Errorf("failed to calculate home directory size: %v", err)
 	}
-	
+
 	// Parse external drive total size
 	externalTotalSize, err := parseDriveSize(externalDriveSize)
 	if err != nil {
 		return fmt.Errorf("failed to parse external drive size: %v", err)
 	}
-	
+
 	// Check: home_directory_size <= external_total_size
 	if homeDirSize > externalTotalSize {
 		return fmt.Errorf("⚠️ INSUFFICIENT SPACE for home backup\n\nHome directory size: %s\nExternal drive total: %s\n\nThe external drive is too small to hold your home directory.\nYou need at least %s of total drive capacity.",
 			FormatBytes(homeDirSize),
-			FormatBytes(externalTotalSize), 
+			FormatBytes(externalTotalSize),
 			FormatBytes(homeDirSize))
 	}
-	
+
 	return nil
 }
 
-// Check if internal drive has enough space for restore  
+// Check if internal drive has enough space for restore
 func checkRestoreSpaceRequirements(externalDriveSize string, externalMountPoint string) error {
 	// Get used space on external drive (backup size)
 	externalUsedSpace, err := getUsedDiskSpace(externalMountPoint)
 	if err != nil {
 		return fmt.Errorf("failed to get backup drive usage: %v", err)
 	}
-	
+
 	// Get total size of internal drive
 	var stat syscall.Statfs_t
 	if err := syscall.Statfs("/", &stat); err != nil {
 		return fmt.Errorf("failed to get internal drive info: %v", err)
 	}
-	
+
 	internalTotalSize := int64(stat.Blocks) * int64(stat.Bsize)
-	
-	// Check: external_used_space <= internal_total_size  
+
+	// Check: external_used_space <= internal_total_size
 	if externalUsedSpace > internalTotalSize {
 		return fmt.Errorf("⚠️ INSUFFICIENT SPACE for restore\n\nBackup size: %s\nInternal drive total: %s\n\nThe backup is too large to fit on your internal drive.\nYou need at least %s of total drive capacity.",
 			FormatBytes(externalUsedSpace),
 			FormatBytes(internalTotalSize),
 			FormatBytes(externalUsedSpace))
 	}
-	
+
 	return nil
 }
+
 // LoadDrives scans for available external drives and returns them as a Bubble Tea command.
 // Uses lsblk to enumerate drives with safety checks to prevent listing system drives.
 // Supports multiple detection criteria: hotplug flag, device naming, and mount location analysis.
@@ -496,26 +497,26 @@ func LoadDrives() tea.Cmd {
 			// NEW IMPROVED LOGIC: Include external drives based on multiple criteria
 			devicePath := "/dev/" + device.Name
 			isExternalDrive := false
-			
+
 			// Criteria 1: Traditional hotplug detection (USB drives, etc.)
 			if device.Hotplug {
 				isExternalDrive = true
 			}
-			
+
 			// Criteria 2: Check if it's a device that's likely external based on naming
 			// Many modern external drives don't report hotplug=true properly
 			deviceName := strings.ToLower(device.Name)
-			if strings.HasPrefix(deviceName, "sd") {  // SATA/USB drives usually start with sd*
+			if strings.HasPrefix(deviceName, "sd") { // SATA/USB drives usually start with sd*
 				isExternalDrive = true
 			}
-			
+
 			// Criteria 3: Check if any partitions are mounted in typical external locations
 			for _, child := range device.Children {
 				if child.Mountpoint != "" {
 					mount := child.Mountpoint
-					if strings.Contains(mount, "/run/media/") || 
-					   strings.Contains(mount, "/mnt/") ||
-					   strings.Contains(mount, "/media/") {
+					if strings.Contains(mount, "/run/media/") ||
+						strings.Contains(mount, "/mnt/") ||
+						strings.Contains(mount, "/media/") {
 						isExternalDrive = true
 						break
 					}
@@ -524,9 +525,9 @@ func LoadDrives() tea.Cmd {
 				for _, grandchild := range child.Children {
 					if grandchild.Mountpoint != "" {
 						mount := grandchild.Mountpoint
-						if strings.Contains(mount, "/run/media/") || 
-						   strings.Contains(mount, "/mnt/") ||
-						   strings.Contains(mount, "/media/") {
+						if strings.Contains(mount, "/run/media/") ||
+							strings.Contains(mount, "/mnt/") ||
+							strings.Contains(mount, "/media/") {
 							isExternalDrive = true
 							break
 						}
@@ -543,7 +544,7 @@ func LoadDrives() tea.Cmd {
 			}
 
 			// Look for mounted filesystems in the device or its partitions
-			var mountedFilesystems []struct{
+			var mountedFilesystems []struct {
 				Device     string
 				Size       string
 				Label      string
@@ -555,7 +556,7 @@ func LoadDrives() tea.Cmd {
 
 			// Check main device for mounted filesystem
 			if device.Fstype != "" && device.UUID != "" && device.Mountpoint != "" {
-				mountedFilesystems = append(mountedFilesystems, struct{
+				mountedFilesystems = append(mountedFilesystems, struct {
 					Device     string
 					Size       string
 					Label      string
@@ -578,7 +579,7 @@ func LoadDrives() tea.Cmd {
 			for _, child := range device.Children {
 				if child.Fstype != "" && child.UUID != "" && child.Mountpoint != "" {
 					childPath := "/dev/" + child.Name
-					mountedFilesystems = append(mountedFilesystems, struct{
+					mountedFilesystems = append(mountedFilesystems, struct {
 						Device     string
 						Size       string
 						Label      string
@@ -601,7 +602,7 @@ func LoadDrives() tea.Cmd {
 				for _, grandchild := range child.Children {
 					if grandchild.Fstype != "" && grandchild.UUID != "" && grandchild.Mountpoint != "" {
 						grandchildPath := "/dev/" + grandchild.Name
-						mountedFilesystems = append(mountedFilesystems, struct{
+						mountedFilesystems = append(mountedFilesystems, struct {
 							Device     string
 							Size       string
 							Label      string
@@ -657,7 +658,7 @@ func mountSelectedDrive(drive DriveInfo) tea.Cmd {
 			// Check if it's already unlocked by looking for the mapper device
 			mapperName := "luks-" + drive.UUID
 			mapperPath := "/dev/mapper/" + mapperName
-			
+
 			if _, err := os.Stat(mapperPath); os.IsNotExist(err) {
 				// LUKS drive is locked - show helpful error
 				return DriveOperation{
@@ -665,17 +666,17 @@ func mountSelectedDrive(drive DriveInfo) tea.Cmd {
 					success: false,
 				}
 			}
-			
+
 			// LUKS drive is unlocked, try to mount the mapper device
 			mountPoint, err := mountRegularDrive(DriveInfo{
-				Device: mapperPath,
-				Size: drive.Size,
-				Label: drive.Label,
-				UUID: drive.UUID,
+				Device:     mapperPath,
+				Size:       drive.Size,
+				Label:      drive.Label,
+				UUID:       drive.UUID,
 				Filesystem: drive.Filesystem,
-				Encrypted: false, // Treat unlocked LUKS as regular drive
+				Encrypted:  false, // Treat unlocked LUKS as regular drive
 			})
-			
+
 			if err != nil {
 				return DriveOperation{
 					message: fmt.Sprintf("Failed to mount unlocked LUKS drive %s: %v", mapperPath, err),
@@ -817,7 +818,7 @@ func mountDriveForSelectiveHomeBackup(drive DriveInfo, homeFolders []HomeFolderI
 				error: err,
 			}
 		}
-		
+
 		// Space is sufficient, proceed with mounting (SKIP redundant space check)
 		// Call the mount operation directly without re-checking space
 		return tea.Cmd(func() tea.Msg {
@@ -826,24 +827,24 @@ func mountDriveForSelectiveHomeBackup(drive DriveInfo, homeFolders []HomeFolderI
 				// Check if it's already unlocked by looking for the mapper device
 				mapperName := "luks-" + drive.UUID
 				mapperPath := "/dev/mapper/" + mapperName
-				
+
 				if _, err := os.Stat(mapperPath); os.IsNotExist(err) {
 					// LUKS drive is locked - show helpful error
 					return BackupDriveStatus{
 						error: fmt.Errorf("❌ LUKS drive is locked\n\nTo unlock manually:\nsudo cryptsetup luksOpen %s %s\nsudo udisksctl mount -b %s\n\nThen restart migrate.", drive.Device, mapperName, mapperPath),
 					}
 				}
-				
+
 				// LUKS drive is unlocked, try to mount the mapper device
 				mountPoint, err := mountRegularDrive(DriveInfo{
-					Device: mapperPath,
-					Size: drive.Size,
-					Label: drive.Label,
-					UUID: drive.UUID,
+					Device:     mapperPath,
+					Size:       drive.Size,
+					Label:      drive.Label,
+					UUID:       drive.UUID,
 					Filesystem: drive.Filesystem,
-					Encrypted: false, // Treat unlocked LUKS as regular drive
+					Encrypted:  false, // Treat unlocked LUKS as regular drive
 				})
-				
+
 				if err != nil {
 					return BackupDriveStatus{
 						error: fmt.Errorf("Failed to mount unlocked LUKS drive %s: %v", mapperPath, err),
@@ -877,7 +878,7 @@ func mountDriveForSelectiveHomeBackup(drive DriveInfo, homeFolders []HomeFolderI
 				needsMount: false,
 				error:      nil,
 			}
-		})()  // Execute the command immediately
+		})() // Execute the command immediately
 	}
 }
 
@@ -891,7 +892,7 @@ func mountDriveForOperation(drive DriveInfo, operationType string) tea.Cmd {
 	return func() tea.Msg {
 		// IMMEDIATE FEEDBACK: Show mounting message first
 		// Note: This will be followed by another message with the result
-		
+
 		// FIRST: Check if external drive has sufficient space before mounting
 		var err error
 		if operationType == "home_backup" {
@@ -901,36 +902,36 @@ func mountDriveForOperation(drive DriveInfo, operationType string) tea.Cmd {
 		} else {
 			err = checkBackupSpaceRequirements(drive.Size)
 		}
-		
+
 		if err != nil {
 			return BackupDriveStatus{
 				error: err,
 			}
 		}
-		
+
 		// Check if this is a locked LUKS drive
 		if drive.Encrypted {
 			// Check if it's already unlocked by looking for the mapper device
 			mapperName := "luks-" + drive.UUID
 			mapperPath := "/dev/mapper/" + mapperName
-			
+
 			if _, err := os.Stat(mapperPath); os.IsNotExist(err) {
 				// LUKS drive is locked - show helpful error
 				return BackupDriveStatus{
 					error: fmt.Errorf("❌ LUKS drive is locked\n\nTo unlock manually:\nsudo cryptsetup luksOpen %s %s\nsudo udisksctl mount -b %s\n\nThen restart migrate.", drive.Device, mapperName, mapperPath),
 				}
 			}
-			
+
 			// LUKS drive is unlocked, try to mount the mapper device
 			mountPoint, err := mountRegularDrive(DriveInfo{
-				Device: mapperPath,
-				Size: drive.Size,
-				Label: drive.Label,
-				UUID: drive.UUID,
+				Device:     mapperPath,
+				Size:       drive.Size,
+				Label:      drive.Label,
+				UUID:       drive.UUID,
 				Filesystem: drive.Filesystem,
-				Encrypted: false, // Treat unlocked LUKS as regular drive
+				Encrypted:  false, // Treat unlocked LUKS as regular drive
 			})
-			
+
 			if err != nil {
 				return BackupDriveStatus{
 					error: fmt.Errorf("Failed to mount unlocked LUKS drive %s: %v", mapperPath, err),
@@ -975,30 +976,30 @@ func mountDriveForRestore(drive DriveInfo) tea.Cmd {
 			// Check if it's already unlocked by looking for the mapper device
 			mapperName := "luks-" + drive.UUID
 			mapperPath := "/dev/mapper/" + mapperName
-			
+
 			if _, err := os.Stat(mapperPath); os.IsNotExist(err) {
 				// LUKS drive is locked - show helpful error
 				return BackupDriveStatus{
 					error: fmt.Errorf("❌ LUKS drive is locked\n\nTo unlock manually:\nsudo cryptsetup luksOpen %s %s\nsudo udisksctl mount -b %s\n\nThen restart migrate.", drive.Device, mapperName, mapperPath),
 				}
 			}
-			
+
 			// LUKS drive is unlocked, try to mount the mapper device
 			mountPoint, err := mountRegularDrive(DriveInfo{
-				Device: mapperPath,
-				Size: drive.Size,
-				Label: drive.Label,
-				UUID: drive.UUID,
+				Device:     mapperPath,
+				Size:       drive.Size,
+				Label:      drive.Label,
+				UUID:       drive.UUID,
 				Filesystem: drive.Filesystem,
-				Encrypted: false, // Treat unlocked LUKS as regular drive
+				Encrypted:  false, // Treat unlocked LUKS as regular drive
 			})
-			
+
 			if err != nil {
 				return BackupDriveStatus{
 					error: fmt.Errorf("Failed to mount unlocked LUKS drive %s: %v", mapperPath, err),
 				}
 			}
-			
+
 			// LUKS drive mounted, now check space requirements for restore
 			if err := checkRestoreSpaceRequirements(drive.Size, mountPoint); err != nil {
 				return BackupDriveStatus{
@@ -1024,7 +1025,7 @@ func mountDriveForRestore(drive DriveInfo) tea.Cmd {
 				error: fmt.Errorf("Failed to mount %s: %v", drive.Device, err),
 			}
 		}
-		
+
 		// AFTER mounting: Check space requirements for restore
 		if err := checkRestoreSpaceRequirements(drive.Size, mountPoint); err != nil {
 			return BackupDriveStatus{
@@ -1051,24 +1052,24 @@ func mountDriveForVerification(drive DriveInfo) tea.Cmd {
 			// Check if it's already unlocked by looking for the mapper device
 			mapperName := "luks-" + drive.UUID
 			mapperPath := "/dev/mapper/" + mapperName
-			
+
 			if _, err := os.Stat(mapperPath); os.IsNotExist(err) {
 				// LUKS drive is locked - show helpful error
 				return BackupDriveStatus{
 					error: fmt.Errorf("❌ LUKS drive is locked\n\nTo unlock manually:\nsudo cryptsetup luksOpen %s %s\nsudo udisksctl mount -b %s\n\nThen restart migrate.", drive.Device, mapperName, mapperPath),
 				}
 			}
-			
+
 			// LUKS drive is unlocked, try to mount the mapper device
 			mountPoint, err := mountRegularDrive(DriveInfo{
-				Device: mapperPath,
-				Size: drive.Size,
-				Label: drive.Label,
-				UUID: drive.UUID,
+				Device:     mapperPath,
+				Size:       drive.Size,
+				Label:      drive.Label,
+				UUID:       drive.UUID,
 				Filesystem: drive.Filesystem,
-				Encrypted: false, // Treat unlocked LUKS as regular drive
+				Encrypted:  false, // Treat unlocked LUKS as regular drive
 			})
-			
+
 			if err != nil {
 				return BackupDriveStatus{
 					error: fmt.Errorf("Failed to mount unlocked LUKS drive %s: %v", mapperPath, err),
@@ -1156,44 +1157,44 @@ func discoverSubfolders(parentPath string) ([]HomeFolderInfo, error) {
 	if err != nil {
 		return nil, err
 	}
-	
+
 	var subfolders []HomeFolderInfo
-	
+
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue // Skip files, only process directories
 		}
-		
+
 		name := entry.Name()
 		path := filepath.Join(parentPath, name)
 		isHidden := strings.HasPrefix(name, ".")
-		
+
 		// Calculate folder size - with error handling
 		size, err := calculateDirectorySize(path)
 		if err != nil {
 			size = 0 // Skip folders we can't access
 		}
-		
+
 		// Don't show empty subdirectories for cleaner UI
 		if size == 0 {
 			continue
 		}
-		
+
 		subfolder := HomeFolderInfo{
 			Name:          name,
 			Path:          path,
 			Size:          size,
 			IsVisible:     !isHidden,
-			Selected:      false, // Subfolders start unselected
-			AlwaysInclude: false, // Subfolders are never auto-included
-			HasSubfolders: false, // We only go 1 level deep
-			Subfolders:    nil,   // No recursive nesting
+			Selected:      false,      // Subfolders start unselected
+			AlwaysInclude: false,      // Subfolders are never auto-included
+			HasSubfolders: false,      // We only go 1 level deep
+			Subfolders:    nil,        // No recursive nesting
 			ParentPath:    parentPath, // Set parent for breadcrumb navigation
 		}
-		
+
 		subfolders = append(subfolders, subfolder)
 	}
-	
+
 	// Sort: visible folders first, then by name
 	sort.Slice(subfolders, func(i, j int) bool {
 		if subfolders[i].IsVisible != subfolders[j].IsVisible {
@@ -1201,7 +1202,7 @@ func discoverSubfolders(parentPath string) ([]HomeFolderInfo, error) {
 		}
 		return subfolders[i].Name < subfolders[j].Name
 	})
-	
+
 	return subfolders, nil
 }
 
@@ -1221,12 +1222,12 @@ func discoverHomeFolders() ([]HomeFolderInfo, error) {
 			return nil, err
 		}
 	}
-	
+
 	entries, err := os.ReadDir(homeDir)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// Open log file for debug output
 	logPath := getLogFilePath()
 	logFile, logErr := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
@@ -1235,19 +1236,19 @@ func discoverHomeFolders() ([]HomeFolderInfo, error) {
 		fmt.Fprintf(logFile, "\n=== HOME FOLDER DISCOVERY DEBUG ===\n")
 		fmt.Fprintf(logFile, "Scanning home directory: %s\n", homeDir)
 	}
-	
+
 	var folders []HomeFolderInfo
-	
+
 	// Process directories sequentially (simpler and more reliable)
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue // Skip files, only process directories
 		}
-		
+
 		name := entry.Name()
 		path := filepath.Join(homeDir, name)
 		isHidden := strings.HasPrefix(name, ".")
-		
+
 		// Calculate folder size - with better error handling
 		size, err := calculateDirectorySize(path)
 		if err != nil {
@@ -1262,7 +1263,7 @@ func discoverHomeFolders() ([]HomeFolderInfo, error) {
 				fmt.Fprintf(logFile, "✅ SUCCESS: %s = %d bytes (%.2f GB)\n", name, size, float64(size)/1024/1024/1024)
 			}
 		}
-		
+
 		// Check if this folder has subdirectories (for drill-down UI)
 		hasSubfolders := false
 		if !isHidden && size > 0 { // Only check visible, non-empty folders
@@ -1281,26 +1282,26 @@ func discoverHomeFolders() ([]HomeFolderInfo, error) {
 				}
 			}
 		}
-		
+
 		folder := HomeFolderInfo{
 			Name:          name,
 			Path:          path,
 			Size:          size,
 			IsVisible:     !isHidden,
-			Selected:      true,  // Default: all selected
-			AlwaysInclude: isHidden, // Dotdirs always included
+			Selected:      true,          // Default: all selected
+			AlwaysInclude: isHidden,      // Dotdirs always included
 			HasSubfolders: hasSubfolders, // NEW: Indicates drill-down capability
 			Subfolders:    nil,           // NEW: Populated on-demand
 			ParentPath:    "",            // NEW: Empty for root level
 		}
-		
+
 		folders = append(folders, folder)
 	}
-	
+
 	if logFile != nil {
 		fmt.Fprintf(logFile, "=== FOLDER DISCOVERY COMPLETE ===\n")
 	}
-	
+
 	// Sort: visible folders first, then by name
 	sort.Slice(folders, func(i, j int) bool {
 		if folders[i].IsVisible != folders[j].IsVisible {
@@ -1308,7 +1309,7 @@ func discoverHomeFolders() ([]HomeFolderInfo, error) {
 		}
 		return folders[i].Name < folders[j].Name
 	})
-	
+
 	return folders, nil
 }
 
@@ -1346,6 +1347,107 @@ func DiscoverSubfoldersCmd(parentPath string) tea.Cmd {
 			parentPath: parentPath,
 			subfolders: subfolders,
 			error:      err,
+		}
+	}
+}
+
+// RestoreFoldersDiscovered is a Bubble Tea message containing folders discovered from a backup.
+type RestoreFoldersDiscovered struct {
+	folders []HomeFolderInfo // Discovered folders from the backup
+	error   error            // Non-nil if folder discovery failed
+}
+
+// discoverRestoreFolders analyzes a backup mount point to find available folders for restore.
+// Similar to discoverHomeFolders but reads from the backup structure instead of the live system.
+func discoverRestoreFolders(backupMountPoint string) ([]HomeFolderInfo, error) {
+	// First check if this is a home backup by looking for BACKUP-INFO.txt
+	backupInfo := filepath.Join(backupMountPoint, "BACKUP-INFO.txt")
+	content, err := os.ReadFile(backupInfo)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read backup info: %v", err)
+	}
+
+	// Check if it's a home backup
+	if !strings.Contains(string(content), "Home Directory") {
+		return nil, fmt.Errorf("not a home directory backup")
+	}
+
+	// For home backups, folders are at the root of the backup
+	entries, err := os.ReadDir(backupMountPoint)
+	if err != nil {
+		return nil, err
+	}
+
+	var folders []HomeFolderInfo
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+
+		name := entry.Name()
+
+		// Skip special backup metadata
+		if name == "BACKUP-INFO.txt" || name == "BACKUP-FOLDERS.txt" {
+			continue
+		}
+
+		path := filepath.Join(backupMountPoint, name)
+		isHidden := strings.HasPrefix(name, ".")
+
+		// Calculate folder size
+		size, err := calculateDirectorySize(path)
+		if err != nil {
+			size = 0 // Skip folders we can't access
+		}
+
+		// Check if this folder has subdirectories
+		hasSubfolders := false
+		if !isHidden && size > 0 {
+			subEntries, err := os.ReadDir(path)
+			if err == nil {
+				for _, subEntry := range subEntries {
+					if subEntry.IsDir() {
+						hasSubfolders = true
+						break
+					}
+				}
+			}
+		}
+
+		folder := HomeFolderInfo{
+			Name:          name,
+			Path:          path,
+			Size:          size,
+			IsVisible:     !isHidden,
+			Selected:      true,     // Default: all selected for restore
+			AlwaysInclude: isHidden, // Dotdirs always included
+			HasSubfolders: hasSubfolders,
+			Subfolders:    nil,
+			ParentPath:    "",
+		}
+
+		folders = append(folders, folder)
+	}
+
+	// Sort: visible folders first, then by name
+	sort.Slice(folders, func(i, j int) bool {
+		if folders[i].IsVisible != folders[j].IsVisible {
+			return folders[i].IsVisible
+		}
+		return folders[i].Name < folders[j].Name
+	})
+
+	return folders, nil
+}
+
+// DiscoverRestoreFoldersCmd creates a command to discover folders from a backup for selective restore.
+func DiscoverRestoreFoldersCmd(backupMountPoint string) tea.Cmd {
+	return func() tea.Msg {
+		folders, err := discoverRestoreFolders(backupMountPoint)
+		return RestoreFoldersDiscovered{
+			folders: folders,
+			error:   err,
 		}
 	}
 }
