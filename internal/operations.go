@@ -16,13 +16,13 @@ package internal
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"golang.org/x/sys/unix"
 )
 
 // BackupConfig contains all configuration parameters for a backup operation.
@@ -1046,13 +1046,13 @@ func syncDirectoriesWithOptions(sourcePath, destPath string, restoreConfig, rest
 func createBackupInfo(mountPoint, backupType string) error {
 	hostname, _ := os.Hostname()
 
-	cmd := exec.Command("uname", "-r")
-	kernelOut, _ := cmd.Output()
-	kernel := strings.TrimSpace(string(kernelOut))
+	var utsname unix.Utsname
+	if err := unix.Uname(&utsname); err != nil {
+		return fmt.Errorf("failed to get system info: %v", err)
+	}
 
-	cmd = exec.Command("uname", "-m")
-	archOut, _ := cmd.Output()
-	arch := strings.TrimSpace(string(archOut))
+	kernel := unix.ByteSliceToString(utsname.Release[:])
+	arch := unix.ByteSliceToString(utsname.Machine[:])
 
 	info := fmt.Sprintf(`%s BACKUP
 =========================

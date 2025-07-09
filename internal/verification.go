@@ -1023,6 +1023,7 @@ func verifyRandomSampleOfBackup(sourcePath, destPath string, sampleRate float64,
 	missingDirSet := make(map[string]bool)
 	dirCount := 0
 	startTime := time.Now()
+	const MAX_DIR_ENTRIES = 50000 // Skip processing directories with more than 50k entries
 
 	err := filepath.WalkDir(sourcePath, func(sourceFilePath string, d os.DirEntry, err error) error {
 		if err != nil {
@@ -1057,6 +1058,15 @@ func verifyRandomSampleOfBackup(sourcePath, destPath string, sampleRate float64,
 			return filepath.SkipDir
 		}
 
+		// Check directory size before processing to avoid hanging on massive directories
+		entries, err := os.ReadDir(sourceFilePath)
+		if err == nil && len(entries) > MAX_DIR_ENTRIES {
+			if logFile != nil {
+				fmt.Fprintf(logFile, "SKIPPING MASSIVE DIRECTORY: %s (%d entries, limit: %d)\n", skipPath, len(entries), MAX_DIR_ENTRIES)
+			}
+			return filepath.SkipDir
+		}
+
 		// Progress reporting every 1000 directories
 		dirCount++
 		// Update verification counter for UI progress - EVERY directory
@@ -1069,10 +1079,10 @@ func verifyRandomSampleOfBackup(sourcePath, destPath string, sampleRate float64,
 				dirCount, rate, elapsed.Round(time.Second))
 		}
 
-		// Timeout check - abort if taking too long
-		if time.Since(startTime) > 2*time.Minute {
+		// Timeout check - abort if taking too long (reduced from 2 minutes to 30 seconds)
+		if time.Since(startTime) > 30*time.Second {
 			if logFile != nil {
-				fmt.Fprintf(logFile, "WARNING: Directory walk timeout after %v\n", time.Since(startTime))
+				fmt.Fprintf(logFile, "WARNING: Directory walk timeout after %v at directory %s\n", time.Since(startTime), skipPath)
 			}
 			return fmt.Errorf("directory walk timeout")
 		}
