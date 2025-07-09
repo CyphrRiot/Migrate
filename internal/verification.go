@@ -65,7 +65,17 @@ func shouldExcludeFile(filePath string, excludePatterns []string, sourcePath str
 func matchesVerificationPattern(fullPath, relPath, pattern string) bool {
 	// Handle absolute patterns (start with /)
 	if strings.HasPrefix(pattern, "/") {
-		return matchesPathPattern(fullPath, pattern)
+		// For absolute patterns, try matching with and without leading slash
+		if matchesPathPattern(fullPath, pattern) {
+			return true
+		}
+		// Also try matching the pattern without leading slash against relPath
+		// This handles the case where pattern is "/home/*/.cache/gopls/*"
+		// and relPath is "home/grendel/.cache/gopls/..."
+		patternWithoutSlash := strings.TrimPrefix(pattern, "/")
+		if matchesPathPattern(relPath, patternWithoutSlash) {
+			return true
+		}
 	}
 
 	// Handle relative patterns
@@ -980,8 +990,18 @@ func verifyRandomSampleOfBackup(sourcePath, destPath string, sampleRate float64,
 	// PHASE 1: Check directory structure first (fast)
 	var missingDirs []string
 	missingDirSet := make(map[string]bool)
+	dirCount := 0
+	startTime := time.Now()
+
 	err := filepath.WalkDir(sourcePath, func(sourceFilePath string, d os.DirEntry, err error) error {
 		if err != nil {
+			// Skip directories we can't access
+			if d != nil && d.IsDir() {
+				if logFile != nil {
+					fmt.Fprintf(logFile, "Skipping inaccessible directory: %s (error: %v)\n", sourceFilePath, err)
+				}
+				return filepath.SkipDir
+			}
 			return nil
 		}
 
@@ -990,9 +1010,39 @@ func verifyRandomSampleOfBackup(sourcePath, destPath string, sampleRate float64,
 			return nil
 		}
 
+		// CRITICAL: Check exclusions BEFORE processing to avoid hanging on virtual filesystems
+		// Skip system virtual filesystems immediately
+		skipPath, _ := filepath.Rel(sourcePath, sourceFilePath)
+		if strings.HasPrefix(skipPath, "proc") || strings.HasPrefix(skipPath, "sys") ||
+			strings.HasPrefix(skipPath, "dev") || strings.HasPrefix(skipPath, "run") {
+			if logFile != nil && dirCount < 10 {
+				fmt.Fprintf(logFile, "Skipping virtual filesystem: %s\n", skipPath)
+			}
+			return filepath.SkipDir
+		}
+
 		// Skip excluded patterns for directories
 		if shouldExcludeFile(sourceFilePath, excludePatterns, sourcePath) {
 			return filepath.SkipDir
+		}
+
+		// Progress reporting every 1000 directories
+		dirCount++
+		if dirCount%1000 == 0 {
+			if logFile != nil {
+				fmt.Fprintf(logFile, "Phase 1 progress: %d directories checked (elapsed: %v)\n",
+					dirCount, time.Since(startTime))
+			}
+			// Update verification counter for UI progress
+			atomic.AddInt64(&totalFilesVerified, 1)
+		}
+
+		// Timeout check - abort if taking too long
+		if time.Since(startTime) > 2*time.Minute {
+			if logFile != nil {
+				fmt.Fprintf(logFile, "WARNING: Directory walk timeout after %v\n", time.Since(startTime))
+			}
+			return fmt.Errorf("directory walk timeout")
 		}
 
 		// Convert source dir path to backup dir path
@@ -1046,11 +1096,20 @@ func verifyRandomSampleOfBackup(sourcePath, destPath string, sampleRate float64,
 	}
 
 	if logFile != nil {
-		fmt.Fprintf(logFile, "Phase 1 complete: Found %d missing directories\n", len(missingDirs))
-		if len(missingDirs) > 0 {
+		fmt.Fprintf(logFile, "Phase 1 complete: Checked %d directories in %v\n", dirCount, time.Since(startTime))
+		fmt.Fprintf(logFile, "Found %d missing directories\n", len(missingDirs))
+		if len(missingDirs) > 0 && len(missingDirs) <= 20 {
 			fmt.Fprintf(logFile, "Missing directories:\n")
 			for _, dir := range missingDirs {
 				fmt.Fprintf(logFile, "  - %s\n", dir)
+			}
+		} else if len(missingDirs) > 20 {
+			fmt.Fprintf(logFile, "Too many missing directories (%d), showing first 20:\n", len(missingDirs))
+			for i, dir := range missingDirs[:20] {
+				fmt.Fprintf(logFile, "  - %s\n", dir)
+				if i >= 19 {
+					break
+				}
 			}
 		}
 	}
@@ -1064,8 +1123,33 @@ func verifyRandomSampleOfBackup(sourcePath, destPath string, sampleRate float64,
 		fmt.Fprintf(logFile, "Phase 2: Starting file sampling verification\n")
 	}
 
+	startTime = time.Now()
 	err = filepath.WalkDir(sourcePath, func(sourceFilePath string, d os.DirEntry, err error) error {
-		if err != nil || !d.Type().IsRegular() {
+		// Handle errors and skip inaccessible items
+		if err != nil {
+			if d != nil && d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
+		// Skip directories
+		if d.IsDir() {
+			// CRITICAL: Skip virtual filesystems early
+			skipPath, _ := filepath.Rel(sourcePath, sourceFilePath)
+			if strings.HasPrefix(skipPath, "proc") || strings.HasPrefix(skipPath, "sys") ||
+				strings.HasPrefix(skipPath, "dev") || strings.HasPrefix(skipPath, "run") {
+				return filepath.SkipDir
+			}
+			// Skip excluded directories
+			if shouldExcludeFile(sourceFilePath, excludePatterns, sourcePath) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
+		// Only process regular files
+		if !d.Type().IsRegular() {
 			return nil
 		}
 
@@ -1073,6 +1157,16 @@ func verifyRandomSampleOfBackup(sourcePath, destPath string, sampleRate float64,
 		filesProcessed++
 		if filesProcessed > maxFilesToCheck {
 			return fmt.Errorf("enough files processed")
+		}
+
+		// Progress reporting every 5000 files
+		if filesProcessed%5000 == 0 {
+			if logFile != nil {
+				fmt.Fprintf(logFile, "Phase 2 progress: %d files processed (elapsed: %v)\n",
+					filesProcessed, time.Since(startTime))
+			}
+			// Update verification counter for UI
+			atomic.AddInt64(&totalFilesVerified, 1)
 		}
 
 		// Skip excluded patterns

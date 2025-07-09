@@ -687,10 +687,32 @@ func (m Model) renderProgress() string {
 		s.WriteString("📂 Source:         ~/\n")
 		s.WriteString("💾 Destination:    " + m.selectedDrive + "\n")
 		s.WriteString(logStyle.Render("📋 Log:            "+logPath) + "\n\n")
+	case "auto_verify":
+		s.WriteString(backupTypeStyle.Render("🔍 Operation:      Backup Verification") + "\n")
+		s.WriteString("📂 Source:         " + m.selectedDrive + "\n")
+		s.WriteString(logStyle.Render("📋 Log:            "+logPath) + "\n\n")
+	case "system_verify":
+		s.WriteString(backupTypeStyle.Render("🔍 Operation:      System Backup Verification") + "\n")
+		s.WriteString("📂 Source:         " + m.selectedDrive + "\n")
+		s.WriteString(logStyle.Render("📋 Log:            "+logPath) + "\n\n")
+	case "home_verify":
+		s.WriteString(backupTypeStyle.Render("🔍 Operation:      Home Backup Verification") + "\n")
+		s.WriteString("📂 Source:         " + m.selectedDrive + "\n")
+		s.WriteString(logStyle.Render("📋 Log:            "+logPath) + "\n\n")
+	case "system_restore":
+		s.WriteString(backupTypeStyle.Render("⚡ Operation:      System Restore") + "\n")
+		s.WriteString("📂 Source:         " + m.selectedDrive + "\n")
+		s.WriteString("📂 Target:         /\n")
+		s.WriteString(logStyle.Render("📋 Log:            "+logPath) + "\n\n")
+	case "custom_restore":
+		s.WriteString(backupTypeStyle.Render("⚡ Operation:      Custom Restore") + "\n")
+		s.WriteString("📂 Source:         " + m.selectedDrive + "\n")
+		s.WriteString(logStyle.Render("📋 Log:            "+logPath) + "\n\n")
 	default:
-		opInfo := fmt.Sprintf("Running: %s", m.operation)
-		s.WriteString(subtitleStyle.Render(opInfo) + "\n")
-		s.WriteString("📋 Log:            " + logPath + "\n\n")
+		// Format unknown operations nicely
+		opName := formatOperationName(m.operation)
+		s.WriteString(backupTypeStyle.Render(fmt.Sprintf("📋 Operation:      %s", opName)) + "\n")
+		s.WriteString(logStyle.Render("📋 Log:            "+logPath) + "\n\n")
 	}
 
 	// Progress bar (only show if not canceling)
@@ -1377,16 +1399,40 @@ func (m Model) renderVerificationErrors() string {
 		s.WriteString(infoStyle.Render("No verification errors found") + "\n\n")
 		help := helpStyle.Render("ESC: back to main menu")
 		s.WriteString(help)
-		return s.String()
+		content := borderStyle.Render(s.String())
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
 	}
 
-	// Calculate display area (leave room for header and help)
-	// Header: title + version + 2 newlines = 4 lines
-	// Help: help text + 2 newlines = 3 lines
-	// Border padding: 2 lines
-	contentHeight := m.height - 9 // More accurate line accounting
+	// LIMIT: Cap errors at 100 to prevent overwhelming display
+	displayErrors := m.verificationErrors
+	moreErrors := 0
+	if errorCount > 100 {
+		displayErrors = m.verificationErrors[:100]
+		moreErrors = errorCount - 100
+		errorCount = 100
+	}
+
+	// Calculate display area for errors REALISTICALLY
+	// Fixed overhead calculation:
+	// - Title: 1 line
+	// - Version: 1 line
+	// - Blank line: 1 line
+	// - Scroll info: 1 line
+	// - Blank line: 1 line
+	// - Help text: 1 line
+	// - Border top/bottom: 2 lines
+	// - Padding: 2 lines
+	// Total fixed overhead: 10 lines
+	contentHeight := m.height - 10
+
+	// Ensure minimum space for content
 	if contentHeight < 3 {
 		contentHeight = 3
+	}
+
+	// Further reduce if we have the "more errors" message
+	if moreErrors > 0 {
+		contentHeight = contentHeight - 2 // Account for "more errors" message
 	}
 
 	// Calculate safe scroll offset (don't mutate model in UI)
@@ -1409,7 +1455,7 @@ func (m Model) renderVerificationErrors() string {
 	// Display errors (properly formatted and truncated)
 	for i := 0; i < contentHeight && (scrollOffset+i) < errorCount; i++ {
 		errorIdx := scrollOffset + i
-		errorText := m.verificationErrors[errorIdx]
+		errorText := displayErrors[errorIdx]
 
 		// Parse error type and format accordingly
 		var prefix, message string
@@ -1428,14 +1474,26 @@ func (m Model) renderVerificationErrors() string {
 		}
 
 		// Calculate available width for the message
-		maxWidth := m.width - 20 // Leave room for number, prefix, borders, and padding
-		if maxWidth < 30 {
-			maxWidth = 30
+		// Account for: border (4), padding (4), number (4), prefix (12)
+		maxWidth := m.width - 24
+		if maxWidth < 50 {
+			maxWidth = 50
 		}
 
 		// Smart truncation for file paths to prevent line wrapping
 		if len(message) > maxWidth {
-			if strings.Contains(message, ".config/BraveSoftware/") {
+			// Special handling for gopls cache files
+			if strings.Contains(message, ".cache/gopls/") && strings.HasSuffix(message, "-analysis") {
+				// Show just "gopls/...hash-analysis"
+				parts := strings.Split(message, "/")
+				if len(parts) >= 2 {
+					hash := parts[len(parts)-1]
+					if len(hash) > 20 {
+						hash = hash[:8] + "..." + hash[len(hash)-12:]
+					}
+					message = "gopls/..." + hash
+				}
+			} else if strings.Contains(message, ".config/BraveSoftware/") {
 				// For browser cache, show just "BraveSoftware/...filename"
 				parts := strings.Split(message, "/")
 				if len(parts) > 0 {
@@ -1493,6 +1551,12 @@ func (m Model) renderVerificationErrors() string {
 		s.WriteString(errorStyle.Render(line) + "\n")
 	}
 
+	// Show indication if there are more errors than displayed
+	if moreErrors > 0 {
+		moreMsg := fmt.Sprintf("\n⚠️  ... and %d more errors not shown (display limited to 100)", moreErrors)
+		s.WriteString(warningStyle.Render(moreMsg) + "\n")
+	}
+
 	// Navigation help (no extra newlines to prevent overflow)
 	if errorCount > contentHeight {
 		help := helpStyle.Render("↑/↓: scroll through errors • ESC: back to main menu")
@@ -1502,9 +1566,57 @@ func (m Model) renderVerificationErrors() string {
 		s.WriteString("\n" + help)
 	}
 
-	// Center the content with beautiful border
-	content := borderStyle.Width(m.width - 8).Render(s.String())
+	// Apply border but DO NOT center if content is too tall
+	borderWidth := m.width - 4
+	if borderWidth < 60 {
+		borderWidth = 60
+	}
+
+	// First render without border to check height
+	rawContent := s.String()
+
+	// Add border
+	content := borderStyle.Width(borderWidth).Render(rawContent)
+	finalHeight := strings.Count(content, "\n") + 1
+
+	// CRITICAL: Never center if content might be cut off
+	// Leave at least 2 lines of margin
+	if finalHeight > m.height-2 {
+		// Content too tall - render at top of screen with small margin
+		return "\n" + content
+	}
+
+	// Content fits - safe to center
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
+}
+
+// formatOperationName converts technical operation names to human-readable strings
+func formatOperationName(operation string) string {
+	switch operation {
+	case "system_backup":
+		return "Complete System Backup"
+	case "home_backup":
+		return "Home Directory Backup"
+	case "selective_backup":
+		return "Selective Backup"
+	case "auto_verify":
+		return "Backup Verification"
+	case "system_verify":
+		return "System Backup Verification"
+	case "home_verify":
+		return "Home Backup Verification"
+	case "system_restore":
+		return "System Restore"
+	case "custom_restore":
+		return "Custom Restore"
+	default:
+		// Capitalize first letter and replace underscores with spaces
+		formatted := strings.ReplaceAll(operation, "_", " ")
+		if len(formatted) > 0 {
+			formatted = strings.ToUpper(formatted[:1]) + formatted[1:]
+		}
+		return formatted
+	}
 }
 
 // min returns the smaller of two integers

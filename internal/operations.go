@@ -490,8 +490,15 @@ func calculateRealProgress() (float64, string) {
 			var fileProgress float64
 			if totalFilesVerified == 0 {
 				fileProgress = 0.0
-			} else if totalFilesVerified < 10 {
-				fileProgress = 0.3 // Up to 30% for first 10 files (critical files)
+			} else if totalFilesVerified < 10 && verificationPhaseActive {
+				// During critical files phase (up to 30%)
+				// Use actual critical files count instead of hardcoded 10
+				criticalCount := len(DefaultVerificationConfig.CriticalFiles)
+				if criticalCount > 0 {
+					fileProgress = (float64(totalFilesVerified) / float64(criticalCount)) * 0.3
+				} else {
+					fileProgress = 0.3
+				}
 			} else if totalFilesVerified < 100 {
 				fileProgress = 0.3 + (float64(totalFilesVerified-10)/90.0)*0.6 // 30% to 90% for sampling
 			} else {
@@ -507,12 +514,12 @@ func calculateRealProgress() (float64, string) {
 			// Progressive messages based on stage
 			if totalFilesVerified == 0 {
 				message = "🔍 Initializing verification..."
-			} else if totalFilesVerified < 10 {
+			} else if totalFilesVerified <= int64(len(DefaultVerificationConfig.CriticalFiles)) && verificationPhaseActive {
 				message = fmt.Sprintf("🔍 Checking critical files • %d verified", totalFilesVerified)
 			} else if totalFilesVerified < 50 {
-				message = fmt.Sprintf("🔍 Sampling backup files • %d verified", totalFilesVerified)
+				message = fmt.Sprintf("🔍 Sampling backup files • %d checked", totalFilesVerified)
 			} else {
-				message = fmt.Sprintf("🔍 Completing verification • %d files verified", totalFilesVerified)
+				message = fmt.Sprintf("🔍 Verifying backup integrity • %d files checked", totalFilesVerified)
 			}
 		} else {
 			// Backup verification phase: 95-100% range (part of backup process)
