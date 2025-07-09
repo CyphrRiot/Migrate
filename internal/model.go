@@ -129,6 +129,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		m.homeFolders = msg.folders
+		m.cursor = 0 // Default to "Continue with selection" option
 
 		// Load saved configuration to restore previous selections
 		config, err := LoadSelectiveBackupConfig()
