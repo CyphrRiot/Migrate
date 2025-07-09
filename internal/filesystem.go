@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"os/user"
 	"path/filepath"
 	"strconv"
@@ -1135,41 +1134,10 @@ func getUsedDiskSpace(path string) (int64, error) {
 	return GetUsedDiskSpace(path)
 }
 
-// calculateDirectorySize computes total directory size using the system du command for accuracy and speed.
-// Falls back to pure Go implementation if du command fails.
-// Uses 'du -sb' for byte-accurate size calculation following symlinks but not crossing filesystems.
+// calculateDirectorySize computes total directory size using native Go directory traversal.
+// Walks the directory tree and sums individual file sizes with graceful error handling.
+// Portable and handles permission errors gracefully without external dependencies.
 func calculateDirectorySize(path string) (int64, error) {
-	// Use du -sb to get size in bytes, following symlinks but not crossing filesystems
-	cmd := exec.Command("du", "-sb", path)
-	output, err := cmd.Output()
-	if err != nil {
-		// If du fails, try a fallback method
-		return calculateDirectorySizeFallback(path)
-	}
-
-	// Parse du output: "123456\t/path/to/dir"
-	outputStr := strings.TrimSpace(string(output))
-	if outputStr == "" {
-		return 0, fmt.Errorf("empty du output")
-	}
-
-	parts := strings.Fields(outputStr)
-	if len(parts) < 1 {
-		return 0, fmt.Errorf("unexpected du output format: %q", outputStr)
-	}
-
-	size, err := strconv.ParseInt(parts[0], 10, 64)
-	if err != nil {
-		return 0, fmt.Errorf("failed to parse size from %q: %v", parts[0], err)
-	}
-
-	return size, nil
-}
-
-// calculateDirectorySizeFallback provides pure Go directory size calculation when du command fails.
-// Walks the directory tree and sums individual file sizes.
-// Slower than du but more portable and handles permission errors gracefully.
-func calculateDirectorySizeFallback(path string) (int64, error) {
 	var totalSize int64
 
 	err := filepath.WalkDir(path, func(filePath string, d os.DirEntry, err error) error {
@@ -1187,6 +1155,12 @@ func calculateDirectorySizeFallback(path string) (int64, error) {
 	})
 
 	return totalSize, err
+}
+
+// calculateDirectorySizeFallback is deprecated - use calculateDirectorySize instead.
+// Kept for backward compatibility but now just calls the main function.
+func calculateDirectorySizeFallback(path string) (int64, error) {
+	return calculateDirectorySize(path)
 }
 
 // GetHomeDirSize calculates the total size of the current user's home directory.

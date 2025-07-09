@@ -2,7 +2,7 @@
 //
 // This package handles:
 //   - Privilege elevation and root access verification
-//   - Single instance checking to prevent concurrent operations  
+//   - Single instance checking to prevent concurrent operations
 //   - System dependency validation (lsblk, udisksctl, cryptsetup, etc.)
 //   - Signal handling for clean shutdown
 //   - TUI initialization and execution
@@ -18,11 +18,13 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"migrate/internal"
+
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 // lockFilePath defines the location of the singleton instance lock file.
@@ -40,9 +42,14 @@ func checkSingleInstance() error {
 		if readErr == nil {
 			pid := strings.TrimSpace(string(lockContent))
 			if pid != "" {
-				// Check if process is still running
-				if err := exec.Command("kill", "-0", pid).Run(); err == nil {
-					return fmt.Errorf("another migrate process is already running (PID: %s)", pid)
+				// Check if process is still running using native Go
+				if pidInt, err := strconv.Atoi(pid); err == nil {
+					if process, err := os.FindProcess(pidInt); err == nil {
+						// Send signal 0 to check if process exists
+						if err := process.Signal(syscall.Signal(0)); err == nil {
+							return fmt.Errorf("another migrate process is already running (PID: %s)", pid)
+						}
+					}
 				}
 			}
 		}
@@ -100,7 +107,7 @@ func elevateToRoot() error {
 	// Re-run this program with sudo, preserving all arguments
 	args := append([]string{execPath}, os.Args[1:]...)
 	cmd := exec.Command("sudo", args...)
-	
+
 	// Connect stdio so user can enter password if needed
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
@@ -121,7 +128,7 @@ func elevateToRoot() error {
 	if exitError, ok := err.(*exec.ExitError); ok {
 		os.Exit(exitError.ExitCode())
 	}
-	
+
 	// Normal successful exit
 	os.Exit(0)
 	return nil // Never reached
@@ -134,7 +141,7 @@ func runAsRoot() {
 	if err := checkSingleInstance(); err != nil {
 		fmt.Println("⚠️  " + err.Error())
 		fmt.Println()
-		
+
 		// Pretty error display
 		fmt.Println("┌─────────────────────────────────────────┐")
 		fmt.Println("│        🚫 Migration In Progress         │")
@@ -182,18 +189,26 @@ func runAsRoot() {
 	// Always run the beautiful TUI
 	m := internal.InitialModel()
 	p := tea.NewProgram(m, tea.WithAltScreen())
-	
+
 	if _, err := p.Run(); err != nil {
 		log.Fatal(err)
 	}
 }
 
-// hasSudoAccess checks if the current user has cached sudo credentials.
-// Returns true if sudo can be used without password prompt.
+// hasSudoAccess checks if the current user has effective root privileges.
+// Returns true if the user can perform privileged operations.
 func hasSudoAccess() bool {
-	cmd := exec.Command("sudo", "-n", "true")
-	err := cmd.Run()
-	return err == nil
+	// Check if we're already running as root
+	if os.Geteuid() == 0 {
+		return true
+	}
+
+	// Check if we can access a root-only file
+	if err := syscall.Access("/etc/shadow", 4); err == nil { // R_OK = 4
+		return true
+	}
+
+	return false
 }
 
 // checkSystemDependencies validates that all required system programs are available.
@@ -201,25 +216,25 @@ func hasSudoAccess() bool {
 // providing installation instructions for missing dependencies.
 func checkSystemDependencies() error {
 	// Required programs for core functionality
-	requiredPrograms := []struct{
-		name string
-		purpose string  
+	requiredPrograms := []struct {
+		name     string
+		purpose  string
 		critical bool
 	}{
 		// Drive detection and information
 		{"lsblk", "drive detection and information", true},
-		
+
 		// Drive mounting/unmounting
 		{"udisksctl", "drive mounting and unmounting", true},
 		{"umount", "drive unmounting", true},
-		
+
 		// LUKS encryption support
 		{"cryptsetup", "LUKS encryption/decryption", true},
-		
+
 		// System information
 		{"uname", "system information for backup metadata", true},
 		{"hostname", "hostname for backup metadata", false},
-		
+
 		// Sudo access validation
 		{"sudo", "privilege escalation", true},
 	}
@@ -246,10 +261,10 @@ func checkSystemDependencies() error {
 		fmt.Println()
 	}
 
-	// Check for critical missing programs  
+	// Check for critical missing programs
 	if len(missing) > 0 {
-		return fmt.Errorf("missing critical programs:\n%s\n\n🔧 Installation commands:\n%s", 
-			formatMissingList(missing), 
+		return fmt.Errorf("missing critical programs:\n%s\n\n🔧 Installation commands:\n%s",
+			formatMissingList(missing),
 			getInstallCommands(missing))
 	}
 
@@ -279,7 +294,7 @@ func formatMissingList(missing []string) string {
 // Get installation commands for missing programs
 func getInstallCommands(missing []string) string {
 	commands := []string{}
-	
+
 	needsLsblk := false
 	needsUdisks := false
 	needsCryptsetup := false
@@ -290,7 +305,7 @@ func getInstallCommands(missing []string) string {
 			needsLsblk = true
 		}
 		if contains(prog, "udisksctl") {
-			needsUdisks = true  
+			needsUdisks = true
 		}
 		if contains(prog, "cryptsetup") {
 			needsCryptsetup = true
@@ -312,7 +327,7 @@ func getInstallCommands(missing []string) string {
 		debianPkgs = append(debianPkgs, "cryptsetup")
 	}
 
-	// Arch Linux  
+	// Arch Linux
 	archPkgs := []string{}
 	if needsLsblk || needsUtil {
 		archPkgs = append(archPkgs, "util-linux")
@@ -330,7 +345,7 @@ func getInstallCommands(missing []string) string {
 	if len(archPkgs) > 0 {
 		commands = append(commands, fmt.Sprintf("   Arch Linux:    sudo pacman -S %s", strings.Join(archPkgs, " ")))
 	}
-	
+
 	return strings.Join(commands, "\n")
 }
 
