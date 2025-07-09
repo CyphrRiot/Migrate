@@ -18,6 +18,7 @@ import (
 	"migrate/internal/handlers"
 	"migrate/internal/screens"
 	"migrate/internal/state"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -326,7 +327,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		} else {
 			// Drive successfully mounted, confirm operation
-			fmt.Printf("DEBUG: Drive successfully mounted, operation: %s\n", m.operation)
+			// Log to file instead of stdout
+			if logPath := getLogFilePath(); logPath != "" {
+				if logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
+					fmt.Fprintf(logFile, "DEBUG: Drive successfully mounted, operation: %s\n", m.operation)
+					logFile.Close()
+				}
+			}
 			if strings.Contains(m.operation, "backup") {
 				// Backup confirmation
 				backupTypeDesc := "ENTIRE SYSTEM"
@@ -348,11 +355,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					backupTypeDesc, sourceSize, msg.drivePath, msg.driveSize, msg.driveType, msg.mountPoint)
 			} else if strings.Contains(m.operation, "restore") {
 				// For restore, first detect backup type
-				fmt.Printf("DEBUG: Starting backup type detection for restore at: %s\n", msg.mountPoint)
+				// Log to file instead of stdout
+				if logPath := getLogFilePath(); logPath != "" {
+					if logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
+						fmt.Fprintf(logFile, "DEBUG: Starting backup type detection for restore at: %s\n", msg.mountPoint)
+						logFile.Close()
+					}
+				}
 				backupType, err := detectBackupType(msg.mountPoint)
 				if err != nil {
 					// Backup type detection failed - show error
-					fmt.Printf("DEBUG: Backup type detection failed: %v\n", err)
+					if logPath := getLogFilePath(); logPath != "" {
+						if logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
+							fmt.Fprintf(logFile, "DEBUG: Backup type detection failed: %v\n", err)
+							logFile.Close()
+						}
+					}
 					errorMsg := fmt.Sprintf("❌ Invalid backup drive\n\nThis drive does not contain a valid migrate backup.\n\nError: %v\n\n💡 Make sure you selected the correct drive that contains your backup.", err)
 					m.message = errorMsg
 					m.errorRequiresManualDismissal = true
@@ -361,10 +379,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, nil
 				}
 
-				fmt.Printf("DEBUG: Backup type detected: %s\n", backupType)
+				// Log to file instead of stdout
+				if logPath := getLogFilePath(); logPath != "" {
+					if logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
+						fmt.Fprintf(logFile, "DEBUG: Backup type detected: %s\n", backupType)
+						logFile.Close()
+					}
+				}
 				if backupType == "home" {
 					// It's a home backup - show folder selection
-					fmt.Printf("DEBUG: Home backup detected, switching to folder selection screen\n")
+					if logPath := getLogFilePath(); logPath != "" {
+						if logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
+							fmt.Fprintf(logFile, "DEBUG: Home backup detected, switching to folder selection screen\n")
+							logFile.Close()
+						}
+					}
 					m.selectedDrive = msg.mountPoint
 					m.screen = screens.ScreenRestoreFolderSelect
 					m.cursor = 0
@@ -376,7 +405,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 
 				// System backup detected - proceed with confirmation
-				fmt.Printf("DEBUG: System backup detected, showing confirmation dialog\n")
+				if logPath := getLogFilePath(); logPath != "" {
+					if logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
+						fmt.Fprintf(logFile, "DEBUG: System backup detected, showing confirmation dialog\n")
+						logFile.Close()
+					}
+				}
 				restoreTypeDesc := "ENTIRE SYSTEM"
 				if m.operation == "custom_restore" {
 					restoreTypeDesc = "CUSTOM PATH"
@@ -1244,7 +1278,12 @@ func (m Model) handleSelection() (tea.Model, tea.Cmd) {
 				}
 			} else if strings.Contains(m.operation, "restore") {
 				// For restore: mount drive for source backup
-				fmt.Printf("DEBUG: Starting restore operation for drive: %s (Device: %s, Label: %s)\n", selectedDrive.Device, selectedDrive.Device, selectedDrive.Label)
+				if logPath := getLogFilePath(); logPath != "" {
+					if logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
+						fmt.Fprintf(logFile, "DEBUG: Starting restore operation for drive: %s (Device: %s, Label: %s)\n", selectedDrive.Device, selectedDrive.Device, selectedDrive.Label)
+						logFile.Close()
+					}
+				}
 				return m, mountDriveForRestore(selectedDrive)
 			} else if strings.Contains(m.operation, "verify") {
 				// For verify: mount drive for source backup (read-only)
