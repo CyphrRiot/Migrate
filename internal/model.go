@@ -1311,6 +1311,16 @@ func (m Model) handleSelection() (tea.Model, tea.Cmd) {
 						// Space check passed - proceed with full system restore to root ("/") 
 						return m, startRestore(m.selectedDrive, "/", m.restoreConfig, m.restoreWindowMgrs)
 					}
+				case "home_restore":
+					// NEW: Handle home_restore explicitly - this should always do selective restore
+					// Space check already done in handleRestoreFolderSelection before confirmation
+					return m, tea.Batch(
+						startSelectiveRestore(m.selectedDrive, m.selectedRestoreFolders, m.restoreFolders, m.restoreConfig, m.restoreWindowMgrs),
+						CheckTUIBackupProgress(),
+						tea.Tick(100*time.Millisecond, func(t time.Time) tea.Msg {
+							return state.CylonAnimateMsg{}
+						}),
+					)
 				case "custom_restore":
 					return m, startRestore(m.selectedDrive, "/tmp/restore", m.restoreConfig, m.restoreWindowMgrs)
 				case "system_verify":

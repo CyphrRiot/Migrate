@@ -779,69 +779,88 @@ func startRestore(sourcePath, targetPath string, restoreConfig, restoreWindowMgr
 
 // startSelectiveRestore creates a command for selective folder restore from a home backup.
 // Similar to startRestore but only restores selected folders from the backup.
+// Uses the same asynchronous progress tracking system as backup operations.
 func startSelectiveRestore(sourcePath string, selectedFolders map[string]bool, allFolders []HomeFolderInfo, restoreConfig, restoreWindowMgrs bool) tea.Cmd {
 	return func() tea.Msg {
-		// Setup logging
-		logPath := getLogFilePath()
-		logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
-		if err == nil {
-			fmt.Fprintf(logFile, "\n=== SELECTIVE RESTORE STARTED: %s ===\n", time.Now().Format(time.RFC3339))
-			fmt.Fprintf(logFile, "Log file: %s\n", logPath)
-			defer logFile.Close()
-		}
+		// Reset all backup state before starting (reuse backup progress system)
+		resetBackupState()
 
-		// Get home directory as target - handle SUDO_USER properly
-		var homeDir string
-		if sudoUser := os.Getenv("SUDO_USER"); sudoUser != "" {
-			homeDir = "/home/" + sudoUser
+		// Start selective restore in background like backup operations
+		go runSelectiveRestoreSilently(sourcePath, selectedFolders, allFolders, restoreConfig, restoreWindowMgrs)
+		return ProgressUpdate{Percentage: -1, Message: "Starting selective restore...", Done: false}
+	}
+}
+
+// runSelectiveRestoreSilently performs the actual selective restore operation in the background.
+// Uses the same pattern as runBackupSilently to provide proper progress tracking.
+func runSelectiveRestoreSilently(sourcePath string, selectedFolders map[string]bool, allFolders []HomeFolderInfo, restoreConfig, restoreWindowMgrs bool) {
+	// Reset cancellation flag at start
+	resetBackupCancel()
+
+	// Setup logging
+	logPath := getLogFilePath()
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err == nil {
+		fmt.Fprintf(logFile, "\n=== SELECTIVE RESTORE STARTED: %s ===\n", time.Now().Format(time.RFC3339))
+		fmt.Fprintf(logFile, "Log file: %s\n", logPath)
+		defer logFile.Close()
+	}
+
+	tuiBackupCompleted = false
+	tuiBackupError = nil
+	tuiBackupCancelling = false
+
+	// Initialize progress tracking like backup operations
+	backupStartTime = time.Now()
+
+	// Get home directory as target - handle SUDO_USER properly
+	var homeDir string
+	if sudoUser := os.Getenv("SUDO_USER"); sudoUser != "" {
+		homeDir = "/home/" + sudoUser
+	} else {
+		homeDir, err = os.UserHomeDir()
+		if err != nil {
+			tuiBackupCompleted = true
+			tuiBackupError = fmt.Errorf("failed to get home directory: %v", err)
+			return
+		}
+	}
+
+	if logFile != nil {
+		fmt.Fprintf(logFile, "Restore source: %s\n", sourcePath)
+		fmt.Fprintf(logFile, "Restore target: %s\n", homeDir)
+		fmt.Fprintf(logFile, "Restore config: %v\n", restoreConfig)
+		fmt.Fprintf(logFile, "Restore window managers: %v\n", restoreWindowMgrs)
+
+		// Log selected folders
+		fmt.Fprintf(logFile, "\nSelected folders for restore:\n")
+		for _, folder := range allFolders {
+			if selectedFolders[folder.Path] || folder.AlwaysInclude {
+				fmt.Fprintf(logFile, "  - %s (%s)\n", folder.Name, FormatBytes(folder.Size))
+			}
+		}
+		fmt.Fprintf(logFile, "Space check already completed during folder selection - proceeding with restore\n")
+	}
+
+	// Perform selective restore synchronously 
+	err = performSelectiveRestore(sourcePath, homeDir, selectedFolders, allFolders, restoreConfig, restoreWindowMgrs, logFile)
+	if err != nil {
+		if logFile != nil {
+			fmt.Fprintf(logFile, "SELECTIVE RESTORE ERROR: %v\n", err)
+		}
+		tuiBackupCompleted = true
+		if shouldCancelBackup() {
+			tuiBackupCancelling = false // Cancellation complete
+			tuiBackupError = fmt.Errorf("selective restore canceled by user")
 		} else {
-			var err error
-			homeDir, err = os.UserHomeDir()
-			if err != nil {
-				return ProgressUpdate{Error: fmt.Errorf("failed to get home directory: %v", err)}
-			}
+			tuiBackupError = fmt.Errorf("selective restore failed: %v", err)
 		}
-
+	} else {
 		if logFile != nil {
-			fmt.Fprintf(logFile, "Restore source: %s\n", sourcePath)
-			fmt.Fprintf(logFile, "Restore target: %s\n", homeDir)
-			fmt.Fprintf(logFile, "Restore config: %v\n", restoreConfig)
-			fmt.Fprintf(logFile, "Restore window managers: %v\n", restoreWindowMgrs)
-
-			// Log selected folders
-			fmt.Fprintf(logFile, "\nSelected folders for restore:\n")
-			for _, folder := range allFolders {
-				if selectedFolders[folder.Path] || folder.AlwaysInclude {
-					fmt.Fprintf(logFile, "  - %s (%s)\n", folder.Name, FormatBytes(folder.Size))
-				}
-			}
+			fmt.Fprintf(logFile, "SELECTIVE RESTORE SUCCESS: completed\n")
 		}
-
-		// SPACE CHECK: Ensure internal drive has enough space for the selective restore
-		if logFile != nil {
-			fmt.Fprintf(logFile, "Checking if internal drive has sufficient space for selective restore...\n")
-		}
-		
-		// For selective restore, use selective space checking that only counts selected items
-		err = checkSelectiveRestoreSpaceRequirements(allFolders, selectedFolders, restoreConfig, restoreWindowMgrs)
-		if err != nil {
-			if logFile != nil {
-				fmt.Fprintf(logFile, "SELECTIVE RESTORE SPACE CHECK FAILED: %v\n", err)
-			}
-			return ProgressUpdate{Error: err, Done: true}
-		}
-		
-		if logFile != nil {
-			fmt.Fprintf(logFile, "Space check passed - internal drive has sufficient capacity for selective restore\n")
-		}
-
-		// Perform selective restore
-		err = performSelectiveRestore(sourcePath, homeDir, selectedFolders, allFolders, restoreConfig, restoreWindowMgrs, logFile)
-		if err != nil {
-			return ProgressUpdate{Error: fmt.Errorf("selective restore failed: %v", err)}
-		}
-
-		return ProgressUpdate{Percentage: 1.0, Message: "Selective restore completed successfully!", Done: true}
+		tuiBackupCompleted = true
+		tuiBackupError = nil
 	}
 }
 
@@ -880,16 +899,41 @@ func performSelectiveRestore(backupPath, targetPath string, selectedFolders map[
 		foldersToRestore = append(foldersToRestore, folderName)
 	}
 
-	// Restore each selected folder
+	// First pass: Count total files to restore for proper progress tracking
+	if logFile != nil {
+		fmt.Fprintf(logFile, "Phase 1: Counting files in selected folders for progress tracking...\n")
+	}
+	
+	totalFiles := int64(0)
 	for _, folderName := range foldersToRestore {
+		sourceFolderPath := filepath.Join(backupPath, folderName)
+		if count, err := countFilesInDirectory(sourceFolderPath); err == nil {
+			totalFiles += count
+		}
+	}
+	
+	// Initialize progress tracking with the actual file count
+	totalFilesFound = totalFiles
+	directoryWalkComplete = true // Mark directory scan as complete
+	
+	if logFile != nil {
+		fmt.Fprintf(logFile, "Total files to restore: %d\n", totalFiles)
+		fmt.Fprintf(logFile, "Phase 2: Starting folder restoration...\n")
+	}
+
+	// Restore each selected folder with progress tracking
+	for i, folderName := range foldersToRestore {
 		sourceFolderPath := filepath.Join(backupPath, folderName)
 		targetFolderPath := filepath.Join(targetPath, folderName)
 
 		if logFile != nil {
-			fmt.Fprintf(logFile, "\nRestoring folder: %s\n", folderName)
+			fmt.Fprintf(logFile, "\nRestoring folder %d/%d: %s\n", i+1, len(foldersToRestore), folderName)
 			fmt.Fprintf(logFile, "  Source: %s\n", sourceFolderPath)
 			fmt.Fprintf(logFile, "  Target: %s\n", targetFolderPath)
 		}
+
+		// Update current directory for progress display
+		currentDirectory = sourceFolderPath
 
 		// Use syncDirectoriesWithExclusions for each folder
 		err := syncDirectoriesWithExclusions(sourceFolderPath, targetFolderPath, nil, logFile)
@@ -908,6 +952,13 @@ func performSelectiveRestore(backupPath, targetPath string, selectedFolders map[
 			}
 			// Don't fail the entire restore for cleanup issues
 		}
+	}
+	
+	// Mark sync phase as complete
+	syncPhaseComplete = true
+	
+	if logFile != nil {
+		fmt.Fprintf(logFile, "All selected folders restored successfully\n")
 	}
 
 	if logFile != nil {
@@ -1566,4 +1617,26 @@ func hasSubfolders(folderPath string, homeFolders []HomeFolderInfo) bool {
 		}
 	}
 	return false
+}
+
+// countFilesInDirectory counts the total number of files in a directory recursively.
+// Used for progress tracking to provide accurate file counts before restore operations.
+func countFilesInDirectory(dirPath string) (int64, error) {
+	var count int64 = 0
+	
+	err := filepath.WalkDir(dirPath, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			// Skip errors but continue counting - don't fail entire operation
+			return nil
+		}
+		
+		// Only count regular files, not directories
+		if !d.IsDir() {
+			count++
+		}
+		
+		return nil
+	})
+	
+	return count, err
 }
