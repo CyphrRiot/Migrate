@@ -440,7 +440,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 				if backupType == "home" {
-					// It's a home backup - check if we need folder selection or can proceed
+					// It's a home backup - change operation type and proceed with folder selection
 					ioutil.WriteFile(debugFile+"_restore_home_backup", []byte("Home backup detected, checking restore flow"), 0644)
 					
 					if logPath := getLogFilePath(); logPath != "" {
@@ -451,6 +451,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 					
 					m.selectedDrive = msg.mountPoint
+					
+					// CRITICAL FIX: Change operation type from "system_restore" to "home_restore"
+					// This ensures the UI will show the correct operation type and target
+					m.operation = "home_restore"
 					
 	// Always go to folder selection first for home backups
 					ioutil.WriteFile(debugFile+"_restore_folder_selection", []byte("Home backup detected, going to folder selection"), 0644)

@@ -704,6 +704,11 @@ func (m Model) renderProgress() string {
 		s.WriteString("📂 Source:         " + m.selectedDrive + "\n")
 		s.WriteString("📂 Target:         /\n")
 		s.WriteString(logStyle.Render("📋 Log:            "+logPath) + "\n\n")
+	case "home_restore":
+		s.WriteString(backupTypeStyle.Render("⚡ Operation:      Home Directory Restore") + "\n")
+		s.WriteString("📂 Source:         " + m.selectedDrive + "\n")
+		s.WriteString("📂 Target:         ~/\n")
+		s.WriteString(logStyle.Render("📋 Log:            "+logPath) + "\n\n")
 	case "custom_restore":
 		s.WriteString(backupTypeStyle.Render("⚡ Operation:      Custom Restore") + "\n")
 		s.WriteString("📂 Source:         " + m.selectedDrive + "\n")
@@ -1868,6 +1873,8 @@ func formatOperationName(operation string) string {
 		return "Home Backup Verification"
 	case "system_restore":
 		return "System Restore"
+	case "home_restore":
+		return "Home Directory Restore"
 	case "custom_restore":
 		return "Custom Restore"
 	default:
