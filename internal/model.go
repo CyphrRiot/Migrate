@@ -319,11 +319,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.screen = screens.ScreenComplete
 			return m, nil
 		} else {
-			// Regular error message - auto-dismiss after 3 seconds
-			m.message = msg.message
-			return m, tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
-				return tea.KeyMsg{Type: tea.KeyEsc}
-			})
+			// Check if this is an "INSUFFICIENT SPACE" error that needs manual dismissal
+			errorMsg := msg.message
+			if strings.Contains(errorMsg, "INSUFFICIENT SPACE") ||
+				strings.Contains(errorMsg, "too small") ||
+				strings.Contains(errorMsg, "not enough space") ||
+				strings.Contains(errorMsg, "insufficient space") {
+				// Space errors need manual dismissal so user can read details
+				m.message = errorMsg
+				m.errorRequiresManualDismissal = true
+				m.lastScreen = m.screen
+				m.screen = screens.ScreenError
+				return m, nil
+			} else {
+				// Regular error message - auto-dismiss after 3 seconds
+				m.message = msg.message
+				return m, tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
+					return tea.KeyMsg{Type: tea.KeyEsc}
+				})
+			}
 		}
 
 	case BackupDriveStatus:
@@ -467,16 +481,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 
-				// CRITICAL SPACE CHECK: Verify internal drive has enough space for system restore
-				err = checkRestoreSpaceRequirements("", msg.mountPoint)
-				if err != nil {
-					// Show the space error immediately - don't proceed to confirmation
-					m.message = err.Error()
-					m.errorRequiresManualDismissal = true
-					m.lastScreen = m.screen
-					m.screen = screens.ScreenError
-					return m, nil
-				}
+				// SPACE CHECK MOVED: Don't check space here for system restore
+				// Space checking now happens after user selections in confirmation (see ScreenConfirm case)
 
 				// Space check passed - proceed with system restore confirmation
 				restoreTypeDesc := "ENTIRE SYSTEM"
@@ -1272,11 +1278,35 @@ func (m Model) handleSelection() (tea.Model, tea.Cmd) {
 						}),
 					)
 				case "system_restore":
-					// Check if we have selected restore folders (means it's a home backup)
+					// CRITICAL BUG FIX: Only call startRestore for actual system backups
+					// Check if we have selected restore folders (means it's a home backup with selections)
 					if len(m.selectedRestoreFolders) > 0 {
+						// This is actually a selective restore from a home backup - use selective space checking
+						err := checkSelectiveRestoreSpaceRequirements(m.restoreFolders, m.selectedRestoreFolders, m.restoreConfig, m.restoreWindowMgrs)
+						if err != nil {
+							// Show the space error immediately - don't proceed with restore
+							m.message = err.Error()
+							m.errorRequiresManualDismissal = true
+							m.lastScreen = m.screen
+							m.screen = screens.ScreenError
+							return m, nil
+						}
+						// Space check passed - proceed with selective restore (NOT startRestore!)
 						return m, startSelectiveRestore(m.selectedDrive, m.selectedRestoreFolders, m.restoreFolders, m.restoreConfig, m.restoreWindowMgrs)
+					} else {
+						// This is a true system restore from a system backup - use full backup space checking  
+						err := checkRestoreSpaceRequirements("", m.selectedDrive)
+						if err != nil {
+							// Show the space error immediately - don't proceed with restore
+							m.message = err.Error()
+							m.errorRequiresManualDismissal = true
+							m.lastScreen = m.screen
+							m.screen = screens.ScreenError
+							return m, nil
+						}
+						// Space check passed - proceed with full system restore to root ("/") 
+						return m, startRestore(m.selectedDrive, "/", m.restoreConfig, m.restoreWindowMgrs)
 					}
-					return m, startRestore(m.selectedDrive, "/", m.restoreConfig, m.restoreWindowMgrs)
 				case "custom_restore":
 					return m, startRestore(m.selectedDrive, "/tmp/restore", m.restoreConfig, m.restoreWindowMgrs)
 				case "system_verify":

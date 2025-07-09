@@ -817,13 +817,13 @@ func startSelectiveRestore(sourcePath string, selectedFolders map[string]bool, a
 			}
 		}
 
-		// SPACE CHECK: Ensure internal drive has enough space for the restore
+		// SPACE CHECK: Ensure internal drive has enough space for the selective restore
 		if logFile != nil {
 			fmt.Fprintf(logFile, "Checking if internal drive has sufficient space for selective restore...\n")
 		}
 		
-		// For selective restore, sourcePath is the backup mount point
-		err = checkRestoreSpaceRequirements("", sourcePath)
+		// For selective restore, use selective space checking that only counts selected items
+		err = checkSelectiveRestoreSpaceRequirements(allFolders, selectedFolders, restoreConfig, restoreWindowMgrs)
 		if err != nil {
 			if logFile != nil {
 				fmt.Fprintf(logFile, "SELECTIVE RESTORE SPACE CHECK FAILED: %v\n", err)
