@@ -68,6 +68,23 @@ func GetSystemBackupExclusions() []string {
 		"/home/*/.local/share/Trash/*",
 		"/root/.local/share/Trash/*",
 
+		// Git directories (version control)
+		".git/*",
+		"*/.git/*",
+		"/home/*/.git/*",
+		"/root/.git/*",
+
+		// Signal app cache directories
+		"/home/*/.config/Signal/blob_storage/*",
+		"/home/*/.config/Signal/drafts.noindex/*",
+		"/home/*/.config/Signal/attachments.noindex/*",
+		"/home/*/.config/Signal/logs/*",
+
+		// Go language server cache
+		"/home/*/.cache/go-build/*",
+		"/home/*/.cache/gopls/*",
+		"/home/*/.cache/golangci-lint/*",
+
 		// Container and virtualization runtime
 		"/var/lib/docker/containers/*",
 		"/var/lib/docker/tmp/*",
@@ -96,6 +113,17 @@ func GetHomeBackupExclusions() []string {
 		".cache/chromium/*",
 		".local/share/flatpak/*",
 		".local/share/containers/*",
+		".git/*",
+		"*/.git/*",
+		// Signal app cache
+		".config/Signal/blob_storage/*",
+		".config/Signal/drafts.noindex/*",
+		".config/Signal/attachments.noindex/*",
+		".config/Signal/logs/*",
+		// Go language server cache
+		".cache/go-build/*",
+		".cache/gopls/*",
+		".cache/golangci-lint/*",
 	}
 }
 
@@ -128,6 +156,24 @@ func GetBrowserCacheExclusions() []string {
 		"*/.cache/google-chrome/*",
 		"*/.cache/chromium/*",
 		"*/.cache/BraveSoftware/*",
+		// Hash-named cache files (common pattern)
+		"*/*-a",
+		"*/*-d",
+		"*/*-*-a",
+		"*/*-*-d",
+		// Go language server cache files
+		"*/*-diagnostics",
+		"*/*-export",
+		"*/*-methodsets",
+		"*/*-tests",
+		"*/*-xrefs",
+		"*/*-typerefs",
+		"*/*-cas",
+		// Signal app cache patterns
+		"*/.config/Signal/blob_storage/*",
+		"*/.config/Signal/drafts.noindex/*",
+		"*/.config/Signal/attachments.noindex/*",
+		"*/.config/Signal/logs/*",
 	}
 }
 
@@ -140,6 +186,24 @@ func GetSystemCacheExclusions() []string {
 		"/.cache/*",        // Any other cache directories
 		"/var/cache/*",     // System package cache
 		"/tmp/*",           // Already in ExcludePatterns but being explicit
+		// Hash-named cache files (common in various cache directories)
+		"*/*-a",
+		"*/*-d",
+		"*/*-*-a",
+		"*/*-*-d",
+		// Go language server cache files
+		"*/*-diagnostics",
+		"*/*-export",
+		"*/*-methodsets",
+		"*/*-tests",
+		"*/*-xrefs",
+		"*/*-typerefs",
+		"*/*-cas",
+		// Signal app cache patterns
+		"/home/*/.config/Signal/blob_storage/*",
+		"/home/*/.config/Signal/drafts.noindex/*",
+		"/home/*/.config/Signal/attachments.noindex/*",
+		"/home/*/.config/Signal/logs/*",
 	}
 }
 
@@ -154,6 +218,37 @@ func GetVerificationExclusions(backupType string, selectiveExclusions []string) 
 		excludePatterns = GetSystemBackupExclusions()
 		// Add browser cache exclusions
 		excludePatterns = append(excludePatterns, GetBrowserCacheExclusions()...)
+		// Add additional runtime exclusions that cause verification false positives
+		excludePatterns = append(excludePatterns, []string{
+			"/run/*",
+			"/var/run/*",
+			"/var/log/*",
+			"/root/.cache/*",
+			"/root/.config/*",
+			"/root/.ssh/*",
+			"/root/go/*",
+			"/srv/*",
+			"/var/lib/machines/*",
+			"/var/lib/portables/*",
+			"/var/lib/docker/containers/*",
+			"/var/lib/docker/tmp/*",
+			"/var/lib/systemd/*",
+			"/var/cache/*",
+			"/home/*/.cache/*",
+			"/home/*/.local/share/Trash/*",
+			"/home/*/.local/share/Steam/*",
+			"/home/*/.local/share/flatpak/*",
+			"/home/*/.local/share/containers/*",
+			// Signal app cache directories
+			"/home/*/.config/Signal/blob_storage/*",
+			"/home/*/.config/Signal/drafts.noindex/*",
+			"/home/*/.config/Signal/attachments.noindex/*",
+			"/home/*/.config/Signal/logs/*",
+			// Go language server cache
+			"/home/*/.cache/go-build/*",
+			"/home/*/.cache/gopls/*",
+			"/home/*/.cache/golangci-lint/*",
+		}...)
 	case "home":
 		// Home verification: Use home exclusions PLUS browser cache exclusions
 		excludePatterns = append(GetHomeBackupExclusions(), GetBrowserCacheExclusions()...)

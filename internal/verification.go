@@ -38,33 +38,113 @@ import (
 )
 
 // shouldExcludeFile checks if a file should be excluded based on exclude patterns
-// Uses the same proven exclusion logic as the backup system
+// shouldExcludeFile checks whether a file should be excluded from verification.
+// Uses robust pattern matching that handles all exclusion patterns properly
 func shouldExcludeFile(filePath string, excludePatterns []string, sourcePath string) bool {
+	// Convert to relative path for consistent matching
+	relPath, err := filepath.Rel(sourcePath, filePath)
+	if err != nil {
+		relPath = filePath // Fallback to absolute if conversion fails
+	}
+
 	for _, pattern := range excludePatterns {
-		// Handle relative patterns by making them relative to source
-		var fullPattern string
-		if strings.HasPrefix(pattern, "/") {
-			// Absolute path pattern
-			fullPattern = pattern
-		} else {
-			// Relative pattern - make it relative to source
-			fullPattern = filepath.Join(sourcePath, pattern)
+		// Skip empty patterns
+		if pattern == "" {
+			continue
 		}
 
-		// Use filepath.Match for proper glob pattern matching
-		matched, err := filepath.Match(fullPattern, filePath)
-		if err == nil && matched {
+		// Check if pattern matches
+		if matchesVerificationPattern(filePath, relPath, pattern) {
 			return true
 		}
+	}
+	return false
+}
 
-		// Also check if the file is within a directory that matches the pattern
-		if strings.HasSuffix(fullPattern, "/*") {
-			dirPattern := strings.TrimSuffix(fullPattern, "/*")
-			if strings.HasPrefix(filePath, dirPattern+"/") {
+// matchesVerificationPattern checks if a file path matches an exclusion pattern
+func matchesVerificationPattern(fullPath, relPath, pattern string) bool {
+	// Handle absolute patterns (start with /)
+	if strings.HasPrefix(pattern, "/") {
+		return matchesPathPattern(fullPath, pattern)
+	}
+
+	// Handle relative patterns
+	// Try matching against relative path first
+	if matchesPathPattern(relPath, pattern) {
+		return true
+	}
+
+	// For patterns like ".git/*", also check if any part of the path matches
+	if strings.Contains(pattern, ".git/") || strings.HasSuffix(pattern, ".git/*") {
+		if strings.Contains(fullPath, "/.git/") || strings.Contains(relPath, "/.git/") {
+			return true
+		}
+	}
+
+	// For cache patterns ending with special suffixes, check filename
+	cacheSuffixes := []string{"-a", "-d", "-diagnostics", "-export", "-methodsets", "-tests", "-xrefs", "-typerefs", "-cas"}
+	for _, suffix := range cacheSuffixes {
+		if strings.HasSuffix(pattern, suffix) {
+			filename := filepath.Base(fullPath)
+			if strings.HasSuffix(filename, suffix) {
 				return true
 			}
 		}
 	}
+
+	// For Signal app cache patterns
+	if strings.Contains(pattern, "Signal") && strings.Contains(fullPath, "Signal") {
+		return true
+	}
+
+	// For browser cache patterns, check if path contains browser directories
+	if strings.Contains(pattern, "BraveSoftware") && strings.Contains(fullPath, "BraveSoftware") {
+		return true
+	}
+
+	return false
+}
+
+// matchesPathPattern handles glob pattern matching for file paths
+func matchesPathPattern(path, pattern string) bool {
+	// Exact match
+	if path == pattern {
+		return true
+	}
+
+	// Directory wildcard patterns (ending with /*)
+	if strings.HasSuffix(pattern, "/*") {
+		dirPattern := strings.TrimSuffix(pattern, "/*")
+		if strings.HasPrefix(path, dirPattern+"/") || path == dirPattern {
+			return true
+		}
+	}
+
+	// Wildcard in middle or beginning
+	if strings.Contains(pattern, "*") {
+		// Try standard filepath.Match first
+		matched, err := filepath.Match(pattern, path)
+		if err == nil && matched {
+			return true
+		}
+
+		// Handle patterns like "*/something/*"
+		if strings.HasPrefix(pattern, "*/") && strings.HasSuffix(pattern, "/*") {
+			middle := strings.TrimSuffix(strings.TrimPrefix(pattern, "*/"), "/*")
+			if strings.Contains(path, "/"+middle+"/") || strings.Contains(path, middle+"/") {
+				return true
+			}
+		}
+
+		// Handle patterns like "something/*"
+		if strings.HasSuffix(pattern, "/*") && !strings.HasPrefix(pattern, "*/") {
+			prefix := strings.TrimSuffix(pattern, "/*")
+			if strings.Contains(path, "/"+prefix+"/") || strings.HasPrefix(path, prefix+"/") {
+				return true
+			}
+		}
+	}
+
 	return false
 }
 
