@@ -350,11 +350,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				backupType, err := detectBackupType(msg.mountPoint)
 				if err != nil {
 					// Backup type detection failed - show error
-					return m, func() tea.Msg {
-						return BackupDriveStatus{
-							error: fmt.Errorf("❌ Invalid backup drive\n\nThis drive does not contain a valid migrate backup.\n\nError: %v\n\n💡 Make sure you selected the correct drive that contains your backup.", err),
-						}
-					}
+					errorMsg := fmt.Sprintf("❌ Invalid backup drive\n\nThis drive does not contain a valid migrate backup.\n\nError: %v\n\n💡 Make sure you selected the correct drive that contains your backup.", err)
+					m.message = errorMsg
+					m.errorRequiresManualDismissal = true
+					m.lastScreen = m.screen
+					m.screen = screens.ScreenError
+					return m, nil
 				}
 
 				if backupType == "home" {

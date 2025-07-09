@@ -947,28 +947,41 @@ func performPureGoRestore(backupPath, targetPath string, restoreConfig, restoreW
 // Checks BACKUP-INFO.txt first, then falls back to directory structure analysis.
 // Returns "system", "home", or "unknown" with an error if type cannot be determined.
 func detectBackupType(backupPath string) (string, error) {
+	fmt.Printf("DEBUG: detectBackupType called with path: %s\n", backupPath)
+
 	infoPath := filepath.Join(backupPath, "BACKUP-INFO.txt")
+	fmt.Printf("DEBUG: Looking for BACKUP-INFO.txt at: %s\n", infoPath)
+
 	content, err := os.ReadFile(infoPath)
 	if err != nil {
+		fmt.Printf("DEBUG: Failed to read BACKUP-INFO.txt: %v\n", err)
 		return "", fmt.Errorf("failed to read backup info: %v", err)
 	}
 
 	contentStr := string(content)
+	fmt.Printf("DEBUG: BACKUP-INFO.txt content: %s\n", contentStr)
+
 	if strings.Contains(contentStr, "Backup Type: Complete System") {
+		fmt.Printf("DEBUG: Detected system backup\n")
 		return "system", nil
 	} else if strings.Contains(contentStr, "Backup Type: Home Directory") {
+		fmt.Printf("DEBUG: Detected home backup\n")
 		return "home", nil
 	}
 
 	// Fallback: try to detect from folder structure
+	fmt.Printf("DEBUG: Backup type not found in BACKUP-INFO.txt, trying folder structure detection\n")
 	if _, err := os.Stat(filepath.Join(backupPath, "etc")); err == nil {
 		// Has /etc directory - likely system backup
+		fmt.Printf("DEBUG: Found /etc directory - assuming system backup\n")
 		return "system", nil
 	} else if _, err := os.Stat(filepath.Join(backupPath, ".config")); err == nil {
 		// Has .config directory - likely home backup
+		fmt.Printf("DEBUG: Found .config directory - assuming home backup\n")
 		return "home", nil
 	}
 
+	fmt.Printf("DEBUG: Could not determine backup type\n")
 	return "unknown", fmt.Errorf("cannot determine backup type from %s", backupPath)
 }
 
