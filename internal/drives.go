@@ -15,6 +15,7 @@
 package internal
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -164,7 +165,27 @@ func unmountBackupDrive(mountPoint string) error {
 	return nil
 }
 
-// getDeviceFromProcMounts finds the device path for a given mount point using pure Go.
+// findMountPointForDevice replaces findmnt with native /proc/mounts parsing
+// Returns the mount point for a given device path
+func findMountPointForDevice(device string) (string, error) {
+	file, err := os.Open("/proc/mounts")
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		fields := strings.Fields(scanner.Text())
+		if len(fields) >= 2 && fields[0] == device {
+			return fields[1], nil // Return mount point
+		}
+	}
+
+	return "", fmt.Errorf("device not found in /proc/mounts")
+}
+
+// getDeviceFromProcMounts finds the device path for a given mount point by parsing /proc/mounts.
 // Parses /proc/mounts to avoid external command dependencies.
 // Returns the device path (e.g., "/dev/sdb1") for the specified mount point.
 func getDeviceFromProcMounts(mountPoint string) (string, error) {
@@ -725,25 +746,20 @@ func mountLUKSDrive(drive DriveInfo) (string, error) {
 	}
 
 	// Step 2: Check if already mounted first
-	cmd := exec.Command("findmnt", "-rn", "-o", "TARGET", mapperPath)
-	out, err := cmd.Output()
-	if err == nil && strings.TrimSpace(string(out)) != "" {
+	if mountPoint, err := findMountPointForDevice(mapperPath); err == nil {
 		// Already mounted - return existing mount point
-		mountPoint := strings.TrimSpace(string(out))
 		return mountPoint, nil
 	}
 
 	// Step 3: Mount the unlocked device (only if not already mounted)
-	cmd = exec.Command("udisksctl", "mount", "-b", mapperPath)
-	out, err = cmd.Output()
+	cmd := exec.Command("udisksctl", "mount", "-b", mapperPath)
+	out, err := cmd.Output()
 	if err != nil {
 		// Check if it failed because it's already mounted
 		if strings.Contains(err.Error(), "AlreadyMounted") {
-			// Try to find the mount point from the error message or use findmnt
-			cmd = exec.Command("findmnt", "-rn", "-o", "TARGET", mapperPath)
-			out, err = cmd.Output()
-			if err == nil {
-				return strings.TrimSpace(string(out)), nil
+			// Try to find the mount point using native /proc/mounts parsing
+			if mountPoint, err := findMountPointForDevice(mapperPath); err == nil {
+				return mountPoint, nil
 			}
 			return "/run/media/grendel/Grendel", nil // Fallback for known case
 		}
@@ -766,27 +782,39 @@ func mountLUKSDrive(drive DriveInfo) (string, error) {
 // Checks for existing mount status and uses udisksctl for safe mounting.
 // Returns the mount point path on success.
 func mountRegularDrive(drive DriveInfo) (string, error) {
-	// Check if already mounted first
-	cmd := exec.Command("findmnt", "-rn", "-o", "TARGET", drive.Device)
-	out, err := cmd.Output()
-	if err == nil && strings.TrimSpace(string(out)) != "" {
-		// Already mounted - return existing mount point
-		mountPoint := strings.TrimSpace(string(out))
-		return mountPoint, nil
+	// If drive.Device contains a mount point path (starts with /), it's already mounted
+	if strings.HasPrefix(drive.Device, "/") && !strings.HasPrefix(drive.Device, "/dev/") {
+		// This is a mount point, check if it exists
+		if _, err := os.Stat(drive.Device); err == nil {
+			return drive.Device, nil
+		}
+	}
+
+	// If we get here, drive.Device should be a device path for mounting
+	// But if it's a mount point, we need to find the actual device
+	var devicePath string
+	if strings.HasPrefix(drive.Device, "/") && !strings.HasPrefix(drive.Device, "/dev/") {
+		// This is a mount point, find the device from /proc/mounts
+		if dev, err := getDeviceFromProcMounts(drive.Device); err == nil {
+			devicePath = dev
+		} else {
+			return "", fmt.Errorf("cannot find device for mount point %s", drive.Device)
+		}
+	} else {
+		devicePath = drive.Device
 	}
 
 	// Mount the device
-	cmd = exec.Command("udisksctl", "mount", "-b", drive.Device)
-	out, err = cmd.Output()
+	cmd := exec.Command("udisksctl", "mount", "-b", devicePath)
+	out, err := cmd.Output()
 	if err != nil {
 		// Check if it failed because it's already mounted
 		if strings.Contains(err.Error(), "AlreadyMounted") {
-			// Try to find the mount point using findmnt
-			cmd = exec.Command("findmnt", "-rn", "-o", "TARGET", drive.Device)
-			out, err = cmd.Output()
-			if err == nil {
-				return strings.TrimSpace(string(out)), nil
+			// Try to find the mount point using native /proc/mounts parsing
+			if mountPoint, err := findMountPointForDevice(devicePath); err == nil {
+				return mountPoint, nil
 			}
+			return drive.Device, nil // Fallback to original device field
 		}
 		return "", fmt.Errorf("failed to mount drive: %v", err)
 	}
