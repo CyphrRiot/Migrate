@@ -999,6 +999,7 @@ func mountDriveForOperation(drive DriveInfo, operationType string) tea.Cmd {
 // Mount any external drive for restore (same logic as backup, but for restore confirmation)
 func mountDriveForRestore(drive DriveInfo) tea.Cmd {
 	return func() tea.Msg {
+		fmt.Printf("DEBUG: mountDriveForRestore called for drive: %s (Encrypted: %v)\n", drive.Device, drive.Encrypted)
 		// Check if this is a locked LUKS drive
 		if drive.Encrypted {
 			// Check if it's already unlocked by looking for the mapper device
@@ -1007,6 +1008,7 @@ func mountDriveForRestore(drive DriveInfo) tea.Cmd {
 
 			if _, err := os.Stat(mapperPath); os.IsNotExist(err) {
 				// LUKS drive is locked - show helpful error
+				fmt.Printf("DEBUG: LUKS drive is locked: %s\n", drive.Device)
 				return BackupDriveStatus{
 					error: fmt.Errorf("❌ LUKS drive is locked\n\nTo unlock manually:\nsudo cryptsetup luksOpen %s %s\nsudo udisksctl mount -b %s\n\nThen restart migrate.", drive.Device, mapperName, mapperPath),
 				}
@@ -1023,19 +1025,23 @@ func mountDriveForRestore(drive DriveInfo) tea.Cmd {
 			})
 
 			if err != nil {
+				fmt.Printf("DEBUG: Failed to mount unlocked LUKS drive: %v\n", err)
 				return BackupDriveStatus{
 					error: fmt.Errorf("Failed to mount unlocked LUKS drive %s: %v", mapperPath, err),
 				}
 			}
 
 			// LUKS drive mounted, now check space requirements for restore
+			fmt.Printf("DEBUG: LUKS drive mounted at: %s, checking space requirements\n", mountPoint)
 			if err := checkRestoreSpaceRequirements(drive.Size, mountPoint); err != nil {
+				fmt.Printf("DEBUG: Space requirements check failed: %v\n", err)
 				return BackupDriveStatus{
 					error: err,
 				}
 			}
 
 			// Successfully mounted LUKS drive - now ask for restore confirmation
+			fmt.Printf("DEBUG: LUKS drive successfully mounted and ready for restore\n")
 			return BackupDriveStatus{
 				drivePath:  drive.Device,
 				driveSize:  drive.Size,
@@ -1047,20 +1053,25 @@ func mountDriveForRestore(drive DriveInfo) tea.Cmd {
 		}
 
 		// Regular drive mounting
+		fmt.Printf("DEBUG: Attempting to mount regular drive: %s\n", drive.Device)
 		mountPoint, err := mountRegularDrive(drive)
 		if err != nil {
+			fmt.Printf("DEBUG: Failed to mount regular drive: %v\n", err)
 			return BackupDriveStatus{
 				error: fmt.Errorf("Failed to mount %s: %v", drive.Device, err),
 			}
 		}
 
 		// AFTER mounting: Check space requirements for restore
+		fmt.Printf("DEBUG: Regular drive mounted at: %s, checking space requirements\n", mountPoint)
 		if err := checkRestoreSpaceRequirements(drive.Size, mountPoint); err != nil {
+			fmt.Printf("DEBUG: Space requirements check failed: %v\n", err)
 			return BackupDriveStatus{
 				error: err,
 			}
 		}
 
+		fmt.Printf("DEBUG: Regular drive successfully mounted and ready for restore\n")
 		return BackupDriveStatus{
 			drivePath:  drive.Device,
 			driveSize:  drive.Size,
