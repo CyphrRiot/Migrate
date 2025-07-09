@@ -408,8 +408,8 @@ func (m Model) renderMainMenu() string {
 	s.WriteString("\n" + help)
 
 	// Center the content with beautiful border
-	content := borderStyle.Width(m.width - 8).Render(s.String())
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
+	content := borderStyle.Width(safeRenderWidth(m.width)).Render(s.String())
+	return safeCenterContent(m.width, m.height, content)
 }
 
 // renderBackupMenu renders the backup type selection screen.
@@ -442,8 +442,8 @@ func (m Model) renderBackupMenu() string {
 	s.WriteString("\n" + help)
 
 	// Center the content with beautiful border
-	content := borderStyle.Width(m.width - 8).Render(s.String())
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
+	content := borderStyle.Width(safeRenderWidth(m.width)).Render(s.String())
+	return safeCenterContent(m.width, m.height, content)
 }
 
 // Render restore menu
@@ -473,8 +473,8 @@ func (m Model) renderRestoreMenu() string {
 	s.WriteString("\n" + help)
 
 	// Center the content with beautiful border
-	content := borderStyle.Width(m.width - 8).Render(s.String())
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
+	content := borderStyle.Width(safeRenderWidth(m.width)).Render(s.String())
+	return safeCenterContent(m.width, m.height, content)
 }
 
 // Render verify menu
@@ -510,8 +510,8 @@ func (m Model) renderVerifyMenu() string {
 	s.WriteString("\n" + help)
 
 	// Center the content with beautiful border
-	content := borderStyle.Width(m.width - 8).Render(s.String())
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
+	content := borderStyle.Width(safeRenderWidth(m.width)).Render(s.String())
+	return safeCenterContent(m.width, m.height, content)
 }
 
 // Render restore options menu
@@ -547,8 +547,8 @@ func (m Model) renderRestoreOptions() string {
 	s.WriteString("\n" + help)
 
 	// Center the content with beautiful border
-	content := borderStyle.Width(m.width - 8).Render(s.String())
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
+	content := borderStyle.Width(safeRenderWidth(m.width)).Render(s.String())
+	return safeCenterContent(m.width, m.height, content)
 }
 
 // Render about screen
@@ -590,8 +590,8 @@ func (m Model) renderAbout() string {
 	s.WriteString(info)
 
 	// Center the content with beautiful border
-	content := borderStyle.Width(m.width - 8).Render(s.String())
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
+	content := borderStyle.Width(safeRenderWidth(m.width)).Render(s.String())
+	return safeCenterContent(m.width, m.height, content)
 }
 
 // Render confirmation dialog
@@ -638,9 +638,9 @@ func (m Model) renderConfirmation() string {
 	help := helpStyle.Render("↑/↓: navigate • enter: select • esc: cancel")
 	s.WriteString("\n" + help)
 
-	// Center the content
-	content := borderStyle.Width(m.width - 4).Render(s.String())
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
+	// Center the content with consistent width
+	content := borderStyle.Width(safeRenderWidth(m.width)).Render(s.String())
+	return safeCenterContent(m.width, m.height, content)
 }
 
 // Render progress screen
@@ -761,9 +761,9 @@ func (m Model) renderProgress() string {
 	}
 	s.WriteString("\n" + help)
 
-	// Center the content
-	content := borderStyle.Width(m.width - 4).Render(s.String())
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
+	// Center the content with consistent width
+	content := borderStyle.Width(safeRenderWidth(m.width)).Render(s.String())
+	return safeCenterContent(m.width, m.height, content)
 }
 
 // getProgressEmoji returns an appropriate emoji for the current operation phase.
@@ -962,8 +962,8 @@ func (m Model) renderDriveSelect() string {
 	s.WriteString("\n" + help)
 
 	// Center the content with beautiful border
-	content := borderStyle.Width(m.width - 8).Render(s.String())
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
+	content := borderStyle.Width(safeRenderWidth(m.width)).Render(s.String())
+	return safeCenterContent(m.width, m.height, content)
 }
 
 // renderHelp creates standardized help text for keyboard navigation.
@@ -1071,8 +1071,8 @@ func (m Model) renderError() string {
 	s.WriteString(help)
 
 	// Center the content with beautiful border
-	content := borderStyle.Width(m.width - 8).Render(s.String())
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
+	content := borderStyle.Width(safeRenderWidth(m.width)).Render(s.String())
+	return safeCenterContent(m.width, m.height, content)
 }
 
 // Render completion screen that requires manual dismissal
@@ -1091,8 +1091,8 @@ func (m Model) renderComplete() string {
 	s.WriteString(help)
 
 	// Center the content with beautiful border
-	content := borderStyle.Width(m.width - 8).Render(s.String())
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
+	content := borderStyle.Width(safeRenderWidth(m.width)).Render(s.String())
+	return safeCenterContent(m.width, m.height, content)
 }
 
 // Render home folder selection screen
@@ -1107,8 +1107,8 @@ func (m Model) renderHomeFolderSelect() string {
 		s.WriteString(infoBoxStyle.Render("🔍 Scanning home directory...") + "\n")
 		help := helpStyle.Render("Please wait...")
 		s.WriteString("\n" + help)
-		content := borderStyle.Width(m.width - 8).Render(s.String())
-		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
+		content := borderStyle.Width(safeRenderWidth(m.width)).Render(s.String())
+		return safeCenterContent(m.width, m.height, content)
 	}
 
 	// Compact instructions
@@ -1256,8 +1256,8 @@ func (m Model) renderHomeFolderSelect() string {
 	s.WriteString(help)
 
 	// Center the content with beautiful border
-	content := borderStyle.Width(m.width - 8).Render(s.String())
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
+	content := borderStyle.Width(safeRenderWidth(m.width)).Render(s.String())
+	return safeCenterContent(m.width, m.height, content)
 }
 
 // renderHomeSubfolderSelect renders the subfolder selection screen with breadcrumb navigation.
@@ -1277,8 +1277,8 @@ func (m Model) renderHomeSubfolderSelect() string {
 		s.WriteString(warningStyle.Render("⚠️  No subfolders found or still loading...") + "\n")
 		help := helpStyle.Render("Press ESC to go back")
 		s.WriteString("\n" + help)
-		content := borderStyle.Width(m.width - 8).Render(s.String())
-		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
+		content := borderStyle.Width(safeRenderWidth(m.width)).Render(s.String())
+		return safeCenterContent(m.width, m.height, content)
 	}
 
 	// Parent folder info
@@ -1379,8 +1379,8 @@ func (m Model) renderHomeSubfolderSelect() string {
 	s.WriteString(help)
 
 	// Center the content with beautiful border
-	content := borderStyle.Width(m.width - 8).Render(s.String())
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
+	content := borderStyle.Width(safeRenderWidth(m.width)).Render(s.String())
+	return safeCenterContent(m.width, m.height, content)
 }
 
 // renderVerificationErrors displays a properly formatted, scrollable list of verification errors.
@@ -1412,7 +1412,7 @@ func (m Model) renderVerificationErrors() string {
 		errorCount = 100
 	}
 
-	// Calculate display area for errors REALISTICALLY
+	// Calculate display area for errors with defensive bounds
 	// Fixed overhead calculation:
 	// - Title: 1 line
 	// - Version: 1 line
@@ -1421,7 +1421,7 @@ func (m Model) renderVerificationErrors() string {
 	// - Blank line: 1 line
 	// - Help text: 1 line
 	// - Border top/bottom: 2 lines
-	// - Padding: 2 lines
+	// - Padding: 4 lines (2 top, 2 bottom for safety)
 	// Total fixed overhead: 10 lines
 	contentHeight := m.height - 10
 
@@ -1430,9 +1430,20 @@ func (m Model) renderVerificationErrors() string {
 		contentHeight = 3
 	}
 
+	// CRITICAL: Cap maximum errors to display to prevent overflow
+	// This ensures we never show more than 12 errors at once
+	if contentHeight > 12 {
+		contentHeight = 12
+	}
+
 	// Further reduce if we have the "more errors" message
 	if moreErrors > 0 {
 		contentHeight = contentHeight - 2 // Account for "more errors" message
+	}
+
+	// Final safety check - never show more errors than we have
+	if contentHeight > errorCount {
+		contentHeight = errorCount
 	}
 
 	// Calculate safe scroll offset (don't mutate model in UI)
@@ -1445,10 +1456,11 @@ func (m Model) renderVerificationErrors() string {
 	}
 
 	// Summary with scroll position
-	scrollInfo := fmt.Sprintf("Showing errors %d-%d of %d total",
+	scrollInfo := fmt.Sprintf("Showing errors %d-%d of %d total (offset: %d)",
 		scrollOffset+1,
 		min(scrollOffset+contentHeight, errorCount),
-		errorCount)
+		errorCount,
+		m.errorScrollOffset)
 	dimStyle := lipgloss.NewStyle().Foreground(dimColor)
 	s.WriteString(dimStyle.Render(scrollInfo) + "\n\n")
 
@@ -1587,7 +1599,7 @@ func (m Model) renderVerificationErrors() string {
 
 	// Navigation help (no extra newlines to prevent overflow)
 	if errorCount > contentHeight {
-		help := helpStyle.Render("↑/↓: scroll through errors • ESC: back to main menu")
+		help := helpStyle.Render("↑/↓: scroll • PgUp/PgDn: page • Home/End: top/bottom • ESC: back")
 		s.WriteString("\n" + help)
 	} else {
 		help := helpStyle.Render("ESC: back to main menu")
@@ -1610,8 +1622,9 @@ func (m Model) renderVerificationErrors() string {
 	// CRITICAL: Never center if content might be cut off
 	// Leave at least 2 lines of margin
 	if finalHeight > m.height-2 {
-		// Content too tall - render at top of screen with small margin
-		return "\n" + content
+		// Content too tall - render at top of screen with proper spacing
+		// Add enough newlines to ensure title is visible
+		return "\n\n" + content
 	}
 
 	// Content fits - safe to center
@@ -1653,6 +1666,40 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// safeRenderWidth calculates a safe border width for consistent rendering across terminals.
+// This function ensures borders display properly regardless of terminal size or font.
+func safeRenderWidth(termWidth int) int {
+	// Standard margin for borders (4 chars on each side)
+	width := termWidth - 8
+
+	// Enforce minimum width for readability
+	if width < 60 {
+		width = 60
+	}
+
+	// Cap maximum width to prevent overly wide content
+	if width > 120 {
+		width = 120
+	}
+
+	return width
+}
+
+// safeCenterContent safely centers content within the terminal bounds.
+// This prevents content from being cut off on terminals with unusual dimensions.
+func safeCenterContent(termWidth, termHeight int, content string) string {
+	// Count actual lines in the content
+	lines := strings.Count(content, "\n") + 1
+
+	// If content is too tall for the terminal, render at top with margin
+	if lines > termHeight-4 {
+		return "\n\n" + content
+	}
+
+	// Safe to center - use lipgloss centering
+	return lipgloss.Place(termWidth, termHeight, lipgloss.Center, lipgloss.Center, content)
 }
 
 // progressMsg is a message type for triggering progress updates in the TUI.

@@ -107,8 +107,26 @@ func (m Model) Init() tea.Cmd {
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
+		// Defensive terminal size handling
 		m.width = msg.Width
 		m.height = msg.Height
+
+		// Ensure minimum usable dimensions
+		if m.width < 80 {
+			m.width = 80
+		}
+		if m.height < 24 {
+			m.height = 24
+		}
+
+		// Cap maximum dimensions for consistent rendering
+		if m.width > 200 {
+			m.width = 200
+		}
+		if m.height > 60 {
+			m.height = 60
+		}
+
 		return m, nil
 
 	case DrivesLoaded:
@@ -578,6 +596,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.errorScrollOffset > 0 {
 					m.errorScrollOffset--
 				}
+				return m, nil
 			} else if m.screen == screens.ScreenMain {
 				// Main menu: wrap around navigation
 				if m.cursor > 0 {
@@ -621,12 +640,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			} else if m.screen == screens.ScreenVerificationErrors {
 				// Scroll down in verification errors list
-				contentHeight := m.height - 8 // Compact header + help + padding
-				contentHeight = max(contentHeight, 5)
+				contentHeight := m.height - 10 // Match the UI calculation
+				contentHeight = max(contentHeight, 3)
+				// Cap at 12 to match the display limit in renderVerificationErrors
+				contentHeight = min(contentHeight, 12)
 				maxScrollOffset := len(m.verificationErrors) - contentHeight
 				if maxScrollOffset > 0 && m.errorScrollOffset < maxScrollOffset {
 					m.errorScrollOffset++
 				}
+				return m, nil
 			} else if m.screen == screens.ScreenMain {
 				// Main menu: wrap around navigation
 				if m.cursor < len(m.choices)-1 {
@@ -687,6 +709,58 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				m.calculateTotalBackupSize()
 				m.autoSaveSelections() // Auto-save when user deselects all
+			}
+			return m, nil
+
+		case "pgup":
+			if m.screen == screens.ScreenVerificationErrors {
+				// Page up in verification errors list
+				contentHeight := m.height - 10 // Match the UI calculation
+				contentHeight = max(contentHeight, 3)
+				// Cap at 12 to match the display limit in renderVerificationErrors
+				contentHeight = min(contentHeight, 12)
+				m.errorScrollOffset -= contentHeight
+				if m.errorScrollOffset < 0 {
+					m.errorScrollOffset = 0
+				}
+			}
+			return m, nil
+
+		case "pgdown":
+			if m.screen == screens.ScreenVerificationErrors {
+				// Page down in verification errors list
+				contentHeight := m.height - 10 // Match the UI calculation
+				contentHeight = max(contentHeight, 3)
+				// Cap at 12 to match the display limit in renderVerificationErrors
+				contentHeight = min(contentHeight, 12)
+				maxScrollOffset := len(m.verificationErrors) - contentHeight
+				if maxScrollOffset > 0 {
+					m.errorScrollOffset += contentHeight
+					if m.errorScrollOffset > maxScrollOffset {
+						m.errorScrollOffset = maxScrollOffset
+					}
+				}
+			}
+			return m, nil
+
+		case "home":
+			if m.screen == screens.ScreenVerificationErrors {
+				// Jump to top of error list
+				m.errorScrollOffset = 0
+			}
+			return m, nil
+
+		case "end":
+			if m.screen == screens.ScreenVerificationErrors {
+				// Jump to bottom of error list
+				contentHeight := m.height - 10 // Match the UI calculation
+				contentHeight = max(contentHeight, 3)
+				// Cap at 12 to match the display limit in renderVerificationErrors
+				contentHeight = min(contentHeight, 12)
+				maxScrollOffset := len(m.verificationErrors) - contentHeight
+				if maxScrollOffset > 0 {
+					m.errorScrollOffset = maxScrollOffset
+				}
 			}
 			return m, nil
 		}
