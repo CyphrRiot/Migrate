@@ -466,6 +466,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						logFile.Close()
 					}
 				}
+
+				// CRITICAL SPACE CHECK: Verify internal drive has enough space for system restore
+				err = checkRestoreSpaceRequirements("", msg.mountPoint)
+				if err != nil {
+					// Show the space error immediately - don't proceed to confirmation
+					m.message = err.Error()
+					m.errorRequiresManualDismissal = true
+					m.lastScreen = m.screen
+					m.screen = screens.ScreenError
+					return m, nil
+				}
+
+				// Space check passed - proceed with system restore confirmation
 				restoreTypeDesc := "ENTIRE SYSTEM"
 				if m.operation == "custom_restore" {
 					restoreTypeDesc = "CUSTOM PATH"
@@ -1087,6 +1100,19 @@ func (m Model) handleRestoreFolderSelection() (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
+		// CRITICAL SPACE CHECK: Verify internal drive has enough space BEFORE confirmation
+		// Use the new selective space checking function that only counts selected items
+		err := checkSelectiveRestoreSpaceRequirements(m.restoreFolders, m.selectedRestoreFolders, m.restoreConfig, m.restoreWindowMgrs)
+		if err != nil {
+			// Show the space error immediately - don't proceed to confirmation
+			m.message = err.Error()
+			m.errorRequiresManualDismissal = true
+			m.lastScreen = m.screen
+			m.screen = screens.ScreenError
+			return m, nil
+		}
+
+		// Space check passed - proceed to confirmation
 		// Go directly to confirmation since everything is on one screen now
 		restoreTypeDesc := "HOME DIRECTORY"
 		

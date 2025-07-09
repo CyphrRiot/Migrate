@@ -453,6 +453,46 @@ func checkRestoreSpaceRequirements(externalDriveSize string, externalMountPoint 
 	return nil
 }
 
+// checkSelectiveRestoreSpaceRequirements validates space for selective folder restore.
+// Only counts the space needed for the folders the user actually selected to restore.
+func checkSelectiveRestoreSpaceRequirements(restoreFolders []HomeFolderInfo, selectedFolders map[string]bool, restoreConfig bool, restoreWindowMgrs bool) error {
+	// Calculate space required for SELECTED items only
+	var totalSelectedSize int64
+	
+	// Add selected folders
+	for _, folder := range restoreFolders {
+		if folder.AlwaysInclude || selectedFolders[folder.Path] {
+			totalSelectedSize += folder.Size
+		}
+	}
+	
+	// Add estimates for configuration options
+	if restoreConfig {
+		totalSelectedSize += 100 * 1024 * 1024 // ~100MB estimate for .config
+	}
+	if restoreWindowMgrs {
+		totalSelectedSize += 50 * 1024 * 1024 // ~50MB estimate for window managers
+	}
+
+	// Get total size of internal drive
+	var stat syscall.Statfs_t
+	if err := syscall.Statfs("/", &stat); err != nil {
+		return fmt.Errorf("failed to get internal drive info: %v", err)
+	}
+
+	internalTotalSize := int64(stat.Blocks) * int64(stat.Bsize)
+
+	// Check: selected_restore_size <= internal_total_size
+	if totalSelectedSize > internalTotalSize {
+		return fmt.Errorf("⚠️ INSUFFICIENT SPACE for restore\n\nSelected items size: %s\nInternal drive total: %s\n\nThe selected items are too large to fit on your internal drive.\nYou need at least %s of total drive capacity.",
+			FormatBytes(totalSelectedSize),
+			FormatBytes(internalTotalSize),
+			FormatBytes(totalSelectedSize))
+	}
+
+	return nil
+}
+
 // LoadDrives scans for available external drives and returns them as a Bubble Tea command.
 // Uses lsblk to enumerate drives with safety checks to prevent listing system drives.
 // Supports multiple detection criteria: hotplug flag, device naming, and mount location analysis.

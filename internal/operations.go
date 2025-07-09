@@ -748,6 +748,25 @@ func startRestore(sourcePath, targetPath string, restoreConfig, restoreWindowMgr
 			fmt.Fprintf(logFile, "Starting restore from %s to %s\n", sourcePath, actualTargetPath)
 		}
 
+		// SPACE CHECK: Ensure internal drive has enough space for the restore
+		if logFile != nil {
+			fmt.Fprintf(logFile, "Checking if internal drive has sufficient space for restore...\n")
+		}
+		
+		// Get the drive size from the source drive info (we need this to pass to checkRestoreSpaceRequirements)
+		// For restore, sourcePath is the mount point, so we can use it directly
+		err = checkRestoreSpaceRequirements("", sourcePath) // Pass empty driveSize, mountPoint as sourcePath
+		if err != nil {
+			if logFile != nil {
+				fmt.Fprintf(logFile, "RESTORE SPACE CHECK FAILED: %v\n", err)
+			}
+			return ProgressUpdate{Error: err, Done: true}
+		}
+		
+		if logFile != nil {
+			fmt.Fprintf(logFile, "Space check passed - internal drive has sufficient capacity\n")
+		}
+
 		// Perform the actual restore with options
 		err = performPureGoRestore(sourcePath, actualTargetPath, restoreConfig, restoreWindowMgrs, logFile)
 		if err != nil {
@@ -796,6 +815,24 @@ func startSelectiveRestore(sourcePath string, selectedFolders map[string]bool, a
 					fmt.Fprintf(logFile, "  - %s (%s)\n", folder.Name, FormatBytes(folder.Size))
 				}
 			}
+		}
+
+		// SPACE CHECK: Ensure internal drive has enough space for the restore
+		if logFile != nil {
+			fmt.Fprintf(logFile, "Checking if internal drive has sufficient space for selective restore...\n")
+		}
+		
+		// For selective restore, sourcePath is the backup mount point
+		err = checkRestoreSpaceRequirements("", sourcePath)
+		if err != nil {
+			if logFile != nil {
+				fmt.Fprintf(logFile, "SELECTIVE RESTORE SPACE CHECK FAILED: %v\n", err)
+			}
+			return ProgressUpdate{Error: err, Done: true}
+		}
+		
+		if logFile != nil {
+			fmt.Fprintf(logFile, "Space check passed - internal drive has sufficient capacity for selective restore\n")
 		}
 
 		// Perform selective restore
