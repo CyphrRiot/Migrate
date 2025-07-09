@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -29,6 +30,30 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 )
+
+// isImportantSystemFolder determines if a hidden folder should be automatically included.
+// Returns true for truly critical system folders that should never be excluded.
+// Returns false for configuration folders that users should be able to control individually.
+func isImportantSystemFolder(name string) bool {
+	// Only truly critical system folders that cannot be excluded
+	switch name {
+	case ".ssh":        // SSH keys - critical for system access
+		return true
+	case ".gnupg":      // GPG keys - critical for encryption
+		return true
+	case ".mozilla":    // Firefox profiles with saved passwords, critical data
+		return true
+	default:
+		return false
+	}
+	
+	// Configuration folders that should be user-controllable:
+	// .config (37GB in this case!) - should be controlled by "Restore Configuration" checkbox
+	// .local - user data, should be selectable
+	// .cache - temporary data, should be selectable  
+	// .var - flatpak data, should be selectable
+	// etc.
+}
 
 // HomeFolderInfo represents metadata about a directory within the user's home folder.
 // Used for selective backup operations to track folder size, visibility, and user selections.
@@ -999,6 +1024,11 @@ func mountDriveForOperation(drive DriveInfo, operationType string) tea.Cmd {
 // Mount any external drive for restore (same logic as backup, but for restore confirmation)
 func mountDriveForRestore(drive DriveInfo) tea.Cmd {
 	return func() tea.Msg {
+		// Create a specific debug file for this operation
+		debugFile := "/tmp/migrate_mountrestore_debug"
+		ioutil.WriteFile(debugFile, []byte(fmt.Sprintf("mountDriveForRestore starting for drive: %s (Label: %s, UUID: %s)", 
+			drive.Device, drive.Label, drive.UUID)), 0644)
+		
 		// Log to file instead of stdout
 		if logPath := getLogFilePath(); logPath != "" {
 			if logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
@@ -1020,6 +1050,7 @@ func mountDriveForRestore(drive DriveInfo) tea.Cmd {
 						logFile.Close()
 					}
 				}
+				ioutil.WriteFile(debugFile+"_error", []byte(fmt.Sprintf("LUKS drive is locked: %s", drive.Device)), 0644)
 				return BackupDriveStatus{
 					error: fmt.Errorf("❌ LUKS drive is locked\n\nTo unlock manually:\nsudo cryptsetup luksOpen %s %s\nsudo udisksctl mount -b %s\n\nThen restart migrate.", drive.Device, mapperName, mapperPath),
 				}
@@ -1042,37 +1073,31 @@ func mountDriveForRestore(drive DriveInfo) tea.Cmd {
 						logFile.Close()
 					}
 				}
+				ioutil.WriteFile(debugFile+"_error", []byte(fmt.Sprintf("Failed to mount unlocked LUKS drive: %v", err)), 0644)
 				return BackupDriveStatus{
 					error: fmt.Errorf("Failed to mount unlocked LUKS drive %s: %v", mapperPath, err),
 				}
 			}
 
-			// LUKS drive mounted, now check space requirements for restore
+			// LUKS drive mounted, space checking will be done later after backup type detection
 			if logPath := getLogFilePath(); logPath != "" {
 				if logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
-					fmt.Fprintf(logFile, "DEBUG: LUKS drive mounted at: %s, checking space requirements\n", mountPoint)
+					fmt.Fprintf(logFile, "DEBUG: LUKS drive mounted at: %s, skipping space check until later\n", mountPoint)
 					logFile.Close()
 				}
 			}
-			if err := checkRestoreSpaceRequirements(drive.Size, mountPoint); err != nil {
-				if logPath := getLogFilePath(); logPath != "" {
-					if logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
-						fmt.Fprintf(logFile, "DEBUG: Space requirements check failed: %v\n", err)
-						logFile.Close()
-					}
-				}
-				return BackupDriveStatus{
-					error: err,
-				}
-			}
 
-			// Successfully mounted LUKS drive - now ask for restore confirmation
+			// Successfully mounted LUKS drive  
 			if logPath := getLogFilePath(); logPath != "" {
 				if logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
 					fmt.Fprintf(logFile, "DEBUG: LUKS drive successfully mounted and ready for restore\n")
 					logFile.Close()
 				}
 			}
+			
+			// Create a success debug file with important details
+			ioutil.WriteFile(debugFile+"_success_luks", []byte(fmt.Sprintf("LUKS drive mounted successfully at: %s", mountPoint)), 0644)
+			
 			return BackupDriveStatus{
 				drivePath:  drive.Device,
 				driveSize:  drive.Size,
@@ -1098,36 +1123,23 @@ func mountDriveForRestore(drive DriveInfo) tea.Cmd {
 					logFile.Close()
 				}
 			}
+			ioutil.WriteFile(debugFile+"_error", []byte(fmt.Sprintf("Failed to mount regular drive: %v", err)), 0644)
 			return BackupDriveStatus{
 				error: fmt.Errorf("Failed to mount %s: %v", drive.Device, err),
 			}
 		}
 
-		// AFTER mounting: Check space requirements for restore
+		// REMOVED: Space checking from mount phase - will be done later after backup type detection and folder selection
 		if logPath := getLogFilePath(); logPath != "" {
 			if logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
-				fmt.Fprintf(logFile, "DEBUG: Regular drive mounted at: %s, checking space requirements\n", mountPoint)
+				fmt.Fprintf(logFile, "DEBUG: Regular drive successfully mounted, skipping space check until later\n")
 				logFile.Close()
 			}
 		}
-		if err := checkRestoreSpaceRequirements(drive.Size, mountPoint); err != nil {
-			if logPath := getLogFilePath(); logPath != "" {
-				if logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
-					fmt.Fprintf(logFile, "DEBUG: Space requirements check failed: %v\n", err)
-					logFile.Close()
-				}
-			}
-			return BackupDriveStatus{
-				error: err,
-			}
-		}
-
-		if logPath := getLogFilePath(); logPath != "" {
-			if logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
-				fmt.Fprintf(logFile, "DEBUG: Regular drive successfully mounted and ready for restore\n")
-				logFile.Close()
-			}
-		}
+		
+		// Create a success debug file with important details 
+		ioutil.WriteFile(debugFile+"_success", []byte(fmt.Sprintf("Regular drive mounted successfully at: %s", mountPoint)), 0644)
+		
 		return BackupDriveStatus{
 			drivePath:  drive.Device,
 			driveSize:  drive.Size,
@@ -1383,11 +1395,11 @@ func discoverHomeFolders() ([]HomeFolderInfo, error) {
 			Path:          path,
 			Size:          size,
 			IsVisible:     !isHidden,
-			Selected:      true,          // Default: all selected
-			AlwaysInclude: isHidden,      // Dotdirs always included
-			HasSubfolders: hasSubfolders, // NEW: Indicates drill-down capability
-			Subfolders:    nil,           // NEW: Populated on-demand
-			ParentPath:    "",            // NEW: Empty for root level
+			Selected:      true,                         // Default: all selected
+			AlwaysInclude: isImportantSystemFolder(name), // Only truly critical system folders
+			HasSubfolders: hasSubfolders,                // NEW: Indicates drill-down capability
+			Subfolders:    nil,                          // NEW: Populated on-demand
+			ParentPath:    "",                           // NEW: Empty for root level
 		}
 
 		folders = append(folders, folder)
@@ -1515,8 +1527,8 @@ func discoverRestoreFolders(backupMountPoint string) ([]HomeFolderInfo, error) {
 			Path:          path,
 			Size:          size,
 			IsVisible:     !isHidden,
-			Selected:      true,     // Default: all selected for restore
-			AlwaysInclude: isHidden, // Dotdirs always included
+			Selected:      true,                         // Default: all selected for restore
+			AlwaysInclude: isImportantSystemFolder(name), // Only truly critical system folders
 			HasSubfolders: hasSubfolders,
 			Subfolders:    nil,
 			ParentPath:    "",

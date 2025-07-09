@@ -15,6 +15,7 @@ package internal
 
 import (
 	"fmt"
+	"io/ioutil"
 	"os"
 	"path/filepath"
 	"strings"
@@ -675,6 +676,10 @@ func calculateRealProgress() (float64, string) {
 // target path. Handles both full system restores and custom path restores.
 func startRestore(sourcePath, targetPath string, restoreConfig, restoreWindowMgrs bool) tea.Cmd {
 	return func() tea.Msg {
+		// Add a debug file marker to indicate this function was called
+		debugFile := "/tmp/migrate_restore_debug"
+		ioutil.WriteFile(debugFile, []byte(fmt.Sprintf("Restore called with: source=%s, target=%s", sourcePath, targetPath)), 0644)
+		
 		// Setup logging in appropriate directory
 		logPath := getLogFilePath()
 		logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
@@ -687,6 +692,8 @@ func startRestore(sourcePath, targetPath string, restoreConfig, restoreWindowMgr
 		// Check if valid backup exists
 		backupInfo := filepath.Join(sourcePath, "BACKUP-INFO.txt")
 		if _, err := os.Stat(backupInfo); os.IsNotExist(err) {
+			// Write debug info about the failed check
+			ioutil.WriteFile(debugFile+"_error", []byte(fmt.Sprintf("No valid backup found at %s", sourcePath)), 0644)
 			return ProgressUpdate{Error: fmt.Errorf("no valid backup found at %s", sourcePath)}
 		}
 
@@ -764,10 +771,16 @@ func startSelectiveRestore(sourcePath string, selectedFolders map[string]bool, a
 			defer logFile.Close()
 		}
 
-		// Get home directory as target
-		homeDir, err := os.UserHomeDir()
-		if err != nil {
-			return ProgressUpdate{Error: fmt.Errorf("failed to get home directory: %v", err)}
+		// Get home directory as target - handle SUDO_USER properly
+		var homeDir string
+		if sudoUser := os.Getenv("SUDO_USER"); sudoUser != "" {
+			homeDir = "/home/" + sudoUser
+		} else {
+			var err error
+			homeDir, err = os.UserHomeDir()
+			if err != nil {
+				return ProgressUpdate{Error: fmt.Errorf("failed to get home directory: %v", err)}
+			}
 		}
 
 		if logFile != nil {
@@ -947,6 +960,10 @@ func performPureGoRestore(backupPath, targetPath string, restoreConfig, restoreW
 // Checks BACKUP-INFO.txt first, then falls back to directory structure analysis.
 // Returns "system", "home", or "unknown" with an error if type cannot be determined.
 func detectBackupType(backupPath string) (string, error) {
+	// Add debug file
+	debugFile := "/tmp/migrate_detecttype_debug"
+	ioutil.WriteFile(debugFile, []byte(fmt.Sprintf("detectBackupType called with path: %s", backupPath)), 0644)
+
 	// Log to file instead of stdout
 	if logPath := getLogFilePath(); logPath != "" {
 		if logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
@@ -956,6 +973,8 @@ func detectBackupType(backupPath string) (string, error) {
 	}
 
 	infoPath := filepath.Join(backupPath, "BACKUP-INFO.txt")
+	ioutil.WriteFile(debugFile+"_looking_for", []byte(fmt.Sprintf("Looking for BACKUP-INFO.txt at: %s", infoPath)), 0644)
+	
 	if logPath := getLogFilePath(); logPath != "" {
 		if logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
 			fmt.Fprintf(logFile, "DEBUG: Looking for BACKUP-INFO.txt at: %s\n", infoPath)
@@ -971,10 +990,13 @@ func detectBackupType(backupPath string) (string, error) {
 				logFile.Close()
 			}
 		}
+		ioutil.WriteFile(debugFile+"_error", []byte(fmt.Sprintf("Failed to read BACKUP-INFO.txt: %v", err)), 0644)
 		return "", fmt.Errorf("failed to read backup info: %v", err)
 	}
 
 	contentStr := string(content)
+	ioutil.WriteFile(debugFile+"_content", []byte(contentStr), 0644)
+	
 	if logPath := getLogFilePath(); logPath != "" {
 		if logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
 			fmt.Fprintf(logFile, "DEBUG: BACKUP-INFO.txt content: %s\n", contentStr)
@@ -989,6 +1011,7 @@ func detectBackupType(backupPath string) (string, error) {
 				logFile.Close()
 			}
 		}
+		ioutil.WriteFile(debugFile+"_result", []byte("Detected system backup"), 0644)
 		return "system", nil
 	} else if strings.Contains(contentStr, "Backup Type: Home Directory") {
 		if logPath := getLogFilePath(); logPath != "" {
@@ -997,6 +1020,7 @@ func detectBackupType(backupPath string) (string, error) {
 				logFile.Close()
 			}
 		}
+		ioutil.WriteFile(debugFile+"_result", []byte("Detected home backup"), 0644)
 		return "home", nil
 	}
 
@@ -1007,6 +1031,8 @@ func detectBackupType(backupPath string) (string, error) {
 			logFile.Close()
 		}
 	}
+	ioutil.WriteFile(debugFile+"_fallback", []byte("Backup type not found in BACKUP-INFO.txt, trying folder structure detection"), 0644)
+	
 	if _, err := os.Stat(filepath.Join(backupPath, "etc")); err == nil {
 		// Has /etc directory - likely system backup
 		if logPath := getLogFilePath(); logPath != "" {
@@ -1015,6 +1041,7 @@ func detectBackupType(backupPath string) (string, error) {
 				logFile.Close()
 			}
 		}
+		ioutil.WriteFile(debugFile+"_result_fallback", []byte("Found /etc directory - assuming system backup"), 0644)
 		return "system", nil
 	} else if _, err := os.Stat(filepath.Join(backupPath, ".config")); err == nil {
 		// Has .config directory - likely home backup
@@ -1024,6 +1051,7 @@ func detectBackupType(backupPath string) (string, error) {
 				logFile.Close()
 			}
 		}
+		ioutil.WriteFile(debugFile+"_result_fallback", []byte("Found .config directory - assuming home backup"), 0644)
 		return "home", nil
 	}
 
@@ -1033,6 +1061,7 @@ func detectBackupType(backupPath string) (string, error) {
 			logFile.Close()
 		}
 	}
+	ioutil.WriteFile(debugFile+"_error_fallback", []byte("Could not determine backup type"), 0644)
 	return "unknown", fmt.Errorf("cannot determine backup type from %s", backupPath)
 }
 

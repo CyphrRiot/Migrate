@@ -1632,12 +1632,12 @@ func (m Model) renderVerificationErrors() string {
 }
 
 // renderRestoreFolderSelect renders the folder selection screen for selective restore.
-// Similar to renderHomeFolderSelect but reads from backup folders instead of live system.
+// Uses IDENTICAL format to backup home folder selection - controls first, then items.
 func (m Model) renderRestoreFolderSelect() string {
 	var s strings.Builder
 
-	// Compact header
-	s.WriteString(titleStyle.Render("📁 Select Folders to Restore") + "\n")
+	// MUCH SMALLER header to save vertical space (EXACTLY like backup)
+	s.WriteString(titleStyle.Render("📁 Select Items to Restore") + "\n")
 
 	// If still loading
 	if len(m.restoreFolders) == 0 {
@@ -1648,13 +1648,15 @@ func (m Model) renderRestoreFolderSelect() string {
 		return safeCenterContent(m.width, m.height, content)
 	}
 
-	// Instructions
-	dimStyle := lipgloss.NewStyle().Foreground(dimColor)
-	instructions := dimStyle.Render("Select folders to restore from backup • A=all N=none")
-	s.WriteString(instructions + "\n\n")
+	// Compact instructions (like backup)
+	s.WriteString("Choose items to restore:\n\n")
 
-	// Control buttons at top
-	controls := []string{"✅ Continue", "⬅️ Back"}
+	// Controls FIRST (EXACTLY like backup home folder selection)
+	controls := []string{
+		"➡️ Continue",
+		"⬅️ Back",
+	}
+
 	for i, control := range controls {
 		if m.cursor == i {
 			s.WriteString(selectedMenuItemStyle.Render("❯ "+control) + "\n")
@@ -1663,13 +1665,149 @@ func (m Model) renderRestoreFolderSelect() string {
 		}
 	}
 
-	s.WriteString("\n") // Separator between controls and folders
+	s.WriteString("\n") // Line between controls and items
 
-	// Display only non-empty, visible folders
+	// Get all items for two-column layout (config options + folders)
+	var allItems []struct {
+		name     string
+		selected bool
+		itemType string // "config" or "folder"
+		folderInfo *HomeFolderInfo
+	}
+
+	// Add configuration options first
+	allItems = append(allItems, struct {
+		name     string
+		selected bool
+		itemType string
+		folderInfo *HomeFolderInfo
+	}{"Configuration (~/.config)", m.restoreConfig, "config", nil})
+	
+	allItems = append(allItems, struct {
+		name     string
+		selected bool
+		itemType string
+		folderInfo *HomeFolderInfo
+	}{"Window Managers", m.restoreWindowMgrs, "config", nil})
+
+	// Add visible folders
 	visibleFolders := m.getVisibleRestoreFolders()
-	numControls := 2
+	for i := range visibleFolders {
+		folder := &visibleFolders[i]
+		allItems = append(allItems, struct {
+			name     string
+			selected bool
+			itemType string
+			folderInfo *HomeFolderInfo
+		}{folder.Name, m.selectedRestoreFolders[folder.Path], "folder", folder})
+	}
 
-	// Always show hidden folders summary at top
+	// RENDER CONFIG OPTIONS FIRST (separate from folders)
+	configItems := []struct {
+		name     string
+		selected bool
+	}{
+		{"Configuration (~/.config)", m.restoreConfig},
+		{"Window Managers", m.restoreWindowMgrs},
+	}
+
+	for i, config := range configItems {
+		checkbox := "☐"
+		if config.selected {
+			checkbox = "☑️"
+		}
+		configText := fmt.Sprintf("%s %s", checkbox, config.name)
+		
+		// Cursor for config items (offset by controls)
+		configCursor := i + len(controls)
+		
+		if m.cursor == configCursor {
+			configStyled := lipgloss.NewStyle().
+				PaddingLeft(2).PaddingRight(2).
+				Background(tealGradient.Start).
+				Foreground(backgroundColor).
+				Bold(true).
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(tealGradient.End).
+				Render("❯ " + configText)
+			s.WriteString(configStyled + "\n")
+		} else {
+			configStyled := lipgloss.NewStyle().
+				PaddingLeft(2).PaddingRight(2).
+				Foreground(tealGradient.Start).
+				Render("  " + configText)
+			s.WriteString(configStyled + "\n")
+		}
+	}
+
+	// ADD SEPARATOR AFTER CONFIG OPTIONS
+	if len(visibleFolders) > 0 {
+		separatorStyle := lipgloss.NewStyle().
+			Foreground(borderColor).
+			Align(lipgloss.Center)
+		s.WriteString(separatorStyle.Render("─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─") + "\n")
+	}
+
+	// RENDER FOLDERS IN TWO-COLUMN LAYOUT
+	numFolders := len(visibleFolders)
+	rowCount := (numFolders + 1) / 2
+
+	for row := 0; row < rowCount; row++ {
+		var leftStyled, rightStyled string
+
+		// Left column
+		leftIndex := row
+		if leftIndex < numFolders {
+			folder := visibleFolders[leftIndex]
+			checkbox := "☐"
+			if m.selectedRestoreFolders[folder.Path] {
+				checkbox = "☑️"
+			}
+			leftText := fmt.Sprintf("%s %s (%s)", checkbox, folder.Name, FormatBytes(folder.Size))
+
+			// Folder cursor (offset by controls + config items)
+			folderCursor := leftIndex + len(controls) + len(configItems)
+			if m.cursor == folderCursor {
+				leftStyled = selectedMenuItemStyle.Render("❯ " + leftText)
+			} else {
+				leftStyled = menuItemStyle.Render("  " + leftText)
+			}
+		}
+
+		// Right column
+		rightIndex := row + rowCount
+		if rightIndex < numFolders {
+			folder := visibleFolders[rightIndex]
+			checkbox := "☐"
+			if m.selectedRestoreFolders[folder.Path] {
+				checkbox = "☑️"
+			}
+			rightText := fmt.Sprintf("%s %s (%s)", checkbox, folder.Name, FormatBytes(folder.Size))
+
+			// Folder cursor (offset by controls + config items)
+			folderCursor := rightIndex + len(controls) + len(configItems)
+			if m.cursor == folderCursor {
+				rightStyled = selectedMenuItemStyle.Render("❯ " + rightText)
+			} else {
+				rightStyled = menuItemStyle.Render("  " + rightText)
+			}
+		}
+
+		// Build the final line
+		if rightStyled != "" {
+			line := lipgloss.JoinHorizontal(lipgloss.Left,
+				lipgloss.NewStyle().Width(50).Render(leftStyled),
+				rightStyled,
+			)
+			s.WriteString(line + "\n")
+		} else {
+			s.WriteString(leftStyled + "\n")
+		}
+	}
+
+	s.WriteString("\n") // Line after items
+
+	// Hidden folders summary
 	hiddenCount := 0
 	var hiddenSize int64
 	for _, folder := range m.restoreFolders {
@@ -1680,43 +1818,35 @@ func (m Model) renderRestoreFolderSelect() string {
 	}
 
 	if hiddenCount > 0 {
-		hiddenInfo := fmt.Sprintf("🔒 %d hidden folders (%s) - always included",
-			hiddenCount, FormatBytes(hiddenSize))
-		s.WriteString(dimStyle.Render(hiddenInfo) + "\n\n")
+		hiddenInfo := fmt.Sprintf("🔒 +%d hidden (%s)", hiddenCount, FormatBytes(hiddenSize))
+		s.WriteString(hiddenInfo + "\n\n")
 	}
 
-	// List visible folders with selection status
-	for i, folder := range visibleFolders {
-		cursorPos := numControls + i
-		isSelected := m.cursor == cursorPos
-		isChecked := m.selectedRestoreFolders[folder.Path]
-
-		var checkbox string
-		if isChecked {
-			checkbox = "☑️"
-		} else {
-			checkbox = "☐"
-		}
-
-		folderLine := fmt.Sprintf("%s %s (%s)", checkbox, folder.Name, FormatBytes(folder.Size))
-
-		if isSelected {
-			s.WriteString(selectedMenuItemStyle.Render("❯ "+folderLine) + "\n")
-		} else {
-			s.WriteString(menuItemStyle.Render("  "+folderLine) + "\n")
-		}
+	// Total backup size display (EXACTLY like backup)
+	totalSize := m.totalRestoreSize
+	if m.restoreConfig {
+		totalSize += 100 * 1024 * 1024
+	}
+	if m.restoreWindowMgrs {
+		totalSize += 50 * 1024 * 1024
 	}
 
-	// Show total size at bottom
-	s.WriteString("\n")
-	totalInfo := fmt.Sprintf("📊 Total restore size: %s", FormatBytes(m.totalRestoreSize))
-	s.WriteString(infoBoxStyle.Render(totalInfo) + "\n")
+	totalSizeText := fmt.Sprintf("Total Restore Size: %s", FormatBytes(totalSize))
+	totalSizeStyle := lipgloss.NewStyle().
+		Foreground(blueGradient.End).
+		Bold(true).
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(blueGradient.Start).
+		Padding(0, 2).
+		Align(lipgloss.Center)
 
-	// Help text
-	help := helpStyle.Render("SPACE: select • A: all • N: none • ↑/↓: navigate • ESC: back")
+	s.WriteString(totalSizeStyle.Render(totalSizeText) + "\n\n")
+
+	// Compact help text (EXACTLY like backup)
+	help := helpStyle.Render("↑/↓: navigate • space: toggle • A: all • X: none")
 	s.WriteString(help)
 
-	// Center the content with beautiful border
+	// Center the content with border
 	content := borderStyle.Width(safeRenderWidth(m.width)).Render(s.String())
 	return safeCenterContent(m.width, m.height, content)
 }
