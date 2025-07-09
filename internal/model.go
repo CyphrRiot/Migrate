@@ -348,7 +348,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else if strings.Contains(m.operation, "restore") {
 				// For restore, first detect backup type
 				backupType, err := detectBackupType(msg.mountPoint)
-				if err == nil && backupType == "home" {
+				if err != nil {
+					// Backup type detection failed - show error
+					return m, func() tea.Msg {
+						return BackupDriveStatus{
+							error: fmt.Errorf("❌ Invalid backup drive\n\nThis drive does not contain a valid migrate backup.\n\nError: %v\n\n💡 Make sure you selected the correct drive that contains your backup.", err),
+						}
+					}
+				}
+
+				if backupType == "home" {
 					// It's a home backup - show folder selection
 					m.selectedDrive = msg.mountPoint
 					m.screen = screens.ScreenRestoreFolderSelect
@@ -360,7 +369,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, DiscoverRestoreFoldersCmd(msg.mountPoint)
 				}
 
-				// System restore or detection failed - proceed with normal confirmation
+				// System backup detected - proceed with confirmation
 				restoreTypeDesc := "ENTIRE SYSTEM"
 				if m.operation == "custom_restore" {
 					restoreTypeDesc = "CUSTOM PATH"
