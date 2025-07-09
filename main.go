@@ -231,9 +231,7 @@ func checkSystemDependencies() error {
 		// LUKS encryption support
 		{"cryptsetup", "LUKS encryption/decryption", true},
 
-		// System information
-		{"uname", "system information for backup metadata", true},
-		{"hostname", "hostname for backup metadata", false},
+		// System information - all optimized to native Go (os.Hostname, unix.Utsname)
 
 		// Sudo access validation
 		{"sudo", "privilege escalation", true},
