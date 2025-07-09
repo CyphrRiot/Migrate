@@ -453,7 +453,14 @@ func verifyCriticalFiles(sourcePath, destPath string, logFile *os.File) error {
 	verified := 0
 	errors := 0
 
-	for _, criticalPath := range criticalFiles {
+	if logFile != nil {
+		fmt.Fprintf(logFile, "Starting critical files verification (%d files)\n", len(criticalFiles))
+	}
+
+	for i, criticalPath := range criticalFiles {
+		if logFile != nil {
+			fmt.Fprintf(logFile, "Critical file %d/%d: Checking %s\n", i+1, len(criticalFiles), criticalPath)
+		}
 		// Check for cancellation
 		if shouldCancelBackup() {
 			return fmt.Errorf("verification canceled")
@@ -475,11 +482,21 @@ func verifyCriticalFiles(sourcePath, destPath string, logFile *os.File) error {
 		}
 
 		// Skip if file doesn't exist in source (not an error for critical files)
-		if _, err := os.Stat(srcFile); os.IsNotExist(err) {
+		if info, err := os.Stat(srcFile); err != nil {
 			if logFile != nil {
-				fmt.Fprintf(logFile, "Critical file not found in source, skipping: %s\n", criticalPath)
+				if os.IsNotExist(err) {
+					fmt.Fprintf(logFile, "  - File not found in source, skipping: %s\n", srcFile)
+				} else {
+					fmt.Fprintf(logFile, "  - ERROR accessing file: %s - %v\n", srcFile, err)
+				}
 			}
 			continue
+		} else if logFile != nil {
+			fmt.Fprintf(logFile, "  - File exists: %s (size: %d bytes)\n", srcFile, info.Size())
+		}
+
+		if logFile != nil {
+			fmt.Fprintf(logFile, "  - Starting verification of %s\n", criticalPath)
 		}
 
 		err := verifySingleFile(criticalPath, sourcePath, destPath)
@@ -487,11 +504,14 @@ func verifyCriticalFiles(sourcePath, destPath string, logFile *os.File) error {
 			errors++
 			verificationErrors = append(verificationErrors, fmt.Sprintf("Critical file %s: %v", criticalPath, err))
 			if logFile != nil {
-				fmt.Fprintf(logFile, "Critical file error: %s - %v\n", criticalPath, err)
+				fmt.Fprintf(logFile, "  - VERIFICATION ERROR: %s - %v\n", criticalPath, err)
 			}
 		} else {
 			verified++
 			atomic.AddInt64(&totalFilesVerified, 1)
+			if logFile != nil {
+				fmt.Fprintf(logFile, "  - VERIFIED OK: %s\n", criticalPath)
+			}
 		}
 	}
 
@@ -768,14 +788,20 @@ func verifySingleFile(filePath, sourcePath, destPath string) error {
 
 	// For small files or critical files, do full checksum
 	if srcInfo.Size() <= 1024*1024 || strings.Contains(relPath, "boot") || strings.Contains(relPath, "etc") {
+		// Log before attempting SHA256 on potentially large files
+		if srcInfo.Size() > 100*1024*1024 { // 100MB
+			fmt.Printf("WARNING: Computing SHA256 for large critical file: %s (size: %d MB)\n",
+				relPath, srcInfo.Size()/(1024*1024))
+		}
+
 		srcHash, err := getFileSHA256(actualSourcePath)
 		if err != nil {
-			return fmt.Errorf("failed to hash source: %v", err)
+			return fmt.Errorf("failed to hash source %s: %v", actualSourcePath, err)
 		}
 
 		destHash, err := getFileSHA256(destFile)
 		if err != nil {
-			return fmt.Errorf("failed to hash destination: %v", err)
+			return fmt.Errorf("failed to hash destination %s: %v", destFile, err)
 		}
 
 		if srcHash != destHash {

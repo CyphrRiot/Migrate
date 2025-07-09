@@ -1020,7 +1020,7 @@ func createBackupConfig(operationType, mountPoint string, selectedFolders map[st
 		config = BackupConfig{
 			SourcePath:        "/",
 			DestinationPath:   mountPoint,
-			ExcludePatterns:   ExcludePatterns, // System exclusions only
+			ExcludePatterns:   GetSystemBackupExclusions(), // Comprehensive system exclusions
 			BackupType:        "Complete System",
 			IsSelectiveBackup: false,
 			SelectedFolders:   nil,
@@ -1039,7 +1039,7 @@ func createBackupConfig(operationType, mountPoint string, selectedFolders map[st
 		config = BackupConfig{
 			SourcePath:        homeDir,
 			DestinationPath:   mountPoint,
-			ExcludePatterns:   []string{".cache/*", ".local/share/Trash/*"}, // Home exclusions
+			ExcludePatterns:   GetHomeBackupExclusions(), // Comprehensive home exclusions
 			BackupType:        "Home Directory",
 			IsSelectiveBackup: false,
 			SelectedFolders:   nil,

@@ -865,10 +865,54 @@ func getFileSHA256(filePath string) (string, error) {
 	}
 	defer file.Close()
 
-	hasher := sha256.New()
-	_, err = io.Copy(hasher, file)
+	// Get file size for progress reporting
+	info, err := file.Stat()
 	if err != nil {
 		return "", err
+	}
+
+	// Log if this is a large file
+	if info.Size() > 10*1024*1024 { // 10MB
+		fmt.Printf("Computing SHA256 for %s (%.1f MB)...\n",
+			filePath, float64(info.Size())/(1024*1024))
+	}
+
+	hasher := sha256.New()
+
+	// For large files, use a progress reader
+	if info.Size() > 100*1024*1024 { // 100MB
+		buffer := make([]byte, 1024*1024) // 1MB buffer
+		totalRead := int64(0)
+		lastReport := int64(0)
+
+		for {
+			n, err := file.Read(buffer)
+			if n > 0 {
+				hasher.Write(buffer[:n])
+				totalRead += int64(n)
+
+				// Report progress every 100MB
+				if totalRead-lastReport > 100*1024*1024 {
+					fmt.Printf("  SHA256 progress: %.1f MB / %.1f MB (%.1f%%)\n",
+						float64(totalRead)/(1024*1024),
+						float64(info.Size())/(1024*1024),
+						float64(totalRead)/float64(info.Size())*100)
+					lastReport = totalRead
+				}
+			}
+			if err == io.EOF {
+				break
+			}
+			if err != nil {
+				return "", err
+			}
+		}
+	} else {
+		// Small files - use simple copy
+		_, err = io.Copy(hasher, file)
+		if err != nil {
+			return "", err
+		}
 	}
 
 	return hex.EncodeToString(hasher.Sum(nil)), nil

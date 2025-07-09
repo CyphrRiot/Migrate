@@ -315,13 +315,25 @@ func FormatNumber(n int64) string {
 // It attempts to create a log in the user's cache directory (~/.cache/migrate/migrate.log)
 // and falls back to /tmp/migrate.log if the cache directory cannot be created.
 // The function automatically creates the cache directory if it doesn't exist.
+// When running with sudo, it still uses the original user's home directory.
 func getLogFilePath() string {
-	// Try user's home directory first, fall back to /tmp
-	if homeDir, err := os.UserHomeDir(); err == nil {
-		logDir := filepath.Join(homeDir, ".cache", "migrate")
-		if err := os.MkdirAll(logDir, 0755); err == nil {
-			return filepath.Join(logDir, "migrate.log")
+	// When running with sudo, use the original user's home directory
+	var homeDir string
+	if sudoUser := os.Getenv("SUDO_USER"); sudoUser != "" {
+		// Running with sudo - use original user's home directory
+		homeDir = "/home/" + sudoUser
+	} else {
+		// Not running with sudo - use current user's home directory
+		var err error
+		homeDir, err = os.UserHomeDir()
+		if err != nil {
+			return "/tmp/migrate.log"
 		}
+	}
+
+	logDir := filepath.Join(homeDir, ".cache", "migrate")
+	if err := os.MkdirAll(logDir, 0755); err == nil {
+		return filepath.Join(logDir, "migrate.log")
 	}
 
 	// Fall back to /tmp
