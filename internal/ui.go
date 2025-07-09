@@ -1465,6 +1465,8 @@ func (m Model) renderVerificationErrors() string {
 		} else if strings.Contains(errorText, "Content mismatch:") {
 			prefix = "⚠️  MISMATCH:"
 			message = strings.TrimPrefix(errorText, "Content mismatch: ")
+			// Remove redundant "- checksum mismatch" suffix
+			message = strings.TrimSuffix(message, " - checksum mismatch")
 		} else if strings.Contains(errorText, "Directory structure:") {
 			prefix = "📁 STRUCTURE:"
 			message = strings.TrimPrefix(errorText, "Directory structure: ")
@@ -1474,16 +1476,36 @@ func (m Model) renderVerificationErrors() string {
 		}
 
 		// Calculate available width for the message
-		// Account for: border (4), padding (4), number (4), prefix (12)
-		maxWidth := m.width - 24
-		if maxWidth < 50 {
-			maxWidth = 50
+		// Line format: "NN. PREFIX MESSAGE"
+		// Account for: border (4), padding (4), number+period+spaces (5), prefix+space (13)
+		maxWidth := m.width - 26
+		if maxWidth < 40 {
+			maxWidth = 40
 		}
 
 		// Smart truncation for file paths to prevent line wrapping
 		if len(message) > maxWidth {
-			// Special handling for gopls cache files
-			if strings.Contains(message, ".cache/gopls/") && strings.HasSuffix(message, "-analysis") {
+			// Special handling for telemetry files
+			if strings.Contains(message, ".config/go/telemetry/") || strings.Contains(message, "telemetry/local/") {
+				// Extract the important parts: tool@version and file type
+				parts := strings.Split(message, "/")
+				if len(parts) >= 2 {
+					filename := parts[len(parts)-1]
+					// Extract tool name from filename (e.g., "go@go1...x-amd64-2025-07-08.v1.count")
+					if strings.Contains(filename, "@") {
+						toolParts := strings.SplitN(filename, "@", 2)
+						tool := toolParts[0]
+						// Keep the .count or other extension
+						ext := ""
+						if idx := strings.LastIndex(filename, "."); idx > 0 {
+							ext = filename[idx:]
+						}
+						message = fmt.Sprintf("telemetry/%s@...%s", tool, ext)
+					} else {
+						message = "telemetry/..." + filename
+					}
+				}
+			} else if strings.Contains(message, ".cache/gopls/") && strings.HasSuffix(message, "-analysis") {
 				// Show just "gopls/...hash-analysis"
 				parts := strings.Split(message, "/")
 				if len(parts) >= 2 {
@@ -1546,9 +1568,15 @@ func (m Model) renderVerificationErrors() string {
 			errorStyle = lipgloss.NewStyle().Foreground(textColor)
 		}
 
-		// Format the line
-		line := fmt.Sprintf("%2d. %s %s", errorIdx+1, prefix, message)
-		s.WriteString(errorStyle.Render(line) + "\n")
+		// Format the line - ensure no wrapping by keeping total length under terminal width
+		lineFormat := fmt.Sprintf("%2d. %s %s", errorIdx+1, prefix, message)
+
+		// Final safety check - if line is still too long, truncate it
+		if len(lineFormat) > m.width-8 { // Leave 8 chars for border and padding
+			lineFormat = lineFormat[:m.width-11] + "..."
+		}
+
+		s.WriteString(errorStyle.Render(lineFormat) + "\n")
 	}
 
 	// Show indication if there are more errors than displayed

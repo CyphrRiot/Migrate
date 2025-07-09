@@ -15,6 +15,9 @@ package internal
 
 import (
 	"fmt"
+	"migrate/internal/handlers"
+	"migrate/internal/screens"
+	"migrate/internal/state"
 	"path/filepath"
 	"strings"
 	"time"
@@ -22,43 +25,15 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// cylonAnimateMsg triggers animation updates for the progress bar cylon effect.
-// This message is sent periodically during progress display to create the sweeping animation.
-type cylonAnimateMsg struct{}
-
-// screen represents the different UI screens available in the application.
-// Each screen has its own rendering logic and input handling behavior.
-type screen int
-
-const (
-	screenMain                screen = iota // Main menu with primary options
-	screenBackup                            // Backup type selection menu
-	screenRestore                           // Restore type selection menu
-	screenVerify                            // Verification type selection menu
-	screenAbout                             // About/help information screen
-	screenConfirm                           // Confirmation dialog for operations
-	screenProgress                          // Progress display during operations
-	screenDriveSelect                       // External drive selection interface
-	screenError                             // Error display requiring manual dismissal
-	screenComplete                          // Success completion requiring manual dismissal
-	screenRestoreOptions                    // Restore configuration options
-	screenHomeFolderSelect                  // Home folder selection for backup
-	screenHomeSubfolderSelect               // Subfolder selection within home folders
-	screenVerificationErrors                // Detailed verification error display
-)
-
-// mainMenuChoices defines the main menu options in the correct order
-var mainMenuChoices = []string{"🚀 Backup System", "🔍 Verify Backup", "🔄 Restore System", "ℹ️ About", "❌ Exit"}
-
 // Model represents the complete application state for the Migrate TUI.
 // It implements the tea.Model interface and contains all data needed to
 // render screens and handle user interactions.
 type Model struct {
 	// Screen and navigation state
-	screen     screen   // Current active screen
-	lastScreen screen   // Previous screen for back navigation
-	cursor     int      // Current cursor/selection position
-	choices    []string // Available menu options for current screen
+	screen     screens.Screen // Current active screen
+	lastScreen screens.Screen // Previous screen for back navigation
+	cursor     int            // Current cursor/selection position
+	choices    []string       // Available menu options for current screen
 
 	// Selection and confirmation state
 	selected     map[int]struct{} // Multi-select state (legacy, may be unused)
@@ -108,8 +83,8 @@ type Model struct {
 // and initializes all required maps and default dimensions.
 func InitialModel() Model {
 	return Model{
-		screen:            screenMain,
-		choices:           mainMenuChoices,
+		screen:            screens.ScreenMain,
+		choices:           screens.MainMenuChoices,
 		selected:          make(map[int]struct{}),
 		selectedFolders:   make(map[string]bool),
 		subfolderCache:    make(map[string][]HomeFolderInfo), // NEW: Initialize subfolder cache
@@ -245,7 +220,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Update navigation state and switch to subfolder screen
 		m.currentFolderPath = msg.parentPath
 		m.folderBreadcrumb = []string{"Home", filepath.Base(msg.parentPath)}
-		m.screen = screenHomeSubfolderSelect
+		m.screen = screens.ScreenHomeSubfolderSelect
 		m.cursor = 0
 
 		return m, nil
@@ -265,13 +240,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.message = msg.message
 			m.errorRequiresManualDismissal = true
 			m.lastScreen = m.screen
-			m.screen = screenError
+			m.screen = screens.ScreenError
 			return m, nil
 		} else if msg.success {
 			// Success message - needs manual dismissal
 			m.message = msg.message
 			m.lastScreen = m.screen
-			m.screen = screenComplete
+			m.screen = screens.ScreenComplete
 			return m, nil
 		} else {
 			// Regular error message - auto-dismiss after 3 seconds
@@ -294,7 +269,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.message = errorMsg
 				m.errorRequiresManualDismissal = true
 				m.lastScreen = m.screen
-				m.screen = screenError
+				m.screen = screens.ScreenError
 				return m, nil
 			} else {
 				// Other errors - auto-dismiss after 3 seconds
@@ -342,7 +317,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 			m.selectedDrive = msg.mountPoint // Store mount point for operation
-			m.screen = screenConfirm
+			m.screen = screens.ScreenConfirm
 			m.cursor = 0
 			return m, nil
 		}
@@ -364,7 +339,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					// Copy verification errors to model for detailed display
 					m.verificationErrors = GetVerificationErrors()
 					m.errorScrollOffset = 0
-					m.screen = screenVerificationErrors
+					m.screen = screens.ScreenVerificationErrors
 					m.progress = 0
 					m.canceling = false
 					return m, nil
@@ -373,7 +348,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.message = errorMsg
 					m.errorRequiresManualDismissal = true
 					m.lastScreen = m.screen
-					m.screen = screenError
+					m.screen = screens.ScreenError
 					m.progress = 0
 					m.canceling = false
 					return m, nil
@@ -392,7 +367,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.message = errorMsg
 				m.errorRequiresManualDismissal = true
 				m.lastScreen = m.screen
-				m.screen = screenError
+				m.screen = screens.ScreenError
 				m.progress = 0
 				m.canceling = false
 				return m, nil
@@ -428,13 +403,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Backup completed successfully, ask about unmounting
 				m.confirmation = "🎉 Backup completed successfully!\n\nDo you want to unmount the backup drive?\n\nNote: Unmounting is recommended for safe removal."
 				m.operation = "unmount_backup"
-				m.screen = screenConfirm
+				m.screen = screens.ScreenConfirm
 				m.cursor = 1
 				return m, nil
 			} else if msg.Error == nil {
 				// Other operation completed successfully - show completion screen
 				m.lastScreen = m.screen
-				m.screen = screenComplete
+				m.screen = screens.ScreenComplete
 				return m, nil
 			} else {
 				// Operation completed with error
@@ -452,7 +427,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						// Copy verification errors to model for detailed display
 						m.verificationErrors = GetVerificationErrors()
 						m.errorScrollOffset = 0
-						m.screen = screenVerificationErrors
+						m.screen = screens.ScreenVerificationErrors
 						m.progress = 0
 						m.canceling = false
 						return m, nil
@@ -461,7 +436,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.message = errorMsg
 						m.errorRequiresManualDismissal = true
 						m.lastScreen = m.screen
-						m.screen = screenError
+						m.screen = screens.ScreenError
 						return m, nil
 					}
 				}
@@ -478,7 +453,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.message = errorMsg
 					m.errorRequiresManualDismissal = true
 					m.lastScreen = m.screen
-					m.screen = screenError
+					m.screen = screens.ScreenError
 					return m, nil
 				} else {
 					// Regular error - auto-dismiss after 3 seconds
@@ -500,48 +475,48 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Remove fake progress simulation
 		return m, nil
 
-	case cylonAnimateMsg:
+	case state.CylonAnimateMsg:
 		// Update cylon animation frame
 		m.cylonFrame = (m.cylonFrame + 1) % 20 // 20-frame cycle
-		if m.screen == screenProgress {
+		if m.screen == screens.ScreenProgress {
 			// Keep animating while on progress screen
 			return m, tea.Tick(100*time.Millisecond, func(t time.Time) tea.Msg {
-				return cylonAnimateMsg{}
+				return state.CylonAnimateMsg{}
 			})
 		}
 		return m, nil
 
 	case tea.KeyMsg:
 		// Handle error screen dismissal first
-		if m.screen == screenError {
+		if m.screen == screens.ScreenError {
 			// Any key press dismisses the error screen and returns to main menu
 			resetBackupState()
-			m.screen = screenMain
+			m.screen = screens.ScreenMain
 			m.message = ""
 			m.cursor = 0
-			m.choices = mainMenuChoices
+			m.choices = screens.MainMenuChoices
 			m.errorRequiresManualDismissal = false
 			return m, nil
 		}
 
 		// Handle completion screen dismissal
-		if m.screen == screenComplete {
+		if m.screen == screens.ScreenComplete {
 			// Any key press dismisses the completion screen and returns to main
 			resetBackupState()
-			m.screen = screenMain
+			m.screen = screens.ScreenMain
 			m.message = ""
 			m.cursor = 0
-			m.choices = mainMenuChoices
+			m.choices = screens.MainMenuChoices
 			return m, nil
 		}
 
 		switch msg.String() {
 		case "ctrl+c", "q":
-			if m.screen == screenMain {
+			if m.screen == screens.ScreenMain {
 				return m, tea.Quit
 			}
 			// Handle Ctrl+C during progress - set canceling state
-			if m.screen == screenProgress {
+			if m.screen == screens.ScreenProgress {
 				m.canceling = true
 				m.message = "Canceling operation... Please wait for cleanup to complete."
 				// Signal the backup operation to cancel
@@ -550,66 +525,66 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			// Go back to main menu from other screens
-			m.screen = screenMain
+			m.screen = screens.ScreenMain
 			m.cursor = 0
-			m.choices = mainMenuChoices
+			m.choices = screens.MainMenuChoices
 			return m, nil
 
 		case "esc":
-			if m.screen == screenError {
+			if m.screen == screens.ScreenError {
 				// Return to main menu from error
 				resetBackupState()
-				m.screen = screenMain
+				m.screen = screens.ScreenMain
 				m.message = ""
 				m.cursor = 0
-				m.choices = mainMenuChoices
+				m.choices = screens.MainMenuChoices
 				m.errorRequiresManualDismissal = false
 				return m, nil
-			} else if m.screen == screenHomeSubfolderSelect {
+			} else if m.screen == screens.ScreenHomeSubfolderSelect {
 				// NEW: Return to parent folder view from subfolder screen
 
 				m.currentFolderPath = ""
 				m.folderBreadcrumb = []string{}
-				m.screen = screenHomeFolderSelect
+				m.screen = screens.ScreenHomeFolderSelect
 				m.cursor = 0
 				m.message = "" // Clear any temporary messages
 				return m, nil
-			} else if m.screen == screenVerificationErrors {
+			} else if m.screen == screens.ScreenVerificationErrors {
 				// NEW: Return to main menu from verification errors screen
 				resetBackupState()
-				m.screen = screenMain
+				m.screen = screens.ScreenMain
 				m.cursor = 0
-				m.choices = mainMenuChoices
+				m.choices = screens.MainMenuChoices
 				m.verificationErrors = []string{} // Clear error list
 				m.errorScrollOffset = 0
 				return m, nil
-			} else if m.screen != screenMain {
+			} else if m.screen != screens.ScreenMain {
 				// Reset backup state when returning to main menu
 				resetBackupState()
-				m.screen = screenMain
+				m.screen = screens.ScreenMain
 				m.cursor = 0
-				m.choices = mainMenuChoices
+				m.choices = screens.MainMenuChoices
 			}
 			return m, nil
 
 		case "up", "k":
-			if m.screen == screenConfirm {
+			if m.screen == screens.ScreenConfirm {
 				if m.cursor > 0 {
 					m.cursor--
 				}
-			} else if m.screen == screenVerificationErrors {
+			} else if m.screen == screens.ScreenVerificationErrors {
 				// Scroll up in verification errors list
 				if m.errorScrollOffset > 0 {
 					m.errorScrollOffset--
 				}
-			} else if m.screen == screenMain {
+			} else if m.screen == screens.ScreenMain {
 				// Main menu: wrap around navigation
 				if m.cursor > 0 {
 					m.cursor--
 				} else {
 					m.cursor = len(m.choices) - 1 // Wrap to bottom
 				}
-			} else if m.screen == screenHomeFolderSelect {
+			} else if m.screen == screens.ScreenHomeFolderSelect {
 				// Home folder selection: NEW LAYOUT with controls at top
 				// Cursor 0-1: Controls (Continue, Back)
 				// Cursor 2+: Folders (non-empty only)
@@ -621,7 +596,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				} else {
 					m.cursor = maxCursor // Wrap to bottom
 				}
-			} else if m.screen == screenHomeSubfolderSelect {
+			} else if m.screen == screens.ScreenHomeSubfolderSelect {
 				// NEW: Subfolder selection navigation
 				// Cursor 0-1: Controls (Continue, Back)
 				// Cursor 2+: Subfolders (non-empty only)
@@ -639,11 +614,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 
 		case "down", "j":
-			if m.screen == screenConfirm {
+			if m.screen == screens.ScreenConfirm {
 				if m.cursor < 1 {
 					m.cursor++
 				}
-			} else if m.screen == screenVerificationErrors {
+			} else if m.screen == screens.ScreenVerificationErrors {
 				// Scroll down in verification errors list
 				contentHeight := m.height - 8 // Compact header + help + padding
 				contentHeight = max(contentHeight, 5)
@@ -651,14 +626,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if maxScrollOffset > 0 && m.errorScrollOffset < maxScrollOffset {
 					m.errorScrollOffset++
 				}
-			} else if m.screen == screenMain {
+			} else if m.screen == screens.ScreenMain {
 				// Main menu: wrap around navigation
 				if m.cursor < len(m.choices)-1 {
 					m.cursor++
 				} else {
 					m.cursor = 0 // Wrap to top
 				}
-			} else if m.screen == screenHomeFolderSelect {
+			} else if m.screen == screens.ScreenHomeFolderSelect {
 				// Home folder selection: NEW LAYOUT with controls at top
 				// Cursor 0-1: Controls (Continue, Back)
 				// Cursor 2+: Folders (non-empty only)
@@ -670,7 +645,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				} else {
 					m.cursor = 0 // Wrap to top
 				}
-			} else if m.screen == screenHomeSubfolderSelect {
+			} else if m.screen == screens.ScreenHomeSubfolderSelect {
 				// NEW: Subfolder selection navigation
 				// Cursor 0-1: Controls (Continue, Back)
 				// Cursor 2+: Subfolders (non-empty only)
@@ -691,7 +666,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.handleSelection()
 
 		case "a", "A":
-			if m.screen == screenHomeFolderSelect {
+			if m.screen == screens.ScreenHomeFolderSelect {
 				// Select all visible NON-EMPTY folders
 				visibleFolders := m.getVisibleFoldersNonEmpty()
 				for _, folder := range visibleFolders {
@@ -703,7 +678,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 
 		case "n", "N", "x", "X":
-			if m.screen == screenHomeFolderSelect {
+			if m.screen == screens.ScreenHomeFolderSelect {
 				// Deselect all visible NON-EMPTY folders
 				visibleFolders := m.getVisibleFoldersNonEmpty()
 				for _, folder := range visibleFolders {
@@ -724,49 +699,50 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // managing state changes and initiating background operations as needed.
 
 // handleMainMenuSelection handles selection logic for the main menu screen
+// handleMainMenuSelection processes main menu selections and transitions to appropriate screens.
 func (m Model) handleMainMenuSelection() (tea.Model, tea.Cmd) {
-	switch m.cursor {
-	case 0: // Backup
-		m.screen = screenBackup
-		m.choices = []string{"📁 Complete System Backup", "🏠 Home Directory Only", "⬅️ Back"}
+	handler := handlers.NewMainMenuHandler()
+	screen, operation, choices, cmd := handler.HandleSelection(m.cursor)
+
+	m.screen = screen
+	if operation != "" {
+		m.operation = operation
+	}
+	if choices != nil {
+		m.choices = choices
 		m.cursor = 0
-	case 1: // Verify Backup
-		m.screen = screenVerify
-		m.choices = []string{"🔍 Auto-Detect & Verify Backup", "⬅️ Back"}
-		m.cursor = 0
-	case 2: // Restore
-		m.screen = screenRestore
-		m.choices = []string{"🔄 Restore to Current System", "📂 Restore to Custom Path", "⬅️ Back"}
-		m.cursor = 0
-	case 3: // About
-		m.screen = screenAbout
-	case 4: // Exit
-		return m, tea.Quit
+	}
+
+	if cmd != nil {
+		return m, cmd
 	}
 	return m, nil
 }
 
 // handleBackupMenuSelection handles selection logic for the backup menu screen
+// handleBackupMenuSelection processes backup menu selections and transitions to appropriate screens.
 func (m Model) handleBackupMenuSelection() (tea.Model, tea.Cmd) {
-	switch m.cursor {
-	case 0: // Complete System Backup
-		m.operation = "system_backup"
-		// Go to drive selection instead of hardcoded drive checking
-		m.screen = screenDriveSelect
-		m.cursor = 0
-		return m, LoadDrives()
-	case 1: // Home Directory Only
-		m.operation = "home_backup"
-		// Go to home folder selection instead of directly to drive selection
-		m.screen = screenHomeFolderSelect
-		m.cursor = 0
-		return m, DiscoverHomeFoldersCmd()
-	case 2: // Back
-		m.screen = screenMain
-		m.choices = mainMenuChoices
+	handler := handlers.NewBackupMenuHandler()
+	screen, operation, choices, _ := handler.HandleSelection(m.cursor)
+
+	m.screen = screen
+	if operation != "" {
+		m.operation = operation
+	}
+	if choices != nil {
+		m.choices = choices
 		m.cursor = 0
 	}
-	return m, nil
+
+	// Return the appropriate command based on selection
+	switch m.cursor {
+	case 0: // Complete System Backup
+		return m, LoadDrives()
+	case 1: // Home Directory Only
+		return m, DiscoverHomeFoldersCmd()
+	default:
+		return m, nil
+	}
 }
 
 // handleRestoreMenuSelection handles selection logic for the restore menu screen
@@ -775,19 +751,19 @@ func (m Model) handleRestoreMenuSelection() (tea.Model, tea.Cmd) {
 	case 0: // Restore to Current System
 		m.operation = "system_restore"
 		// Go to restore options screen first
-		m.screen = screenRestoreOptions
+		m.screen = screens.ScreenRestoreOptions
 		m.cursor = 0
-		m.choices = []string{"☑️ Restore Configuration (~/.config)", "☑️ Restore Window Managers (Hyprland, GNOME, etc.)", "✅ Continue", "⬅️ Back"}
+		m.choices = screens.RestoreOptionsChoices
 	case 1: // Restore to Custom Path
 		m.operation = "custom_restore"
 		// Go to restore options screen first
-		m.screen = screenRestoreOptions
+		m.screen = screens.ScreenRestoreOptions
 		m.cursor = 0
-		m.choices = []string{"☑️ Restore Configuration (~/.config)", "☑️ Restore Window Managers (Hyprland, GNOME, etc.)", "✅ Continue", "⬅️ Back"}
+		m.choices = screens.RestoreOptionsChoices
 	case 2: // Back
 		resetBackupState() // Reset state when going back to main from restore menu
-		m.screen = screenMain
-		m.choices = mainMenuChoices
+		m.screen = screens.ScreenMain
+		m.choices = screens.MainMenuChoices
 		m.cursor = 0
 	}
 	return m, nil
@@ -799,12 +775,12 @@ func (m Model) handleVerifyMenuSelection() (tea.Model, tea.Cmd) {
 	case 0: // Auto-detect backup type and verify
 		m.operation = "auto_verify"
 		// Go to drive selection for backup source
-		m.screen = screenDriveSelect
+		m.screen = screens.ScreenDriveSelect
 		m.cursor = 0
 		return m, LoadDrives()
 	case 1: // Back
-		m.screen = screenMain
-		m.choices = mainMenuChoices
+		m.screen = screens.ScreenMain
+		m.choices = screens.MainMenuChoices
 		m.cursor = 0
 	}
 	return m, nil
@@ -812,15 +788,15 @@ func (m Model) handleVerifyMenuSelection() (tea.Model, tea.Cmd) {
 
 func (m Model) handleSelection() (tea.Model, tea.Cmd) {
 	switch m.screen {
-	case screenMain:
+	case screens.ScreenMain:
 		return m.handleMainMenuSelection()
-	case screenBackup:
+	case screens.ScreenBackup:
 		return m.handleBackupMenuSelection()
-	case screenRestore:
+	case screens.ScreenRestore:
 		return m.handleRestoreMenuSelection()
-	case screenVerify:
+	case screens.ScreenVerify:
 		return m.handleVerifyMenuSelection()
-	case screenConfirm:
+	case screens.ScreenConfirm:
 		switch m.cursor {
 		case 0: // Yes
 			switch m.operation {
@@ -829,7 +805,7 @@ func (m Model) handleSelection() (tea.Model, tea.Cmd) {
 				return m, PerformBackupUnmount()
 			default:
 				// Clear all state and transition to progress for other operations
-				m.screen = screenProgress
+				m.screen = screens.ScreenProgress
 				m.progress = 0
 				m.message = "Starting operation..."
 				m.confirmation = "" // Clear confirmation text
@@ -842,7 +818,7 @@ func (m Model) handleSelection() (tea.Model, tea.Cmd) {
 						startUniversalBackup(m.operation, m.selectedDrive, nil, nil),
 						CheckTUIBackupProgress(),
 						tea.Tick(100*time.Millisecond, func(t time.Time) tea.Msg {
-							return cylonAnimateMsg{}
+							return state.CylonAnimateMsg{}
 						}),
 					)
 				case "home_backup":
@@ -858,7 +834,7 @@ func (m Model) handleSelection() (tea.Model, tea.Cmd) {
 						startUniversalBackup("selective_home_backup", m.selectedDrive, m.selectedFolders, m.homeFolders),
 						CheckTUIBackupProgress(),
 						tea.Tick(100*time.Millisecond, func(t time.Time) tea.Msg {
-							return cylonAnimateMsg{}
+							return state.CylonAnimateMsg{}
 						}),
 					)
 				case "system_restore":
@@ -871,7 +847,7 @@ func (m Model) handleSelection() (tea.Model, tea.Cmd) {
 						startVerification(m.operation, m.selectedDrive),
 						CheckTUIBackupProgress(),
 						tea.Tick(100*time.Millisecond, func(t time.Time) tea.Msg {
-							return cylonAnimateMsg{}
+							return state.CylonAnimateMsg{}
 						}),
 					)
 				case "home_verify":
@@ -880,7 +856,7 @@ func (m Model) handleSelection() (tea.Model, tea.Cmd) {
 						startVerification(m.operation, m.selectedDrive),
 						CheckTUIBackupProgress(),
 						tea.Tick(100*time.Millisecond, func(t time.Time) tea.Msg {
-							return cylonAnimateMsg{}
+							return state.CylonAnimateMsg{}
 						}),
 					)
 				case "auto_verify":
@@ -889,7 +865,7 @@ func (m Model) handleSelection() (tea.Model, tea.Cmd) {
 						startVerification(m.operation, m.selectedDrive),
 						CheckTUIBackupProgress(),
 						tea.Tick(100*time.Millisecond, func(t time.Time) tea.Msg {
-							return cylonAnimateMsg{}
+							return state.CylonAnimateMsg{}
 						}),
 					)
 				default:
@@ -907,8 +883,8 @@ func (m Model) handleSelection() (tea.Model, tea.Cmd) {
 			m.operation = ""
 			m.selectedDrive = ""
 			m.progress = 0
-			m.screen = screenMain
-			m.choices = mainMenuChoices
+			m.screen = screens.ScreenMain
+			m.choices = screens.MainMenuChoices
 			m.cursor = 0
 
 			// Set appropriate message
@@ -918,12 +894,12 @@ func (m Model) handleSelection() (tea.Model, tea.Cmd) {
 				m.message = ""
 			}
 		}
-	case screenAbout:
+	case screens.ScreenAbout:
 		resetBackupState() // Reset state when returning from about screen
-		m.screen = screenMain
-		m.choices = mainMenuChoices
+		m.screen = screens.ScreenMain
+		m.choices = screens.MainMenuChoices
 		m.cursor = 0
-	case screenHomeFolderSelect:
+	case screens.ScreenHomeFolderSelect:
 		// NEW LAYOUT: Controls first (0-1), then folders (2+)
 		numControls := 2
 
@@ -941,12 +917,12 @@ func (m Model) handleSelection() (tea.Model, tea.Cmd) {
 					})
 				}
 
-				m.screen = screenDriveSelect
+				m.screen = screens.ScreenDriveSelect
 				m.cursor = 0
 				return m, LoadDrives()
 			case 1: // "Back" option
-				m.screen = screenBackup
-				m.choices = []string{"📁 Complete System Backup", "🏠 Home Directory Only", "⬅️ Back"}
+				m.screen = screens.ScreenBackup
+				m.choices = screens.BackupMenuChoices
 				m.cursor = 0
 			}
 		} else {
@@ -964,7 +940,7 @@ func (m Model) handleSelection() (tea.Model, tea.Cmd) {
 						// Use cached data - switch directly to subfolder screen
 						m.currentFolderPath = folder.Path
 						m.folderBreadcrumb = []string{"Home", folder.Name}
-						m.screen = screenHomeSubfolderSelect
+						m.screen = screens.ScreenHomeSubfolderSelect
 						m.cursor = 0
 					} else {
 						// Need to discover subfolders first
@@ -983,7 +959,7 @@ func (m Model) handleSelection() (tea.Model, tea.Cmd) {
 				}
 			}
 		}
-	case screenHomeSubfolderSelect:
+	case screens.ScreenHomeSubfolderSelect:
 		// NEW: Subfolder selection handling
 		numControls := 2
 
@@ -1001,14 +977,14 @@ func (m Model) handleSelection() (tea.Model, tea.Cmd) {
 					})
 				}
 
-				m.screen = screenDriveSelect
+				m.screen = screens.ScreenDriveSelect
 				m.cursor = 0
 				return m, LoadDrives()
 			case 1: // "Back" option - return to parent folder view
 				// Reset navigation state and return to main folder view
 				m.currentFolderPath = ""
 				m.folderBreadcrumb = []string{}
-				m.screen = screenHomeFolderSelect
+				m.screen = screens.ScreenHomeFolderSelect
 				m.cursor = 0
 				// Clear any temporary messages
 				m.message = ""
@@ -1033,7 +1009,7 @@ func (m Model) handleSelection() (tea.Model, tea.Cmd) {
 				m.autoSaveSelections()
 			}
 		}
-	case screenDriveSelect:
+	case screens.ScreenDriveSelect:
 		if m.cursor < len(m.drives) {
 			selectedDrive := m.drives[m.cursor]
 			m.selectedDrive = selectedDrive.Device
@@ -1064,24 +1040,24 @@ func (m Model) handleSelection() (tea.Model, tea.Cmd) {
 			// Back option
 			if strings.Contains(m.operation, "backup") {
 				// Go back to backup menu
-				m.screen = screenBackup
-				m.choices = []string{"📁 Complete System Backup", "🏠 Home Directory Only", "⬅️ Back"}
+				m.screen = screens.ScreenBackup
+				m.choices = screens.BackupMenuChoices
 			} else if strings.Contains(m.operation, "restore") {
 				// Go back to restore menu
-				m.screen = screenRestore
-				m.choices = []string{"🔄 Restore to Current System", "📂 Restore to Custom Path", "⬅️ Back"}
+				m.screen = screens.ScreenRestore
+				m.choices = screens.RestoreMenuChoices
 			} else if strings.Contains(m.operation, "verify") {
 				// Go back to verify menu
-				m.screen = screenVerify
-				m.choices = []string{"🔍 Verify Complete System", "🏠 Verify Home Directory", "⬅️ Back"}
+				m.screen = screens.ScreenVerify
+				m.choices = screens.VerifyMenuChoices
 			} else {
 				// Go back to main menu
-				m.screen = screenMain
-				m.choices = mainMenuChoices
+				m.screen = screens.ScreenMain
+				m.choices = screens.MainMenuChoices
 			}
 			m.cursor = 0
 		}
-	case screenRestoreOptions:
+	case screens.ScreenRestoreOptions:
 		switch m.cursor {
 		case 0: // Toggle Restore Configuration
 			m.restoreConfig = !m.restoreConfig
@@ -1101,12 +1077,12 @@ func (m Model) handleSelection() (tea.Model, tea.Cmd) {
 			}
 		case 2: // Continue
 			// Go to drive selection with the configured options
-			m.screen = screenDriveSelect
+			m.screen = screens.ScreenDriveSelect
 			m.cursor = 0
 			return m, LoadDrives()
 		case 3: // Back
-			m.screen = screenRestore
-			m.choices = []string{"🔄 Restore to Current System", "📂 Restore to Custom Path", "⬅️ Back"}
+			m.screen = screens.ScreenRestore
+			m.choices = screens.RestoreMenuChoices
 			m.cursor = 0
 		}
 	}
@@ -1222,7 +1198,7 @@ func (m Model) getVisibleFoldersNonEmpty() []HomeFolderInfo {
 }
 
 // getCurrentSubfolders returns the cached subfolders for the current folder path.
-// Used for UI navigation and rendering in screenHomeSubfolderSelect.
+// Used for UI navigation and rendering in ScreenHomeSubfolderSelect.
 func (m Model) getCurrentSubfolders() []HomeFolderInfo {
 	if subfolders, exists := m.subfolderCache[m.currentFolderPath]; exists {
 		// Filter to only show non-empty subfolders (like main folders)
@@ -1349,33 +1325,33 @@ func (m *Model) autoSaveSelections() {
 // This method delegates to specific render functions based on the active screen.
 func (m Model) View() string {
 	switch m.screen {
-	case screenMain:
+	case screens.ScreenMain:
 		return m.renderMainMenu()
-	case screenBackup:
+	case screens.ScreenBackup:
 		return m.renderBackupMenu()
-	case screenRestore:
+	case screens.ScreenRestore:
 		return m.renderRestoreMenu()
-	case screenRestoreOptions:
+	case screens.ScreenRestoreOptions:
 		return m.renderRestoreOptions()
-	case screenVerify:
+	case screens.ScreenVerify:
 		return m.renderVerifyMenu()
-	case screenAbout:
+	case screens.ScreenAbout:
 		return m.renderAbout()
-	case screenConfirm:
+	case screens.ScreenConfirm:
 		return m.renderConfirmation()
-	case screenProgress:
+	case screens.ScreenProgress:
 		return m.renderProgress()
-	case screenHomeFolderSelect:
+	case screens.ScreenHomeFolderSelect:
 		return m.renderHomeFolderSelect()
-	case screenHomeSubfolderSelect:
+	case screens.ScreenHomeSubfolderSelect:
 		return m.renderHomeSubfolderSelect() // NEW: Subfolder rendering
-	case screenDriveSelect:
+	case screens.ScreenDriveSelect:
 		return m.renderDriveSelect()
-	case screenError:
+	case screens.ScreenError:
 		return m.renderError()
-	case screenComplete:
+	case screens.ScreenComplete:
 		return m.renderComplete()
-	case screenVerificationErrors:
+	case screens.ScreenVerificationErrors:
 		return m.renderVerificationErrors()
 	default:
 		return "Unknown screen"

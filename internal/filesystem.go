@@ -15,6 +15,7 @@
 package internal
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -859,6 +860,10 @@ func largFilesIdentical(src, dst string, size int64) bool {
 // Uses streaming IO to handle large files efficiently without loading entire file into memory.
 // Returns hex-encoded hash string for easy comparison and storage.
 func getFileSHA256(filePath string) (string, error) {
+	// Create context with timeout based on file size
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
 	file, err := os.Open(filePath)
 	if err != nil {
 		return "", err
@@ -871,6 +876,13 @@ func getFileSHA256(filePath string) (string, error) {
 		return "", err
 	}
 
+	// Adjust timeout for larger files
+	if info.Size() > 1024*1024*1024 { // 1GB
+		cancel() // Cancel old context
+		ctx, cancel = context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cancel()
+	}
+
 	// Log if this is a large file
 	if info.Size() > 10*1024*1024 { // 10MB
 		fmt.Printf("Computing SHA256 for %s (%.1f MB)...\n",
@@ -879,13 +891,20 @@ func getFileSHA256(filePath string) (string, error) {
 
 	hasher := sha256.New()
 
-	// For large files, use a progress reader
+	// For large files, use a progress reader with context checking
 	if info.Size() > 100*1024*1024 { // 100MB
 		buffer := make([]byte, 1024*1024) // 1MB buffer
 		totalRead := int64(0)
 		lastReport := int64(0)
 
 		for {
+			// Check context cancellation
+			select {
+			case <-ctx.Done():
+				return "", fmt.Errorf("SHA256 calculation timed out for %s", filePath)
+			default:
+			}
+
 			n, err := file.Read(buffer)
 			if n > 0 {
 				hasher.Write(buffer[:n])
@@ -908,10 +927,20 @@ func getFileSHA256(filePath string) (string, error) {
 			}
 		}
 	} else {
-		// Small files - use simple copy
-		_, err = io.Copy(hasher, file)
-		if err != nil {
-			return "", err
+		// Small files - use simple copy with context
+		done := make(chan error, 1)
+		go func() {
+			_, err := io.Copy(hasher, file)
+			done <- err
+		}()
+
+		select {
+		case <-ctx.Done():
+			return "", fmt.Errorf("SHA256 calculation timed out for %s", filePath)
+		case err := <-done:
+			if err != nil {
+				return "", err
+			}
 		}
 	}
 

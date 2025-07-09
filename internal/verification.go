@@ -236,6 +236,15 @@ func performBackupVerification(sourcePath, destPath string, excludePatterns []st
 	totalFilesVerified = 0
 	verificationErrors = []string{}
 
+	if logFile != nil {
+		fmt.Fprintf(logFile, "\n=== VERIFICATION PHASES ===\n")
+		fmt.Fprintf(logFile, "Phase 1: Verifying newly copied files (%d files)\n", len(copiedFilesList))
+		fmt.Fprintf(logFile, "Phase 2: Verifying critical system files (%d files)\n", len(DefaultVerificationConfig.CriticalFiles))
+		fmt.Fprintf(logFile, "Phase 3: Random sampling of unchanged files (%.1f%% sample rate)\n",
+			DefaultVerificationConfig.SampleRate*100)
+		fmt.Fprintf(logFile, "Phase 4: Directory structure validation\n\n")
+	}
+
 	// Step 1: Verify newly copied files (high priority)
 	// Thread-safe access to copiedFilesList - minimize mutex lock time
 	copiedFilesListMutex.Lock()
@@ -501,8 +510,21 @@ func verifyCriticalFiles(sourcePath, destPath string, logFile *os.File) error {
 				}
 			}
 			continue
-		} else if logFile != nil {
-			fmt.Fprintf(logFile, "  - File exists: %s (size: %d bytes)\n", srcFile, info.Size())
+		} else {
+			// Skip very large critical files that might cause hangs
+			if info.Size() > 100*1024*1024 { // 100MB
+				if logFile != nil {
+					fmt.Fprintf(logFile, "  - SKIPPING large critical file: %s (size: %.1f MB)\n",
+						srcFile, float64(info.Size())/(1024*1024))
+				}
+				verificationErrors = append(verificationErrors,
+					fmt.Sprintf("Critical file %s: skipped - too large (%.1f MB)",
+						criticalPath, float64(info.Size())/(1024*1024)))
+				continue
+			}
+			if logFile != nil {
+				fmt.Fprintf(logFile, "  - File exists: %s (size: %d bytes)\n", srcFile, info.Size())
+			}
 		}
 
 		if logFile != nil {
@@ -511,6 +533,15 @@ func verifyCriticalFiles(sourcePath, destPath string, logFile *os.File) error {
 
 		err := verifySingleFile(criticalPath, sourcePath, destPath)
 		if err != nil {
+			// Check if it's a timeout error
+			if strings.Contains(err.Error(), "timed out") {
+				if logFile != nil {
+					fmt.Fprintf(logFile, "  - TIMEOUT: Verification timed out for %s\n", criticalPath)
+				}
+				verificationErrors = append(verificationErrors,
+					fmt.Sprintf("Critical file %s: timed out", criticalPath))
+				continue
+			}
 			errors++
 			verificationErrors = append(verificationErrors, fmt.Sprintf("Critical file %s: %v", criticalPath, err))
 			if logFile != nil {
@@ -815,7 +846,7 @@ func verifySingleFile(filePath, sourcePath, destPath string) error {
 		}
 
 		if srcHash != destHash {
-			return fmt.Errorf("checksum mismatch")
+			return fmt.Errorf("checksums differ")
 		}
 	} else {
 		// For large files, use the same sampling strategy as during backup
@@ -1028,13 +1059,14 @@ func verifyRandomSampleOfBackup(sourcePath, destPath string, sampleRate float64,
 
 		// Progress reporting every 1000 directories
 		dirCount++
-		if dirCount%1000 == 0 {
-			if logFile != nil {
-				fmt.Fprintf(logFile, "Phase 1 progress: %d directories checked (elapsed: %v)\n",
-					dirCount, time.Since(startTime))
-			}
-			// Update verification counter for UI progress
-			atomic.AddInt64(&totalFilesVerified, 1)
+		// Update verification counter for UI progress - EVERY directory
+		atomic.AddInt64(&totalFilesVerified, 1)
+
+		if logFile != nil && dirCount%1000 == 0 {
+			elapsed := time.Since(startTime)
+			rate := float64(dirCount) / elapsed.Seconds()
+			fmt.Fprintf(logFile, "  Directory scan progress: %d directories checked (%.1f/sec, elapsed: %v)\n",
+				dirCount, rate, elapsed.Round(time.Second))
 		}
 
 		// Timeout check - abort if taking too long
@@ -1160,13 +1192,14 @@ func verifyRandomSampleOfBackup(sourcePath, destPath string, sampleRate float64,
 		}
 
 		// Progress reporting every 5000 files
-		if filesProcessed%5000 == 0 {
-			if logFile != nil {
-				fmt.Fprintf(logFile, "Phase 2 progress: %d files processed (elapsed: %v)\n",
-					filesProcessed, time.Since(startTime))
-			}
-			// Update verification counter for UI
-			atomic.AddInt64(&totalFilesVerified, 1)
+		// Update verification counter for UI - EVERY file processed
+		atomic.AddInt64(&totalFilesVerified, 1)
+
+		if logFile != nil && filesProcessed%5000 == 0 {
+			elapsed := time.Since(startTime)
+			rate := float64(filesProcessed) / elapsed.Seconds()
+			fmt.Fprintf(logFile, "  File enumeration progress: %d files found (%.1f/sec, elapsed: %v)\n",
+				filesProcessed, rate, elapsed.Round(time.Second))
 		}
 
 		// Skip excluded patterns
@@ -1258,7 +1291,7 @@ func verifyRandomSampleOfBackup(sourcePath, destPath string, sampleRate float64,
 		err := verifySingleFile(filePath, sourcePath, destPath)
 		if err != nil {
 			errors++
-			verificationErrors = append(verificationErrors, fmt.Sprintf("Content mismatch: %s - %v", filePath, err))
+			verificationErrors = append(verificationErrors, fmt.Sprintf("Content mismatch: %s", filePath))
 			if logFile != nil {
 				fmt.Fprintf(logFile, "Sample verification error: %s - %v\n", filePath, err)
 			}

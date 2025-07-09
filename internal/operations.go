@@ -482,9 +482,16 @@ func calculateRealProgress() (float64, string) {
 			// Standalone verification: Time-based progress to ensure smooth progression
 			elapsed := time.Since(backupStartTime)
 
-			// Target verification to take 8-12 seconds for good UX
-			targetDuration := 10.0 // 10 seconds
-			timeProgress := elapsed.Seconds() / targetDuration
+			// Use realistic time estimate based on expected file count
+			// Start with 60 seconds base, increase for larger backups
+			estimatedDuration := 60.0 // 1 minute base
+			if totalFilesVerified > 1000 {
+				estimatedDuration = 120.0 // 2 minutes for medium backups
+			}
+			if totalFilesVerified > 10000 {
+				estimatedDuration = 300.0 // 5 minutes for large backups
+			}
+			timeProgress := elapsed.Seconds() / estimatedDuration
 
 			// Combine time progress with file progress
 			var fileProgress float64
@@ -515,11 +522,11 @@ func calculateRealProgress() (float64, string) {
 			if totalFilesVerified == 0 {
 				message = "🔍 Initializing verification..."
 			} else if totalFilesVerified <= int64(len(DefaultVerificationConfig.CriticalFiles)) && verificationPhaseActive {
-				message = fmt.Sprintf("🔍 Checking critical files • %d verified", totalFilesVerified)
-			} else if totalFilesVerified < 50 {
-				message = fmt.Sprintf("🔍 Sampling backup files • %d checked", totalFilesVerified)
+				message = fmt.Sprintf("🔍 Phase 1: Checking critical files • %d/%d verified", totalFilesVerified, len(DefaultVerificationConfig.CriticalFiles))
+			} else if totalFilesVerified < 1000 {
+				message = fmt.Sprintf("🔍 Phase 2: Scanning directories • %s checked", FormatNumber(totalFilesVerified))
 			} else {
-				message = fmt.Sprintf("🔍 Verifying backup integrity • %d files checked", totalFilesVerified)
+				message = fmt.Sprintf("🔍 Phase 3: Verifying files • %s processed", FormatNumber(totalFilesVerified))
 			}
 		} else {
 			// Backup verification phase: 95-100% range (part of backup process)
