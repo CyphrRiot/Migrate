@@ -412,7 +412,14 @@ func performPureGoBackup(config BackupConfig, logFile *os.File) error {
 // Handles cancellation detection, completion status, and real-time progress calculation.
 // Returns ProgressUpdate messages with current status for the UI.
 func CheckTUIBackupProgress() tea.Cmd {
-	return tea.Tick(200*time.Millisecond, func(t time.Time) tea.Msg {
+	// Use slower update frequency for restore operations to improve I/O performance
+	updateInterval := 200 * time.Millisecond
+	if syncPhaseComplete || deletionPhaseActive {
+		// During intensive I/O phases, update less frequently
+		updateInterval = 500 * time.Millisecond
+	}
+	
+	return tea.Tick(updateInterval, func(t time.Time) tea.Msg {
 		// Check if cancellation was requested - switch to cancelling state
 		if shouldCancelBackup() && !tuiBackupCancelling && !tuiBackupCompleted {
 			tuiBackupCancelling = true
