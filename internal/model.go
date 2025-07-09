@@ -88,6 +88,15 @@ type Model struct {
 // This sets up the initial application state with the main menu active
 // and initializes all required maps and default dimensions.
 func InitialModel() Model {
+	// Log initial model creation
+	if logPath := getLogFilePath(); logPath != "" {
+		if logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
+			fmt.Fprintf(logFile, "\n=== MIGRATE DEBUG SESSION STARTED ===\n")
+			fmt.Fprintf(logFile, "DEBUG: InitialModel() called, creating new model\n")
+			fmt.Fprintf(logFile, "DEBUG: Log file path: %s\n", logPath)
+			logFile.Close()
+		}
+	}
 	return Model{
 		screen:            screens.ScreenMain,
 		choices:           screens.MainMenuChoices,
@@ -136,6 +145,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case DrivesLoaded:
+		// Log when drives are loaded
+		if logPath := getLogFilePath(); logPath != "" {
+			if logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
+				fmt.Fprintf(logFile, "DEBUG: DrivesLoaded message received, %d drives found\n", len(msg.drives))
+				for i, drive := range msg.drives {
+					fmt.Fprintf(logFile, "DEBUG: Drive %d: %s (%s) - %s\n", i, drive.Device, drive.Label, drive.Size)
+				}
+				logFile.Close()
+			}
+		}
 		m.drives = msg.drives
 		m.choices = make([]string, len(m.drives)+1)
 		for i, drive := range m.drives {
@@ -912,6 +931,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // handleMainMenuSelection handles selection logic for the main menu screen
 // handleMainMenuSelection processes main menu selections and transitions to appropriate screens.
 func (m Model) handleMainMenuSelection() (tea.Model, tea.Cmd) {
+	// Log main menu selection
+	if logPath := getLogFilePath(); logPath != "" {
+		if logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
+			fmt.Fprintf(logFile, "DEBUG: handleMainMenuSelection called, cursor: %d\n", m.cursor)
+			logFile.Close()
+		}
+	}
 	handler := handlers.NewMainMenuHandler()
 	screen, operation, choices, cmd := handler.HandleSelection(m.cursor)
 
@@ -922,6 +948,14 @@ func (m Model) handleMainMenuSelection() (tea.Model, tea.Cmd) {
 	if choices != nil {
 		m.choices = choices
 		m.cursor = 0
+	}
+
+	// Log the result of main menu selection
+	if logPath := getLogFilePath(); logPath != "" {
+		if logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
+			fmt.Fprintf(logFile, "DEBUG: Main menu selection result - screen: %v, operation: %s\n", screen, operation)
+			logFile.Close()
+		}
 	}
 
 	if cmd != nil {
@@ -958,13 +992,34 @@ func (m Model) handleBackupMenuSelection() (tea.Model, tea.Cmd) {
 
 // handleRestoreMenuSelection handles selection logic for the restore menu screen
 func (m Model) handleRestoreMenuSelection() (tea.Model, tea.Cmd) {
+	// Log restore menu selection
+	if logPath := getLogFilePath(); logPath != "" {
+		if logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
+			fmt.Fprintf(logFile, "DEBUG: handleRestoreMenuSelection called, cursor: %d\n", m.cursor)
+			logFile.Close()
+		}
+	}
 	switch m.cursor {
 	case 0: // Restore to Current System
 		m.operation = "system_restore"
+		// Log that we're setting up system restore
+		if logPath := getLogFilePath(); logPath != "" {
+			if logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
+				fmt.Fprintf(logFile, "DEBUG: Setting operation to system_restore, calling LoadDrives()\n")
+				logFile.Close()
+			}
+		}
 		// Go to drive selection first
 		return m, LoadDrives()
 	case 1: // Restore to Custom Path
 		m.operation = "custom_restore"
+		// Log that we're setting up custom restore
+		if logPath := getLogFilePath(); logPath != "" {
+			if logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
+				fmt.Fprintf(logFile, "DEBUG: Setting operation to custom_restore, calling LoadDrives()\n")
+				logFile.Close()
+			}
+		}
 		// Go to drive selection first
 		return m, LoadDrives()
 	case 2: // Back
@@ -1260,9 +1315,24 @@ func (m Model) handleSelection() (tea.Model, tea.Cmd) {
 			}
 		}
 	case screens.ScreenDriveSelect:
+		// Log drive selection screen handling
+		if logPath := getLogFilePath(); logPath != "" {
+			if logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
+				fmt.Fprintf(logFile, "DEBUG: ScreenDriveSelect handling, cursor: %d, total drives: %d, operation: %s\n", m.cursor, len(m.drives), m.operation)
+				logFile.Close()
+			}
+		}
 		if m.cursor < len(m.drives) {
 			selectedDrive := m.drives[m.cursor]
 			m.selectedDrive = selectedDrive.Device
+
+			// Log the selected drive
+			if logPath := getLogFilePath(); logPath != "" {
+				if logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
+					fmt.Fprintf(logFile, "DEBUG: Selected drive: %s (%s) - %s\n", selectedDrive.Device, selectedDrive.Label, selectedDrive.Size)
+					logFile.Close()
+				}
+			}
 
 			// IMMEDIATE FEEDBACK: Show mounting message
 			m.message = "🔧 Mounting drive and checking space..."
