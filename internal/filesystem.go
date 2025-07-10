@@ -314,10 +314,7 @@ func syncDirectoriesWithSelectiveInclusions(src, dst string,
 					copiedFilesListMutex.Lock()
 					copiedFilesList = append(copiedFilesList, path)
 					copiedFilesListMutex.Unlock()
-					if logFile != nil && filesCopied%1000 == 0 { // Log every 1000 files instead of 100
-						fmt.Fprintf(logFile, "Copied %s files, skipped %s identical files\n",
-							FormatNumber(filesCopied), FormatNumber(filesSkipped))
-					}
+
 				}
 				return nil
 			}
@@ -334,9 +331,6 @@ func syncDirectoriesWithSelectiveInclusions(src, dst string,
 				// For large files, do immediate size comparison without extra syscalls
 				if srcInfo.Size() == dstStat.Size() {
 					atomic.AddInt64(&filesSkipped, 1)
-					if logFile != nil && filesSkipped%100 == 0 {
-						fmt.Fprintf(logFile, "LARGE FILE FAST-SKIP: %s (size: %s) - sizes match\n", path, FormatBytes(dstStat.Size()))
-					}
 					return nil
 				}
 				// Sizes don't match - fall through to copy
@@ -344,9 +338,6 @@ func syncDirectoriesWithSelectiveInclusions(src, dst string,
 				// Regular file size comparison
 				if srcInfo.Size() == dstStat.Size() {
 					atomic.AddInt64(&filesSkipped, 1)
-					if logFile != nil && filesSkipped%500 == 0 { // Less frequent logging
-						fmt.Fprintf(logFile, "Skipped %s identical files so far...\n", FormatNumber(filesSkipped))
-					}
 					return nil
 				}
 			}
@@ -368,10 +359,7 @@ func syncDirectoriesWithSelectiveInclusions(src, dst string,
 				copiedFilesListMutex.Lock()
 				copiedFilesList = append(copiedFilesList, path)
 				copiedFilesListMutex.Unlock()
-				if logFile != nil && filesCopied%100 == 0 {
-					fmt.Fprintf(logFile, "Copied %s files, skipped %s identical files\n",
-						FormatNumber(filesCopied), FormatNumber(filesSkipped))
-				}
+
 			}
 			return nil
 		}
@@ -390,10 +378,6 @@ func syncDirectoriesWithSelectiveInclusions(src, dst string,
 	directoryWalkComplete = true
 
 	// Log final summary
-	if logFile != nil {
-		fmt.Fprintf(logFile, "Hierarchical sync completed: copied %s files, skipped %s identical files, processed %s total\n",
-			FormatNumber(filesCopied), FormatNumber(filesSkipped), FormatNumber(totalFilesFound))
-	}
 
 	return err
 }
@@ -598,10 +582,7 @@ func syncDirectoriesWithExclusions(src, dst string, excludePatterns []string, lo
 					copiedFilesListMutex.Lock()
 					copiedFilesList = append(copiedFilesList, path)
 					copiedFilesListMutex.Unlock()
-					if logFile != nil && filesCopied%1000 == 0 { // Log every 1000 files instead of 100
-						fmt.Fprintf(logFile, "Copied %s files, skipped %s identical files\n",
-							FormatNumber(filesCopied), FormatNumber(filesSkipped))
-					}
+
 				}
 				return nil
 			}
@@ -618,9 +599,6 @@ func syncDirectoriesWithExclusions(src, dst string, excludePatterns []string, lo
 				// For large files, do immediate size comparison without extra syscalls
 				if srcInfo.Size() == dstStat.Size() {
 					atomic.AddInt64(&filesSkipped, 1)
-					if logFile != nil && filesSkipped%100 == 0 {
-						fmt.Fprintf(logFile, "LARGE FILE FAST-SKIP: %s (size: %s) - sizes match\n", path, FormatBytes(dstStat.Size()))
-					}
 					return nil
 				}
 				// Sizes don't match - fall through to copy
@@ -628,9 +606,6 @@ func syncDirectoriesWithExclusions(src, dst string, excludePatterns []string, lo
 				// Regular file size comparison
 				if srcInfo.Size() == dstStat.Size() {
 					atomic.AddInt64(&filesSkipped, 1)
-					if logFile != nil && filesSkipped%500 == 0 { // Less frequent logging
-						fmt.Fprintf(logFile, "Skipped %s identical files so far...\n", FormatNumber(filesSkipped))
-					}
 					return nil
 				}
 			}
@@ -652,10 +627,7 @@ func syncDirectoriesWithExclusions(src, dst string, excludePatterns []string, lo
 				copiedFilesListMutex.Lock()
 				copiedFilesList = append(copiedFilesList, path)
 				copiedFilesListMutex.Unlock()
-				if logFile != nil && filesCopied%100 == 0 {
-					fmt.Fprintf(logFile, "Copied %s files, skipped %s identical files\n",
-						FormatNumber(filesCopied), FormatNumber(filesSkipped))
-				}
+
 			}
 			return nil
 		}
@@ -674,10 +646,6 @@ func syncDirectoriesWithExclusions(src, dst string, excludePatterns []string, lo
 	directoryWalkComplete = true
 
 	// Log final summary
-	if logFile != nil {
-		fmt.Fprintf(logFile, "Sync completed: copied %s files, skipped %s identical files, processed %s total\n",
-			FormatNumber(filesCopied), FormatNumber(filesSkipped), FormatNumber(totalFilesFound))
-	}
 
 	return err
 }

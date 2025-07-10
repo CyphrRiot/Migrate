@@ -93,12 +93,7 @@ type Model struct {
 func InitialModel() Model {
 	// Log initial model creation
 	if logPath := getLogFilePath(); logPath != "" {
-		if logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
-			fmt.Fprintf(logFile, "\n=== MIGRATE DEBUG SESSION STARTED ===\n")
-			fmt.Fprintf(logFile, "DEBUG: InitialModel() called, creating new model\n")
-			fmt.Fprintf(logFile, "DEBUG: Log file path: %s\n", logPath)
-			logFile.Close()
-		}
+
 	}
 	return Model{
 		screen:            screens.ScreenMain,
@@ -148,16 +143,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case DrivesLoaded:
-		// Log when drives are loaded
-		if logPath := getLogFilePath(); logPath != "" {
-			if logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
-				fmt.Fprintf(logFile, "DEBUG: DrivesLoaded message received, %d drives found\n", len(msg.Drives))
-				for i, drive := range msg.Drives {
-					fmt.Fprintf(logFile, "DEBUG: Drive %d: %s (%s) - %s\n", i, drive.Device, drive.Label, drive.Size)
-				}
-				logFile.Close()
-			}
-		}
+
 		m.drives = msg.Drives
 		m.choices = make([]string, len(m.drives)+1)
 		for i, drive := range m.drives {
@@ -376,13 +362,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				msg.drivePath, msg.mountPoint, m.operation)
 			os.WriteFile(debugFile, debugBuf, 0644)
 
-			// Log to file instead of stdout
-			if logPath := getLogFilePath(); logPath != "" {
-				if logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
-					fmt.Fprintf(logFile, "DEBUG: Drive successfully mounted, operation: %s\n", m.operation)
-					logFile.Close()
-				}
-			}
 			if strings.Contains(m.operation, "backup") {
 				// Backup confirmation
 				backupTypeDesc := "ENTIRE SYSTEM"
@@ -407,24 +386,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Write debug info
 				os.WriteFile(debugFile+"_restore", []byte(fmt.Sprintf("Starting backup type detection for restore at: %s", msg.mountPoint)), 0644)
 
-				// Log to file instead of stdout
-				if logPath := getLogFilePath(); logPath != "" {
-					if logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
-						fmt.Fprintf(logFile, "DEBUG: Starting backup type detection for restore at: %s\n", msg.mountPoint)
-						logFile.Close()
-					}
-				}
 				backupType, err := detectBackupType(msg.mountPoint)
 				if err != nil {
 					// Backup type detection failed - show error
 					os.WriteFile(debugFile+"_restore_error", []byte(fmt.Sprintf("Backup type detection failed: %v", err)), 0644)
 
-					if logPath := getLogFilePath(); logPath != "" {
-						if logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
-							fmt.Fprintf(logFile, "DEBUG: Backup type detection failed: %v\n", err)
-							logFile.Close()
-						}
-					}
 					errorMsg := fmt.Sprintf("❌ Invalid backup drive\n\nThis drive does not contain a valid migrate backup.\n\nError: %v\n\n💡 Make sure you selected the correct drive that contains your backup.", err)
 					m.message = errorMsg
 					m.errorRequiresManualDismissal = true
@@ -438,22 +404,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				buf = fmt.Appendf(buf, "Backup type detected: %s", backupType)
 				os.WriteFile(debugFile+"_restore_type", buf, 0644)
 
-				if logPath := getLogFilePath(); logPath != "" {
-					if logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
-						fmt.Fprintf(logFile, "DEBUG: Backup type detected: %s\n", backupType)
-						logFile.Close()
-					}
-				}
 				if backupType == "home" {
 					// It's a home backup - change operation type and proceed with folder selection
 					os.WriteFile(debugFile+"_restore_home_backup", []byte("Home backup detected, checking restore flow"), 0644)
-
-					if logPath := getLogFilePath(); logPath != "" {
-						if logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
-							fmt.Fprintf(logFile, "DEBUG: Home backup detected, restoreOptionsConfigured: %v\n", m.restoreOptionsConfigured)
-							logFile.Close()
-						}
-					}
 
 					m.selectedDrive = msg.mountPoint
 
@@ -463,13 +416,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 					// Always go to folder selection first for home backups
 					os.WriteFile(debugFile+"_restore_folder_selection", []byte("Home backup detected, going to folder selection"), 0644)
-
-					if logPath := getLogFilePath(); logPath != "" {
-						if logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
-							fmt.Fprintf(logFile, "DEBUG: Home backup detected, going to folder selection (restoreOptionsConfigured: %v)\n", m.restoreOptionsConfigured)
-							logFile.Close()
-						}
-					}
 
 					m.screen = screens.ScreenRestoreFolderSelect
 					m.cursor = 0
@@ -482,13 +428,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 				// System backup detected - proceed with confirmation
 				os.WriteFile(debugFile+"_restore_system_backup", []byte("System backup detected, showing confirmation dialog"), 0644)
-
-				if logPath := getLogFilePath(); logPath != "" {
-					if logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
-						fmt.Fprintf(logFile, "DEBUG: System backup detected, showing confirmation dialog\n")
-						logFile.Close()
-					}
-				}
 
 				// SPACE CHECK MOVED: Don't check space here for system restore
 				// Space checking now happens after user selections in confirmation (see ScreenConfirm case)
@@ -1009,10 +948,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) handleMainMenuSelection() (tea.Model, tea.Cmd) {
 	// Log main menu selection
 	if logPath := getLogFilePath(); logPath != "" {
-		if logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
-			fmt.Fprintf(logFile, "DEBUG: handleMainMenuSelection called, cursor: %d\n", m.cursor)
-			logFile.Close()
-		}
+
 	}
 	handler := handlers.NewMainMenuHandler()
 	screen, operation, choices, cmd := handler.HandleSelection(m.cursor)
@@ -1028,10 +964,7 @@ func (m Model) handleMainMenuSelection() (tea.Model, tea.Cmd) {
 
 	// Log the result of main menu selection
 	if logPath := getLogFilePath(); logPath != "" {
-		if logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
-			fmt.Fprintf(logFile, "DEBUG: Main menu selection result - screen: %v, operation: %s\n", screen, operation)
-			logFile.Close()
-		}
+
 	}
 
 	if cmd != nil {
@@ -1070,10 +1003,7 @@ func (m Model) handleBackupMenuSelection() (tea.Model, tea.Cmd) {
 func (m Model) handleRestoreMenuSelection() (tea.Model, tea.Cmd) {
 	// Log restore menu selection
 	if logPath := getLogFilePath(); logPath != "" {
-		if logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
-			fmt.Fprintf(logFile, "DEBUG: handleRestoreMenuSelection called, cursor: %d\n", m.cursor)
-			logFile.Close()
-		}
+
 	}
 
 	handler := handlers.NewRestoreMenuHandler()
@@ -1090,10 +1020,7 @@ func (m Model) handleRestoreMenuSelection() (tea.Model, tea.Cmd) {
 
 	// Log the result of restore menu selection
 	if logPath := getLogFilePath(); logPath != "" {
-		if logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
-			fmt.Fprintf(logFile, "DEBUG: Restore menu selection result - screen: %v, operation: %s\n", screen, operation)
-			logFile.Close()
-		}
+
 	}
 
 	// Since we go directly to drive selection now, load drives
@@ -1502,10 +1429,7 @@ func (m Model) handleSelection() (tea.Model, tea.Cmd) {
 	case screens.ScreenDriveSelect:
 		// Log drive selection screen handling
 		if logPath := getLogFilePath(); logPath != "" {
-			if logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
-				fmt.Fprintf(logFile, "DEBUG: ScreenDriveSelect handling, cursor: %d, total drives: %d, operation: %s\n", m.cursor, len(m.drives), m.operation)
-				logFile.Close()
-			}
+
 		}
 		if m.cursor < len(m.drives) {
 			selectedDrive := m.drives[m.cursor]
@@ -1513,10 +1437,7 @@ func (m Model) handleSelection() (tea.Model, tea.Cmd) {
 
 			// Log the selected drive
 			if logPath := getLogFilePath(); logPath != "" {
-				if logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
-					fmt.Fprintf(logFile, "DEBUG: Selected drive: %s (%s) - %s\n", selectedDrive.Device, selectedDrive.Label, selectedDrive.Size)
-					logFile.Close()
-				}
+
 			}
 
 			// IMMEDIATE FEEDBACK: Show mounting message
@@ -1534,10 +1455,7 @@ func (m Model) handleSelection() (tea.Model, tea.Cmd) {
 			} else if strings.Contains(m.operation, "restore") {
 				// For restore: mount drive for source backup
 				if logPath := getLogFilePath(); logPath != "" {
-					if logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
-						fmt.Fprintf(logFile, "DEBUG: Starting restore operation for drive: %s (Device: %s, Label: %s)\n", selectedDrive.Device, selectedDrive.Device, selectedDrive.Label)
-						logFile.Close()
-					}
+
 				}
 				return m, mountDriveForRestore(selectedDrive)
 			} else if strings.Contains(m.operation, "verify") {

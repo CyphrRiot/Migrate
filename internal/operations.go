@@ -294,11 +294,6 @@ func performPureGoBackup(config BackupConfig, logFile *os.File) error {
 		if logFile != nil {
 			fmt.Fprintf(logFile, "=== SELECTIVE BACKUP MODE ===\n")
 			fmt.Fprintf(logFile, "Selected folders: %+v\n", config.SelectedFolders)
-			fmt.Fprintf(logFile, "HomeFolders metadata: %d folders\n", len(config.HomeFolders))
-			fmt.Fprintf(logFile, "DEBUG: Folder selection details:\n")
-			for folderPath, isSelected := range config.SelectedFolders {
-				fmt.Fprintf(logFile, "  Folder: '%s' -> Selected: %t\n", folderPath, isSelected)
-			}
 		}
 
 		// BULLETPROOF HIERARCHICAL EXCLUSION LOGIC
@@ -389,9 +384,7 @@ func performPureGoBackup(config BackupConfig, logFile *os.File) error {
 
 	// Skip verification if disabled
 	if !EnableVerification {
-		if logFile != nil {
-			fmt.Fprintf(logFile, "Verification skipped (disabled for debugging)\n")
-		}
+
 	} else {
 		err = performBackupVerification(config.SourcePath, config.DestinationPath, config.ExcludePatterns, logFile)
 		if err != nil {
@@ -418,7 +411,7 @@ func CheckTUIBackupProgress() tea.Cmd {
 		// During intensive I/O phases, update less frequently
 		updateInterval = 500 * time.Millisecond
 	}
-	
+
 	return tea.Tick(updateInterval, func(t time.Time) tea.Msg {
 		// Check if cancellation was requested - switch to cancelling state
 		if shouldCancelBackup() && !tuiBackupCancelling && !tuiBackupCompleted {
@@ -686,7 +679,7 @@ func startRestore(sourcePath, targetPath string, restoreConfig, restoreWindowMgr
 		// Add a debug file marker to indicate this function was called
 		debugFile := "/tmp/migrate_restore_debug"
 		ioutil.WriteFile(debugFile, []byte(fmt.Sprintf("Restore called with: source=%s, target=%s", sourcePath, targetPath)), 0644)
-		
+
 		// Setup logging in appropriate directory
 		logPath := getLogFilePath()
 		logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
@@ -759,7 +752,7 @@ func startRestore(sourcePath, targetPath string, restoreConfig, restoreWindowMgr
 		if logFile != nil {
 			fmt.Fprintf(logFile, "Checking if internal drive has sufficient space for restore...\n")
 		}
-		
+
 		// Get the drive size from the source drive info (we need this to pass to checkRestoreSpaceRequirements)
 		// For restore, sourcePath is the mount point, so we can use it directly
 		err = checkRestoreSpaceRequirements("", sourcePath) // Pass empty driveSize, mountPoint as sourcePath
@@ -769,7 +762,7 @@ func startRestore(sourcePath, targetPath string, restoreConfig, restoreWindowMgr
 			}
 			return ProgressUpdate{Error: err, Done: true}
 		}
-		
+
 		if logFile != nil {
 			fmt.Fprintf(logFile, "Space check passed - internal drive has sufficient capacity\n")
 		}
@@ -849,7 +842,7 @@ func runSelectiveRestoreSilently(sourcePath string, selectedFolders map[string]b
 		fmt.Fprintf(logFile, "Space check already completed during folder selection - proceeding with restore\n")
 	}
 
-	// Perform selective restore synchronously 
+	// Perform selective restore synchronously
 	err = performSelectiveRestore(sourcePath, homeDir, selectedFolders, allFolders, restoreConfig, restoreWindowMgrs, logFile)
 	if err != nil {
 		if logFile != nil {
@@ -910,7 +903,7 @@ func performSelectiveRestore(backupPath, targetPath string, selectedFolders map[
 	if logFile != nil {
 		fmt.Fprintf(logFile, "Phase 1: Counting files in selected folders for progress tracking...\n")
 	}
-	
+
 	totalFiles := int64(0)
 	for _, folderName := range foldersToRestore {
 		sourceFolderPath := filepath.Join(backupPath, folderName)
@@ -918,11 +911,11 @@ func performSelectiveRestore(backupPath, targetPath string, selectedFolders map[
 			totalFiles += count
 		}
 	}
-	
+
 	// Initialize progress tracking with the actual file count
 	totalFilesFound = totalFiles
 	directoryWalkComplete = true // Mark directory scan as complete
-	
+
 	if logFile != nil {
 		fmt.Fprintf(logFile, "Total files to restore: %d\n", totalFiles)
 		fmt.Fprintf(logFile, "Phase 2: Starting folder restoration...\n")
@@ -960,10 +953,10 @@ func performSelectiveRestore(backupPath, targetPath string, selectedFolders map[
 			// Don't fail the entire restore for cleanup issues
 		}
 	}
-	
+
 	// Mark sync phase as complete
 	syncPhaseComplete = true
-	
+
 	if logFile != nil {
 		fmt.Fprintf(logFile, "All selected folders restored successfully\n")
 	}
@@ -1061,20 +1054,14 @@ func detectBackupType(backupPath string) (string, error) {
 
 	// Log to file instead of stdout
 	if logPath := getLogFilePath(); logPath != "" {
-		if logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
-			fmt.Fprintf(logFile, "DEBUG: detectBackupType called with path: %s\n", backupPath)
-			logFile.Close()
-		}
+
 	}
 
 	infoPath := filepath.Join(backupPath, "BACKUP-INFO.txt")
 	ioutil.WriteFile(debugFile+"_looking_for", []byte(fmt.Sprintf("Looking for BACKUP-INFO.txt at: %s", infoPath)), 0644)
-	
+
 	if logPath := getLogFilePath(); logPath != "" {
-		if logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
-			fmt.Fprintf(logFile, "DEBUG: Looking for BACKUP-INFO.txt at: %s\n", infoPath)
-			logFile.Close()
-		}
+
 	}
 
 	content, err := os.ReadFile(infoPath)
@@ -1091,12 +1078,9 @@ func detectBackupType(backupPath string) (string, error) {
 
 	contentStr := string(content)
 	ioutil.WriteFile(debugFile+"_content", []byte(contentStr), 0644)
-	
+
 	if logPath := getLogFilePath(); logPath != "" {
-		if logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
-			fmt.Fprintf(logFile, "DEBUG: BACKUP-INFO.txt content: %s\n", contentStr)
-			logFile.Close()
-		}
+
 	}
 
 	if strings.Contains(contentStr, "Backup Type: Complete System") {
@@ -1127,7 +1111,7 @@ func detectBackupType(backupPath string) (string, error) {
 		}
 	}
 	ioutil.WriteFile(debugFile+"_fallback", []byte("Backup type not found in BACKUP-INFO.txt, trying folder structure detection"), 0644)
-	
+
 	if _, err := os.Stat(filepath.Join(backupPath, "etc")); err == nil {
 		// Has /etc directory - likely system backup
 		if logPath := getLogFilePath(); logPath != "" {
@@ -1416,13 +1400,14 @@ func createBackupConfig(operationType, mountPoint string, selectedFolders map[st
 		}
 
 		config = BackupConfig{
-			SourcePath:        homeDir,
-			DestinationPath:   mountPoint,
-			ExcludePatterns:   GetHomeBackupExclusions(),
-			BackupType:        "Home Directory",
-			IsSelectiveBackup: true,
-			SelectedFolders:   selectedFolders,
-			HomeFolders:       homeFolders,
+			SourcePath:         homeDir,
+			DestinationPath:    mountPoint,
+			ExcludePatterns:    GetHomeBackupExclusions(),
+			BackupType:         "Home Directory",
+			IsSelectiveBackup:  true,
+			SelectedFolders:    selectedFolders,
+			HomeFolders:        homeFolders,
+			SelectedSubfolders: selectedFolders,
 		}
 
 	default:
@@ -1630,20 +1615,20 @@ func hasSubfolders(folderPath string, homeFolders []HomeFolderInfo) bool {
 // Used for progress tracking to provide accurate file counts before restore operations.
 func countFilesInDirectory(dirPath string) (int64, error) {
 	var count int64 = 0
-	
+
 	err := filepath.WalkDir(dirPath, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			// Skip errors but continue counting - don't fail entire operation
 			return nil
 		}
-		
+
 		// Only count regular files, not directories
 		if !d.IsDir() {
 			count++
 		}
-		
+
 		return nil
 	})
-	
+
 	return count, err
 }
