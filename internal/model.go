@@ -15,7 +15,6 @@ package internal
 
 import (
 	"fmt"
-	"io/ioutil"
 	"migrate/internal/handlers"
 	"migrate/internal/screens"
 	"migrate/internal/state"
@@ -74,7 +73,7 @@ type Model struct {
 	// Restore options
 	restoreConfig     bool // Restore ~/.config directory
 	restoreWindowMgrs bool // Restore window managers (Hyprland, GNOME, etc.)
-	
+
 	// NEW: Track if user has already been through restore options
 	restoreOptionsConfigured bool // True if user has already configured restore options
 
@@ -152,14 +151,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Log when drives are loaded
 		if logPath := getLogFilePath(); logPath != "" {
 			if logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
-				fmt.Fprintf(logFile, "DEBUG: DrivesLoaded message received, %d drives found\n", len(msg.drives))
-				for i, drive := range msg.drives {
+				fmt.Fprintf(logFile, "DEBUG: DrivesLoaded message received, %d drives found\n", len(msg.Drives))
+				for i, drive := range msg.Drives {
 					fmt.Fprintf(logFile, "DEBUG: Drive %d: %s (%s) - %s\n", i, drive.Device, drive.Label, drive.Size)
 				}
 				logFile.Close()
 			}
 		}
-		m.drives = msg.drives
+		m.drives = msg.Drives
 		m.choices = make([]string, len(m.drives)+1)
 		for i, drive := range m.drives {
 			m.choices[i] = fmt.Sprintf("💾 %s (%s) - %s", drive.Device, drive.Size, drive.Label)
@@ -344,8 +343,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.error != nil {
 			// Write debug info
 			debugFile := "/tmp/migrate_bds_error"
-			ioutil.WriteFile(debugFile, []byte(fmt.Sprintf("BackupDriveStatus error: %v", msg.error)), 0644)
-			
+			var buf []byte
+			buf = fmt.Appendf(buf, "BackupDriveStatus error: %v", msg.error)
+			os.WriteFile(debugFile, buf, 0644)
+
 			// Check if this is a space requirement error (INSUFFICIENT SPACE) or LUKS error
 			errorMsg := msg.error.Error()
 			if strings.Contains(errorMsg, "LUKS drive is locked") ||
@@ -370,9 +371,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Drive successfully mounted, confirm operation
 			// Write debug info
 			debugFile := "/tmp/migrate_bds_success"
-			ioutil.WriteFile(debugFile, []byte(fmt.Sprintf("BackupDriveStatus success: drive=%s mountpoint=%s operation=%s", 
-				msg.drivePath, msg.mountPoint, m.operation)), 0644)
-			
+			var debugBuf []byte
+			debugBuf = fmt.Appendf(debugBuf, "BackupDriveStatus success: drive=%s mountpoint=%s operation=%s",
+				msg.drivePath, msg.mountPoint, m.operation)
+			os.WriteFile(debugFile, debugBuf, 0644)
+
 			// Log to file instead of stdout
 			if logPath := getLogFilePath(); logPath != "" {
 				if logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
@@ -402,8 +405,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else if strings.Contains(m.operation, "restore") {
 				// For restore, first detect backup type
 				// Write debug info
-				ioutil.WriteFile(debugFile+"_restore", []byte(fmt.Sprintf("Starting backup type detection for restore at: %s", msg.mountPoint)), 0644)
-				
+				os.WriteFile(debugFile+"_restore", []byte(fmt.Sprintf("Starting backup type detection for restore at: %s", msg.mountPoint)), 0644)
+
 				// Log to file instead of stdout
 				if logPath := getLogFilePath(); logPath != "" {
 					if logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
@@ -414,8 +417,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				backupType, err := detectBackupType(msg.mountPoint)
 				if err != nil {
 					// Backup type detection failed - show error
-					ioutil.WriteFile(debugFile+"_restore_error", []byte(fmt.Sprintf("Backup type detection failed: %v", err)), 0644)
-					
+					os.WriteFile(debugFile+"_restore_error", []byte(fmt.Sprintf("Backup type detection failed: %v", err)), 0644)
+
 					if logPath := getLogFilePath(); logPath != "" {
 						if logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
 							fmt.Fprintf(logFile, "DEBUG: Backup type detection failed: %v\n", err)
@@ -431,8 +434,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 
 				// Log to file instead of stdout
-				ioutil.WriteFile(debugFile+"_restore_type", []byte(fmt.Sprintf("Backup type detected: %s", backupType)), 0644)
-				
+				var buf []byte
+				buf = fmt.Appendf(buf, "Backup type detected: %s", backupType)
+				os.WriteFile(debugFile+"_restore_type", buf, 0644)
+
 				if logPath := getLogFilePath(); logPath != "" {
 					if logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
 						fmt.Fprintf(logFile, "DEBUG: Backup type detected: %s\n", backupType)
@@ -441,31 +446,31 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				if backupType == "home" {
 					// It's a home backup - change operation type and proceed with folder selection
-					ioutil.WriteFile(debugFile+"_restore_home_backup", []byte("Home backup detected, checking restore flow"), 0644)
-					
+					os.WriteFile(debugFile+"_restore_home_backup", []byte("Home backup detected, checking restore flow"), 0644)
+
 					if logPath := getLogFilePath(); logPath != "" {
 						if logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
 							fmt.Fprintf(logFile, "DEBUG: Home backup detected, restoreOptionsConfigured: %v\n", m.restoreOptionsConfigured)
 							logFile.Close()
 						}
 					}
-					
+
 					m.selectedDrive = msg.mountPoint
-					
+
 					// CRITICAL FIX: Change operation type from "system_restore" to "home_restore"
 					// This ensures the UI will show the correct operation type and target
 					m.operation = "home_restore"
-					
-	// Always go to folder selection first for home backups
-					ioutil.WriteFile(debugFile+"_restore_folder_selection", []byte("Home backup detected, going to folder selection"), 0644)
-					
+
+					// Always go to folder selection first for home backups
+					os.WriteFile(debugFile+"_restore_folder_selection", []byte("Home backup detected, going to folder selection"), 0644)
+
 					if logPath := getLogFilePath(); logPath != "" {
 						if logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
 							fmt.Fprintf(logFile, "DEBUG: Home backup detected, going to folder selection (restoreOptionsConfigured: %v)\n", m.restoreOptionsConfigured)
 							logFile.Close()
 						}
 					}
-					
+
 					m.screen = screens.ScreenRestoreFolderSelect
 					m.cursor = 0
 					// Initialize restore folder state
@@ -476,8 +481,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 
 				// System backup detected - proceed with confirmation
-				ioutil.WriteFile(debugFile+"_restore_system_backup", []byte("System backup detected, showing confirmation dialog"), 0644)
-				
+				os.WriteFile(debugFile+"_restore_system_backup", []byte("System backup detected, showing confirmation dialog"), 0644)
+
 				if logPath := getLogFilePath(); logPath != "" {
 					if logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
 						fmt.Fprintf(logFile, "DEBUG: System backup detected, showing confirmation dialog\n")
@@ -507,10 +512,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.selectedDrive = msg.mountPoint // Store mount point for operation
 			m.screen = screens.ScreenConfirm
 			m.cursor = 0
-			
+
 			// Write debug info about confirmation screen
-			ioutil.WriteFile(debugFile+"_confirmation", []byte(fmt.Sprintf("Set screen to ScreenConfirm, stored mountPoint: %s", msg.mountPoint)), 0644)
-			
+			var buf []byte
+			buf = fmt.Appendf(buf, "Set screen to ScreenConfirm, stored mountPoint: %s", msg.mountPoint)
+			os.WriteFile(debugFile+"_confirmation", buf, 0644)
+
 			return m, nil
 		}
 
@@ -816,8 +823,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			} else if m.screen == screens.ScreenRestoreFolderSelect {
 				// Restore folder selection navigation (FIXED: Separate config and folders)
-				numControls := 2       // Continue, Back
-				numConfigItems := 2    // Configuration, Window Managers
+				numControls := 2    // Continue, Back
+				numConfigItems := 2 // Configuration, Window Managers
 				visibleFolders := m.getVisibleRestoreFolders()
 				maxCursor := numControls + numConfigItems + len(visibleFolders) - 1
 				if m.cursor > 0 {
@@ -879,8 +886,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			} else if m.screen == screens.ScreenRestoreFolderSelect {
 				// Restore folder selection navigation (FIXED: Separate config and folders)
-				numControls := 2       // Continue, Back
-				numConfigItems := 2    // Configuration, Window Managers
+				numControls := 2    // Continue, Back
+				numConfigItems := 2 // Configuration, Window Managers
 				visibleFolders := m.getVisibleRestoreFolders()
 				maxCursor := numControls + numConfigItems + len(visibleFolders) - 1
 				if m.cursor < maxCursor {
@@ -1068,7 +1075,7 @@ func (m Model) handleRestoreMenuSelection() (tea.Model, tea.Cmd) {
 			logFile.Close()
 		}
 	}
-	
+
 	handler := handlers.NewRestoreMenuHandler()
 	screen, operation, choices, _ := handler.HandleSelection(m.cursor)
 
@@ -1099,10 +1106,10 @@ func (m Model) handleRestoreMenuSelection() (tea.Model, tea.Cmd) {
 
 // handleRestoreFolderSelection handles folder selection for selective restore
 func (m Model) handleRestoreFolderSelection() (tea.Model, tea.Cmd) {
-	numControls := 2      // Continue, Back
-	numConfigItems := 2   // Configuration, Window Managers
+	numControls := 2    // Continue, Back
+	numConfigItems := 2 // Configuration, Window Managers
 	visibleFolders := m.getVisibleRestoreFolders()
-	
+
 	if m.cursor == 0 {
 		// Continue button - proceed with restore
 		if m.totalRestoreSize == 0 && !m.restoreConfig && !m.restoreWindowMgrs {
@@ -1125,7 +1132,7 @@ func (m Model) handleRestoreFolderSelection() (tea.Model, tea.Cmd) {
 		// Space check passed - proceed to confirmation
 		// Go directly to confirmation since everything is on one screen now
 		restoreTypeDesc := "HOME DIRECTORY"
-		
+
 		// Build summary of what will be restored
 		var restoreItems []string
 		if m.restoreConfig {
@@ -1134,7 +1141,7 @@ func (m Model) handleRestoreFolderSelection() (tea.Model, tea.Cmd) {
 		if m.restoreWindowMgrs {
 			restoreItems = append(restoreItems, "✅ Window Managers")
 		}
-		
+
 		selectedFolders := 0
 		for _, folder := range visibleFolders {
 			if m.selectedRestoreFolders[folder.Path] {
@@ -1144,28 +1151,28 @@ func (m Model) handleRestoreFolderSelection() (tea.Model, tea.Cmd) {
 		if selectedFolders > 0 {
 			restoreItems = append(restoreItems, fmt.Sprintf("✅ %d selected folders", selectedFolders))
 		}
-		
+
 		var itemsList string
 		if len(restoreItems) > 0 {
 			itemsList = "Items to restore:\n" + strings.Join(restoreItems, "\n") + "\n\n"
 		}
-		
+
 		// Calculate total size including config estimates
 		totalSize := m.totalRestoreSize
 		if m.restoreConfig {
 			totalSize += 100 * 1024 * 1024 // ~100MB estimate
 		}
 		if m.restoreWindowMgrs {
-			totalSize += 50 * 1024 * 1024 // ~50MB estimate  
+			totalSize += 50 * 1024 * 1024 // ~50MB estimate
 		}
-		
+
 		m.confirmation = fmt.Sprintf("Ready to restore %s\n\n%sTotal size: %s\nSource: %s\n\n⚠️ This will OVERWRITE existing files!\n\nProceed with restore?",
 			restoreTypeDesc, itemsList, FormatBytes(totalSize), m.selectedDrive)
-		
+
 		m.screen = screens.ScreenConfirm
 		m.cursor = 0
 		return m, nil
-		
+
 	} else if m.cursor == 1 {
 		// Back button - go back to restore menu and clear all restore state
 		m.screen = screens.ScreenRestore
@@ -1182,8 +1189,8 @@ func (m Model) handleRestoreFolderSelection() (tea.Model, tea.Cmd) {
 		m.selectedDrive = ""
 		m.message = ""
 		return m, nil
-		
-	} else if m.cursor >= numControls && m.cursor < numControls + numConfigItems {
+
+	} else if m.cursor >= numControls && m.cursor < numControls+numConfigItems {
 		// Config item selection
 		configIndex := m.cursor - numControls
 		if configIndex == 0 {
@@ -1194,11 +1201,11 @@ func (m Model) handleRestoreFolderSelection() (tea.Model, tea.Cmd) {
 			m.restoreWindowMgrs = !m.restoreWindowMgrs
 		}
 		m.calculateTotalRestoreSize()
-		
-	} else if m.cursor >= numControls + numConfigItems {
+
+	} else if m.cursor >= numControls+numConfigItems {
 		// Folder selection
 		folderIndex := m.cursor - numControls - numConfigItems
-		
+
 		if folderIndex >= 0 && folderIndex < len(visibleFolders) {
 			folder := visibleFolders[folderIndex]
 			if !folder.AlwaysInclude {
@@ -1207,7 +1214,7 @@ func (m Model) handleRestoreFolderSelection() (tea.Model, tea.Cmd) {
 			}
 		}
 	}
-	
+
 	return m, nil
 }
 
@@ -1298,7 +1305,7 @@ func (m Model) handleSelection() (tea.Model, tea.Cmd) {
 						// Space check passed - proceed with selective restore (NOT startRestore!)
 						return m, startSelectiveRestore(m.selectedDrive, m.selectedRestoreFolders, m.restoreFolders, m.restoreConfig, m.restoreWindowMgrs)
 					} else {
-						// This is a true system restore from a system backup - use full backup space checking  
+						// This is a true system restore from a system backup - use full backup space checking
 						err := checkRestoreSpaceRequirements("", m.selectedDrive)
 						if err != nil {
 							// Show the space error immediately - don't proceed with restore
@@ -1308,7 +1315,7 @@ func (m Model) handleSelection() (tea.Model, tea.Cmd) {
 							m.screen = screens.ScreenError
 							return m, nil
 						}
-						// Space check passed - proceed with full system restore to root ("/") 
+						// Space check passed - proceed with full system restore to root ("/")
 						return m, startRestore(m.selectedDrive, "/", m.restoreConfig, m.restoreWindowMgrs)
 					}
 				case "home_restore":

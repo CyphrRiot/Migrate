@@ -24,27 +24,27 @@ import (
 // This structure is saved to disk to remember user preferences between backup sessions.
 type SelectiveBackupConfig struct {
 	// Metadata
-	Version     string    `json:"version"`              // Config format version for migration
-	LastUpdated time.Time `json:"last_updated"`         // When this config was last saved
-	HomeDir     string    `json:"home_dir"`             // Home directory path for validation
-	
+	Version     string    `json:"version"`      // Config format version for migration
+	LastUpdated time.Time `json:"last_updated"` // When this config was last saved
+	HomeDir     string    `json:"home_dir"`     // Home directory path for validation
+
 	// Hierarchical Selection Data
-	FolderSelections map[string]bool `json:"folder_selections"` // folder_path -> selected state
+	FolderSelections map[string]bool             `json:"folder_selections"` // folder_path -> selected state
 	SubfolderCache   map[string][]SavedSubfolder `json:"subfolder_cache"`   // parent_path -> discovered subfolders
-	
+
 	// UI Navigation State (optional - for restoring drill-down state)
-	LastFolderPath   string   `json:"last_folder_path,omitempty"`   // Last drilled-down folder
-	LastBreadcrumb   []string `json:"last_breadcrumb,omitempty"`    // Last breadcrumb path
+	LastFolderPath string   `json:"last_folder_path,omitempty"` // Last drilled-down folder
+	LastBreadcrumb []string `json:"last_breadcrumb,omitempty"`  // Last breadcrumb path
 }
 
 // SavedSubfolder represents a cached subfolder for persistent storage.
 // This allows us to restore subfolder discoveries without re-scanning on every load.
 type SavedSubfolder struct {
-	Name          string `json:"name"`            // Folder name (e.g., "Personal")
-	Path          string `json:"path"`            // Full path (e.g., "/home/user/Videos/Personal")
-	Size          int64  `json:"size"`            // Size in bytes
-	IsVisible     bool   `json:"is_visible"`      // Whether folder should be shown in UI
-	HasSubfolders bool   `json:"has_subfolders"`  // Whether this folder can be drilled down further
+	Name          string `json:"name"`           // Folder name (e.g., "Personal")
+	Path          string `json:"path"`           // Full path (e.g., "/home/user/Videos/Personal")
+	Size          int64  `json:"size"`           // Size in bytes
+	IsVisible     bool   `json:"is_visible"`     // Whether folder should be shown in UI
+	HasSubfolders bool   `json:"has_subfolders"` // Whether this folder can be drilled down further
 }
 
 // getConfigDir returns the appropriate configuration directory for the current user.
@@ -54,15 +54,15 @@ func getConfigDir() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to get home directory: %v", err)
 	}
-	
+
 	configDir := filepath.Join(homeDir, ".config", "migrate")
-	
+
 	// Create config directory if it doesn't exist
 	err = os.MkdirAll(configDir, 0755)
 	if err != nil {
 		return "", fmt.Errorf("failed to create config directory: %v", err)
 	}
-	
+
 	return configDir, nil
 }
 
@@ -72,7 +72,7 @@ func getSelectiveBackupConfigPath() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	
+
 	return filepath.Join(configDir, "selective_backup.json"), nil
 }
 
@@ -83,15 +83,36 @@ func SaveSelectiveBackupConfig(selectedFolders map[string]bool, subfolderCache m
 	if err != nil {
 		return fmt.Errorf("failed to get config path: %v", err)
 	}
-	
-	// Get current user's home directory for validation
+
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return fmt.Errorf("failed to get home directory: %v", err)
 	}
-	
+
 	// Convert HomeFolderInfo to SavedSubfolder for JSON serialization
-	savedSubfolderCache := make(map[string][]SavedSubfolder)
+	savedSubfolderCache := convertToSavedSubfolders(subfolderCache)
+
+	config := SelectiveBackupConfig{
+		Version:          "1.0",
+		LastUpdated:      time.Now(),
+		HomeDir:          homeDir,
+		FolderSelections: selectedFolders,
+		SubfolderCache:   savedSubfolderCache,
+		LastFolderPath:   currentPath,
+		LastBreadcrumb:   breadcrumb,
+	}
+
+	jsonData, err := json.MarshalIndent(config, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal config: %v", err)
+	}
+
+	return writeFileAtomically(configPath, jsonData)
+}
+
+// convertToSavedSubfolders converts HomeFolderInfo map to SavedSubfolder map
+func convertToSavedSubfolders(subfolderCache map[string][]HomeFolderInfo) map[string][]SavedSubfolder {
+	result := make(map[string][]SavedSubfolder, len(subfolderCache))
 	for parentPath, subfolders := range subfolderCache {
 		savedSubfolders := make([]SavedSubfolder, len(subfolders))
 		for i, subfolder := range subfolders {
@@ -103,40 +124,24 @@ func SaveSelectiveBackupConfig(selectedFolders map[string]bool, subfolderCache m
 				HasSubfolders: subfolder.HasSubfolders,
 			}
 		}
-		savedSubfolderCache[parentPath] = savedSubfolders
+		result[parentPath] = savedSubfolders
 	}
-	
-	// Create config structure
-	config := SelectiveBackupConfig{
-		Version:          "1.0",
-		LastUpdated:      time.Now(),
-		HomeDir:          homeDir,
-		FolderSelections: selectedFolders,
-		SubfolderCache:   savedSubfolderCache,
-		LastFolderPath:   currentPath,
-		LastBreadcrumb:   breadcrumb,
-	}
-	
-	// Marshal to JSON with pretty printing for readability
-	jsonData, err := json.MarshalIndent(config, "", "  ")
-	if err != nil {
-		return fmt.Errorf("failed to marshal config: %v", err)
-	}
-	
-	// Write to file atomically (write to temp file, then rename)
-	tempPath := configPath + ".tmp"
-	err = os.WriteFile(tempPath, jsonData, 0644)
-	if err != nil {
+	return result
+}
+
+// writeFileAtomically writes data to a file atomically using temp file + rename
+func writeFileAtomically(filePath string, data []byte) error {
+	tempPath := filePath + ".tmp"
+
+	if err := os.WriteFile(tempPath, data, 0644); err != nil {
 		return fmt.Errorf("failed to write temp config file: %v", err)
 	}
-	
-	// Atomic rename
-	err = os.Rename(tempPath, configPath)
-	if err != nil {
+
+	if err := os.Rename(tempPath, filePath); err != nil {
 		os.Remove(tempPath) // Clean up temp file on failure
 		return fmt.Errorf("failed to rename config file: %v", err)
 	}
-	
+
 	return nil
 }
 
@@ -147,7 +152,7 @@ func LoadSelectiveBackupConfig() (*SelectiveBackupConfig, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to get config path: %v", err)
 	}
-	
+
 	// Check if config file exists
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
 		// No saved config - return empty config (first time use)
@@ -158,26 +163,26 @@ func LoadSelectiveBackupConfig() (*SelectiveBackupConfig, error) {
 			SubfolderCache:   make(map[string][]SavedSubfolder),
 		}, nil
 	}
-	
+
 	// Read existing config file
 	jsonData, err := os.ReadFile(configPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read config file: %v", err)
 	}
-	
+
 	// Parse JSON
 	var config SelectiveBackupConfig
 	err = json.Unmarshal(jsonData, &config)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse config JSON: %v", err)
 	}
-	
+
 	// Validate config against current home directory
 	currentHomeDir, err := os.UserHomeDir()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get current home directory: %v", err)
 	}
-	
+
 	// If home directory has changed, invalidate the config (user switched accounts)
 	if config.HomeDir != currentHomeDir {
 		return &SelectiveBackupConfig{
@@ -188,7 +193,7 @@ func LoadSelectiveBackupConfig() (*SelectiveBackupConfig, error) {
 			SubfolderCache:   make(map[string][]SavedSubfolder),
 		}, nil
 	}
-	
+
 	return &config, nil
 }
 
@@ -196,7 +201,7 @@ func LoadSelectiveBackupConfig() (*SelectiveBackupConfig, error) {
 // This is used when loading config to restore the subfolder cache in the UI model.
 func ConvertSavedSubfoldersToHomeFolders(savedSubfolders map[string][]SavedSubfolder) map[string][]HomeFolderInfo {
 	result := make(map[string][]HomeFolderInfo)
-	
+
 	for parentPath, savedList := range savedSubfolders {
 		homeFolders := make([]HomeFolderInfo, len(savedList))
 		for i, saved := range savedList {
@@ -214,7 +219,7 @@ func ConvertSavedSubfoldersToHomeFolders(savedSubfolders map[string][]SavedSubfo
 		}
 		result[parentPath] = homeFolders
 	}
-	
+
 	return result
 }
 
@@ -225,13 +230,13 @@ func ApplySelectionsToFolders(folders []HomeFolderInfo, savedSelections map[stri
 		if selected, exists := savedSelections[folders[i].Path]; exists {
 			folders[i].Selected = selected
 		}
-		
+
 		// Apply selections to subfolders as well
 		if len(folders[i].Subfolders) > 0 {
 			folders[i].Subfolders = ApplySelectionsToFolders(folders[i].Subfolders, savedSelections)
 		}
 	}
-	
+
 	return folders
 }
 
@@ -239,7 +244,7 @@ func ApplySelectionsToFolders(folders []HomeFolderInfo, savedSelections map[stri
 // This prevents the config file from growing indefinitely with stale entries.
 func CleanupOldSelections(selections map[string]bool) map[string]bool {
 	cleaned := make(map[string]bool)
-	
+
 	for folderPath, selected := range selections {
 		// Check if the folder still exists
 		if _, err := os.Stat(folderPath); err == nil {
@@ -247,7 +252,7 @@ func CleanupOldSelections(selections map[string]bool) map[string]bool {
 		}
 		// If folder doesn't exist, we simply don't add it to cleaned map (removes it)
 	}
-	
+
 	return cleaned
 }
 
@@ -258,21 +263,21 @@ func GetConfigSummary() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	
+
 	selectedCount := 0
 	totalCount := len(config.FolderSelections)
-	
+
 	for _, selected := range config.FolderSelections {
 		if selected {
 			selectedCount++
 		}
 	}
-	
+
 	cacheCount := 0
 	for _, subfolders := range config.SubfolderCache {
 		cacheCount += len(subfolders)
 	}
-	
+
 	summary := fmt.Sprintf(`Configuration Summary:
   Version: %s
   Last Updated: %s
@@ -288,7 +293,7 @@ func GetConfigSummary() (string, error) {
 		selectedCount,
 		cacheCount,
 		config.LastFolderPath)
-	
+
 	return summary, nil
 }
 
@@ -299,12 +304,12 @@ func ResetSelectiveBackupConfig() error {
 	if err != nil {
 		return fmt.Errorf("failed to get config path: %v", err)
 	}
-	
+
 	// Simply remove the config file
 	err = os.Remove(configPath)
 	if err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("failed to remove config file: %v", err)
 	}
-	
+
 	return nil
 }

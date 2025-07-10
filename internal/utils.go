@@ -11,6 +11,7 @@
 package internal
 
 import (
+	"migrate/internal/drives"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -352,51 +353,8 @@ func getLogFilePath() string {
 //	FormatBytes(999) -> "999 B"
 //
 // The function automatically promotes units (e.g., 1000GB becomes 1.0TB) for readability.
+// FormatBytes formats byte counts into human-readable size with proper units.
+// Use optimized version from drives package
 func FormatBytes(bytes int64) string {
-	const unit = 1024
-	if bytes < unit {
-		return strconv.FormatInt(bytes, 10) + " B"
-	}
-
-	// Calculate the appropriate unit
-	units := []string{"B", "KB", "MB", "GB", "TB", "PB"}
-	value := float64(bytes)
-	unitIndex := 0
-
-	for value >= unit && unitIndex < len(units)-1 {
-		value /= unit
-		unitIndex++
-	}
-
-	// If we have >= 1000 of current unit, promote to next unit (e.g., 1000GB -> 1.0TB)
-	if value >= 1000 && unitIndex < len(units)-1 {
-		value /= unit
-		unitIndex++
-	}
-
-	// Format the number based on its size
-	var formatted string
-	if value >= 100 {
-		// For 100+ units, show whole number with comma separator if > 999
-		wholeValue := int(value + 0.5) // Round to nearest integer
-		if wholeValue >= 1000 {
-			formatted = strconv.Itoa(wholeValue)
-			// Add comma thousands separator for readability
-			str := formatted
-			if len(str) > 3 {
-				n := len(str)
-				formatted = str[:n-3] + "," + str[n-3:]
-			}
-		} else {
-			formatted = strconv.FormatFloat(float64(wholeValue), 'f', 0, 64)
-		}
-	} else if value >= 10 {
-		// For 10-99.x units, show 1 decimal place
-		formatted = strconv.FormatFloat(value, 'f', 1, 64)
-	} else {
-		// For <10 units, show 2 decimal places
-		formatted = strconv.FormatFloat(value, 'f', 2, 64)
-	}
-
-	return formatted + " " + units[unitIndex]
+	return drives.FormatBytes(bytes)
 }

@@ -28,6 +28,8 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
+
+	"migrate/internal/drives"
 )
 
 // matchesExclusionPattern checks if a path matches an exclusion pattern with support for complex wildcards.
@@ -1111,68 +1113,32 @@ func deleteExtraFiles(backupPath, targetPath string, logFile *os.File) error {
 // GetUsedDiskSpace calculates used disk space using pure Go syscalls without external commands.
 // Returns the actual used bytes on the filesystem containing the specified path.
 // Uses syscall.Statfs for accurate filesystem statistics.
+// Use optimized version from drives package
 func GetUsedDiskSpace(path string) (int64, error) {
-	var stat syscall.Statfs_t
-	err := syscall.Statfs(path, &stat)
-	if err != nil {
-		return 0, fmt.Errorf("failed to get filesystem stats for %s: %v", path, err)
-	}
-
-	// Calculate used space: total - free
-	// stat.Blocks = total blocks
-	// stat.Bfree = free blocks (including reserved for root)
-	// stat.Bsize = block size
-	totalBytes := int64(stat.Blocks) * int64(stat.Bsize)
-	freeBytes := int64(stat.Bfree) * int64(stat.Bsize)
-	usedBytes := totalBytes - freeBytes
-
-	return usedBytes, nil
+	return drives.GetUsedDiskSpace(path)
 }
 
 // getUsedDiskSpace provides backward compatibility wrapper for GetUsedDiskSpace.
 func getUsedDiskSpace(path string) (int64, error) {
-	return GetUsedDiskSpace(path)
+	return drives.GetUsedDiskSpace(path)
 }
 
 // calculateDirectorySize computes total directory size using native Go directory traversal.
 // Walks the directory tree and sums individual file sizes with graceful error handling.
 // Portable and handles permission errors gracefully without external dependencies.
+// Use optimized version from drives package
 func calculateDirectorySize(path string) (int64, error) {
-	var totalSize int64
-
-	err := filepath.WalkDir(path, func(filePath string, d os.DirEntry, err error) error {
-		if err != nil {
-			// Skip errors (permission denied, etc.) but continue
-			return nil
-		}
-
-		if !d.IsDir() {
-			if info, err := d.Info(); err == nil {
-				totalSize += info.Size()
-			}
-		}
-		return nil
-	})
-
-	return totalSize, err
+	return drives.CalculateDirectorySize(path)
 }
 
-// calculateDirectorySizeFallback is deprecated - use calculateDirectorySize instead.
-// Kept for backward compatibility but now just calls the main function.
+// calculateDirectorySizeFallback is a fallback that uses the same logic as calculateDirectorySize
 func calculateDirectorySizeFallback(path string) (int64, error) {
-	return calculateDirectorySize(path)
+	return drives.CalculateDirectorySize(path)
 }
 
 // GetHomeDirSize calculates the total size of the current user's home directory.
-// Uses the efficient calculateDirectorySize function which prefers du command with Go fallback.
 func GetHomeDirSize() (int64, error) {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return 0, err
-	}
-
-	// Use du-equivalent Go implementation
-	return calculateDirectorySize(homeDir)
+	return drives.GetHomeDirSize()
 }
 
 // getActualBackupSize calculates filesystem usage for a backup mount point.
