@@ -1195,12 +1195,10 @@ func syncDirectoriesWithOptions(sourcePath, destPath string, restoreConfig, rest
 			".config/bspwm/*",
 			".config/qtile/*",
 			".config/xmonad/*",
-			".local/share/gnome-shell/*",
-			".local/share/plasma/*",
+			".local/*",
 			".config/plasma*",
 			".config/kde*",
 			".config/gnome*",
-			".local/share/applications/*",
 			".config/autostart/*",
 		)
 		if logFile != nil {
