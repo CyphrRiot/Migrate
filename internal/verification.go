@@ -1351,5 +1351,71 @@ func verifyRandomSampleOfBackup(sourcePath, destPath string, sampleRate float64,
 		fmt.Fprintf(logFile, "INFO: %d directory structure issues found (not counted as verification failures)\n", directoryIssues)
 	}
 
+	// PHASE 3: Check for extra files in backup that don't exist in source
+	if logFile != nil {
+		fmt.Fprintf(logFile, "Phase 3: Starting reverse verification (checking for extra files in backup)\n")
+	}
+
+	extraFilesFound := 0
+	startTime = time.Now()
+
+	err = filepath.WalkDir(destPath, func(backupFilePath string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil // Skip errors
+		}
+
+		// Skip directories
+		if d.IsDir() {
+			return nil
+		}
+
+		// Only check regular files
+		if !d.Type().IsRegular() {
+			return nil
+		}
+
+		// Skip special backup metadata files
+		if strings.Contains(backupFilePath, "BACKUP-INFO.txt") || strings.Contains(backupFilePath, "BACKUP-FOLDERS.txt") {
+			return nil
+		}
+
+		// Calculate corresponding source file path
+		relPath, err := filepath.Rel(destPath, backupFilePath)
+		if err != nil {
+			return nil
+		}
+		sourceFilePath := filepath.Join(sourcePath, relPath)
+
+		// Check if file exists in source
+		if _, err := os.Stat(sourceFilePath); os.IsNotExist(err) {
+			extraFilesFound++
+			verificationErrors = append(verificationErrors, fmt.Sprintf("Extra file in backup: %s", relPath))
+			// Only log every 100 extra files to reduce verbosity
+			if logFile != nil && extraFilesFound%100 == 0 {
+				fmt.Fprintf(logFile, "Extra file verification progress: %d extra files found\n", extraFilesFound)
+			}
+		}
+
+		// Update verification counter for UI progress
+		atomic.AddInt64(&totalFilesVerified, 1)
+
+		return nil
+	})
+
+	if err != nil {
+		if logFile != nil {
+			fmt.Fprintf(logFile, "Phase 3 error: %v\n", err)
+		}
+	}
+
+	if logFile != nil {
+		fmt.Fprintf(logFile, "Phase 3 complete: Found %d extra files in backup in %v\n",
+			extraFilesFound, time.Since(startTime))
+		if extraFilesFound > 0 {
+			fmt.Fprintf(logFile, "WARNING: Backup contains %d files that don't exist in source\n", extraFilesFound)
+			fmt.Fprintf(logFile, "These extra files should be cleaned up by the deletion phase\n")
+		}
+	}
+
 	return nil
 }
