@@ -1026,7 +1026,7 @@ func deleteExtraFilesFromBackupWithSelectiveSupport(sourcePath, backupPath strin
 // deleteExtraFiles removes files from target that don't exist in backup during restore operations.
 // Implements rsync --delete behavior for restore operations, ensuring the target matches the backup exactly.
 // Automatically excludes special files and respects the standard exclusion patterns.
-func deleteExtraFiles(backupPath, targetPath string, logFile *os.File) error {
+func deleteExtraFiles(backupPath, targetPath string, excludePatterns []string, logFile *os.File) error {
 	if logFile != nil {
 		fmt.Fprintf(logFile, "Starting cleanup phase (delete extra files)\n")
 	}
@@ -1037,8 +1037,18 @@ func deleteExtraFiles(backupPath, targetPath string, logFile *os.File) error {
 		}
 
 		// Skip excluded patterns even during restore
-		for _, pattern := range ExcludePatterns {
-			if strings.Contains(targetFile, strings.TrimSuffix(pattern, "/*")) {
+		for _, pattern := range excludePatterns {
+			// Convert to absolute path for proper matching (same as syncDirectoriesWithExclusions)
+			var fullPattern string
+			if strings.HasPrefix(pattern, "/") {
+				// Absolute path pattern
+				fullPattern = pattern
+			} else {
+				// Relative pattern - make it relative to target
+				fullPattern = filepath.Join(targetPath, pattern)
+			}
+
+			if matchesExclusionPattern(targetFile, fullPattern) {
 				if d.IsDir() {
 					return filepath.SkipDir
 				}

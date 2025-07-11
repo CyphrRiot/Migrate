@@ -262,6 +262,151 @@ func GetVerificationExclusions(backupType string, selectiveExclusions []string) 
 	return excludePatterns
 }
 
+// GetSelectiveRestoreExclusions returns exclusion patterns for selective restore operations.
+// This respects user choices about restoring .config and .local directories.
+func GetSelectiveRestoreExclusions(restoreConfig, restoreWindowMgrs bool) []string {
+	// Start with basic system exclusions that should always be excluded
+	excludePatterns := []string{
+		"/dev/*",      // Device files
+		"/proc/*",     // Process filesystem
+		"/sys/*",      // System filesystem
+		"/tmp/*",      // Temporary files
+		"/var/tmp/*",  // Variable temporary files
+		"/lost+found", // Filesystem recovery directory
+	}
+
+	// Add COMPREHENSIVE cache and dangerous directory exclusions (always safe to exclude)
+	excludePatterns = append(excludePatterns, []string{
+		// Cache directories (CRITICAL - should never be restored)
+		".cache/*",
+		".local/share/Trash/*",
+		".local/share/Steam/*",
+		".local/share/flatpak/*",
+		".local/share/containers/*",
+
+		// Browser cache and temporary data (CRITICAL)
+		".cache/mozilla/*",
+		".cache/google-chrome/*",
+		".cache/chromium/*",
+		".cache/BraveSoftware/*",
+		".mozilla/firefox/*/storage/*",
+		".mozilla/firefox/*/cache2/*",
+		".config/BraveSoftware/*/Default/IndexedDB/*",
+		".config/BraveSoftware/*/Default/Local Storage/*",
+		".config/BraveSoftware/*/Default/GPUCache/*",
+		".config/google-chrome/*/Default/IndexedDB/*",
+		".config/google-chrome/*/Default/Local Storage/*",
+		".config/google-chrome/*/Default/GPUCache/*",
+		".config/chromium/*/Default/IndexedDB/*",
+		".config/chromium/*/Default/Local Storage/*",
+		".config/chromium/*/Default/GPUCache/*",
+
+		// Git directories (version control)
+		".git/*",
+		"*/.git/*",
+
+		// Signal app cache directories
+		".config/Signal/blob_storage/*",
+		".config/Signal/drafts.noindex/*",
+		".config/Signal/attachments.noindex/*",
+		".config/Signal/logs/*",
+
+		// Go language server cache
+		".cache/go-build/*",
+		".cache/gopls/*",
+		".cache/golangci-lint/*",
+
+		// Package manager cache
+		".cache/yay/*",
+		".cache/paru/*",
+
+		// Security-sensitive directories (CRITICAL - private keys)
+		".ssh/id_*",                  // SSH private keys
+		".ssh/known_hosts",           // SSH known hosts (changes frequently)
+		".gnupg/private-keys-v1.d/*", // GPG private keys
+		".gnupg/pubring.kbx~",        // GPG temporary files
+		".gnupg/trustdb.gpg",         // GPG trust database
+
+		// Runtime and lock files
+		".dbus/session-bus/*",
+		".pulse-cookie",
+		".Xauthority",
+		".ICEauthority",
+
+		// Application-specific dangerous directories
+		".docker/config.json", // Docker auth
+		".kube/config",        // Kubernetes config
+		".aws/credentials",    // AWS credentials
+		".gcp/credentials",    // GCP credentials
+
+		// Build and development cache
+		"node_modules/*",
+		".npm/*",
+		".yarn/*",
+		".cargo/registry/*",
+		".cargo/git/*",
+		".rustup/*",
+		".go/pkg/*",
+		".gradle/*",
+		".m2/repository/*",
+
+		// IDE and editor cache
+		".vscode/logs/*",
+		".vscode/CachedExtensions/*",
+		".vscode/CachedData/*",
+		".idea/system/*",
+		".idea/logs/*",
+
+		// Game directories with large cache
+		".steam/steam/appcache/*",
+		".steam/steam/logs/*",
+		".steam/steam/dumps/*",
+		".local/share/Steam/logs/*",
+		".local/share/Steam/appcache/*",
+		".local/share/Steam/dumps/*",
+
+		// Wine directories (can be problematic)
+		".wine/drive_c/windows/Temp/*",
+		".wine/drive_c/users/*/Temp/*",
+		".wine/drive_c/users/*/AppData/Local/Temp/*",
+
+		// Virtualization
+		".local/share/gnome-boxes/images/*",
+		"VirtualBox VMs/*",
+		".config/VirtualBox/VBoxSVC.log*",
+
+		// Backup and sync conflicts
+		"*conflicted copy*",
+		"*.tmp",
+		"*.temp",
+		"*.lock",
+		"*.pid",
+		"*.swp",
+		"*.swo",
+		"*~",
+		".DS_Store",
+		"Thumbs.db",
+	}...)
+
+	// If user chose NOT to restore .config, add .config exclusions
+	if !restoreConfig {
+		excludePatterns = append(excludePatterns, []string{
+			".config/*",
+			"*/.config/*",
+		}...)
+	}
+
+	// If user chose NOT to restore window managers, add .local exclusions
+	if !restoreWindowMgrs {
+		excludePatterns = append(excludePatterns, []string{
+			".local/*",
+			"*/.local/*",
+		}...)
+	}
+
+	return excludePatterns
+}
+
 // backupCancelFlag is a thread-safe cancellation flag for backup operations.
 // Use shouldCancelBackup(), CancelBackup(), and resetBackupCancel() to interact with this flag.
 var backupCancelFlag int64

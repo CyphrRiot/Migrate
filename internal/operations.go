@@ -944,8 +944,10 @@ func performSelectiveRestore(backupPath, targetPath string, selectedFolders map[
 			return fmt.Errorf("failed to restore %s: %v", folderName, err)
 		}
 
-		// Phase 2: Delete extra files for this folder
-		err = deleteExtraFiles(sourceFolderPath, targetFolderPath, logFile)
+		// Phase 2: Delete extra files for this folder with proper exclusions
+		// Generate exclusion patterns based on user's restore preferences
+		excludePatterns := GetSelectiveRestoreExclusions(restoreConfig, restoreWindowMgrs)
+		err = deleteExtraFiles(sourceFolderPath, targetFolderPath, excludePatterns, logFile)
 		if err != nil {
 			if logFile != nil {
 				fmt.Fprintf(logFile, "Warning: cleanup failed for %s: %v\n", folderName, err)
@@ -1030,7 +1032,9 @@ func performPureGoRestore(backupPath, targetPath string, restoreConfig, restoreW
 	}
 
 	// Phase 2: Delete files that exist in target but not in backup (--delete behavior)
-	err = deleteExtraFiles(backupPath, targetPath, logFile)
+	// Generate exclusion patterns based on user's restore preferences
+	excludePatterns := GetSelectiveRestoreExclusions(restoreConfig, restoreWindowMgrs)
+	err = deleteExtraFiles(backupPath, targetPath, excludePatterns, logFile)
 	if err != nil {
 		if logFile != nil {
 			fmt.Fprintf(logFile, "Error during cleanup: %v\n", err)
