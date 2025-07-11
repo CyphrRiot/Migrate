@@ -1069,8 +1069,6 @@ func (m Model) renderError() string {
 		}
 	}
 
-	s.WriteString("\n")
-
 	// Help text - emphasize manual dismissal
 	help := helpStyle.Render("📖 Please read the error details above • Press ESC or any key when ready to continue")
 	s.WriteString(help)
@@ -1654,7 +1652,7 @@ func (m Model) renderRestoreFolderSelect() string {
 	}
 
 	// Compact instructions (like backup)
-	s.WriteString("Choose items to restore:\n\n")
+	s.WriteString("Choose items to restore:\n")
 
 	// Controls FIRST (EXACTLY like backup home folder selection)
 	controls := []string{
@@ -1674,24 +1672,24 @@ func (m Model) renderRestoreFolderSelect() string {
 
 	// Get all items for two-column layout (config options + folders)
 	var allItems []struct {
-		name     string
-		selected bool
-		itemType string // "config" or "folder"
+		name       string
+		selected   bool
+		itemType   string // "config" or "folder"
 		folderInfo *HomeFolderInfo
 	}
 
 	// Add configuration options first
 	allItems = append(allItems, struct {
-		name     string
-		selected bool
-		itemType string
+		name       string
+		selected   bool
+		itemType   string
 		folderInfo *HomeFolderInfo
 	}{"Configuration (~/.config)", m.restoreConfig, "config", nil})
-	
+
 	allItems = append(allItems, struct {
-		name     string
-		selected bool
-		itemType string
+		name       string
+		selected   bool
+		itemType   string
 		folderInfo *HomeFolderInfo
 	}{"Window Managers", m.restoreWindowMgrs, "config", nil})
 
@@ -1700,9 +1698,9 @@ func (m Model) renderRestoreFolderSelect() string {
 	for i := range visibleFolders {
 		folder := &visibleFolders[i]
 		allItems = append(allItems, struct {
-			name     string
-			selected bool
-			itemType string
+			name       string
+			selected   bool
+			itemType   string
 			folderInfo *HomeFolderInfo
 		}{folder.Name, m.selectedRestoreFolders[folder.Path], "folder", folder})
 	}
@@ -1722,10 +1720,10 @@ func (m Model) renderRestoreFolderSelect() string {
 			checkbox = "☑️"
 		}
 		configText := fmt.Sprintf("%s %s", checkbox, config.name)
-		
+
 		// Cursor for config items (offset by controls)
 		configCursor := i + len(controls)
-		
+
 		if m.cursor == configCursor {
 			configStyled := lipgloss.NewStyle().
 				PaddingLeft(2).PaddingRight(2).
@@ -1824,7 +1822,7 @@ func (m Model) renderRestoreFolderSelect() string {
 
 	if hiddenCount > 0 {
 		hiddenInfo := fmt.Sprintf("🔒 +%d hidden (%s)", hiddenCount, FormatBytes(hiddenSize))
-		s.WriteString(hiddenInfo + "\n\n")
+		s.WriteString(hiddenInfo)
 	}
 
 	// Total backup size display (EXACTLY like backup)
@@ -1845,10 +1843,10 @@ func (m Model) renderRestoreFolderSelect() string {
 		Padding(0, 2).
 		Align(lipgloss.Center)
 
-	s.WriteString(totalSizeStyle.Render(totalSizeText) + "\n\n")
+	s.WriteString("\n" + totalSizeStyle.Render(totalSizeText))
 
 	// Compact help text (EXACTLY like backup)
-	help := helpStyle.Render("↑/↓: navigate • space: toggle • A: all • X: none")
+	help := helpStyle.Render("\n↑/↓: navigate • space: toggle • A: all • X: none")
 	s.WriteString(help)
 
 	// Center the content with border
@@ -1898,17 +1896,17 @@ func min(a, b int) int {
 // safeRenderWidth calculates a safe border width for consistent rendering across terminals.
 // This function ensures borders display properly regardless of terminal size or font.
 func safeRenderWidth(termWidth int) int {
-	// Standard margin for borders (4 chars on each side)
-	width := termWidth - 8
+	// Reduced margin for borders to give more space for content (3 chars on each side)
+	width := termWidth - 6
 
 	// Enforce minimum width for readability
-	if width < 60 {
-		width = 60
+	if width < 70 {
+		width = 70
 	}
 
 	// Cap maximum width to prevent overly wide content
-	if width > 120 {
-		width = 120
+	if width > 130 {
+		width = 130
 	}
 
 	return width
@@ -1920,9 +1918,9 @@ func safeCenterContent(termWidth, termHeight int, content string) string {
 	// Count actual lines in the content
 	lines := strings.Count(content, "\n") + 1
 
-	// If content is too tall for the terminal, render at top with margin
-	if lines > termHeight-4 {
-		return "\n\n" + content
+	// If content is too tall for the terminal, render at top with minimal margin
+	if lines > termHeight-2 {
+		return content
 	}
 
 	// Safe to center - use lipgloss centering

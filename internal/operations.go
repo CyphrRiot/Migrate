@@ -889,6 +889,14 @@ func performSelectiveRestore(backupPath, targetPath string, selectedFolders map[
 			continue
 		}
 
+		// CRITICAL FIX: Skip .local folder entirely when Window Managers deselected
+		if !restoreWindowMgrs && folderName == ".local" {
+			if logFile != nil {
+				fmt.Fprintf(logFile, "Skipping .local (restore window managers disabled)\n")
+			}
+			continue
+		}
+
 		if !restoreWindowMgrs && isWindowManagerFolder(folderName) {
 			if logFile != nil {
 				fmt.Fprintf(logFile, "Skipping window manager: %s\n", folderName)
@@ -935,8 +943,10 @@ func performSelectiveRestore(backupPath, targetPath string, selectedFolders map[
 		// Update current directory for progress display
 		currentDirectory = sourceFolderPath
 
-		// Use syncDirectoriesWithExclusions for each folder
-		err := syncDirectoriesWithExclusions(sourceFolderPath, targetFolderPath, nil, logFile)
+		// Use syncDirectoriesWithExclusions for each folder with proper exclusions
+		// Generate exclusion patterns to prevent overwriting protected directories
+		excludePatterns := GetSelectiveRestoreExclusions(restoreConfig, restoreWindowMgrs, selectedFolders, allFolders)
+		err := syncDirectoriesWithExclusions(sourceFolderPath, targetFolderPath, excludePatterns, logFile)
 		if err != nil {
 			if logFile != nil {
 				fmt.Fprintf(logFile, "Error restoring %s: %v\n", folderName, err)
@@ -944,9 +954,7 @@ func performSelectiveRestore(backupPath, targetPath string, selectedFolders map[
 			return fmt.Errorf("failed to restore %s: %v", folderName, err)
 		}
 
-		// Phase 2: Delete extra files for this folder with proper exclusions
-		// Generate exclusion patterns based on user's restore preferences
-		excludePatterns := GetSelectiveRestoreExclusions(restoreConfig, restoreWindowMgrs)
+		// Phase 2: Delete extra files for this folder with same exclusions as sync phase
 		err = deleteExtraFiles(sourceFolderPath, targetFolderPath, excludePatterns, logFile)
 		if err != nil {
 			if logFile != nil {
@@ -1033,7 +1041,8 @@ func performPureGoRestore(backupPath, targetPath string, restoreConfig, restoreW
 
 	// Phase 2: Delete files that exist in target but not in backup (--delete behavior)
 	// Generate exclusion patterns based on user's restore preferences
-	excludePatterns := GetSelectiveRestoreExclusions(restoreConfig, restoreWindowMgrs)
+	// Note: For pure restore, we don't have selectedFolders/allFolders data, so pass nil
+	excludePatterns := GetSelectiveRestoreExclusions(restoreConfig, restoreWindowMgrs, nil, nil)
 	err = deleteExtraFiles(backupPath, targetPath, excludePatterns, logFile)
 	if err != nil {
 		if logFile != nil {

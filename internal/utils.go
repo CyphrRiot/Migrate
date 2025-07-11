@@ -263,8 +263,8 @@ func GetVerificationExclusions(backupType string, selectiveExclusions []string) 
 }
 
 // GetSelectiveRestoreExclusions returns exclusion patterns for selective restore operations.
-// This respects user choices about restoring .config and .local directories.
-func GetSelectiveRestoreExclusions(restoreConfig, restoreWindowMgrs bool) []string {
+// This respects user choices about restoring .config and .local directories, and excludes deselected folders.
+func GetSelectiveRestoreExclusions(restoreConfig, restoreWindowMgrs bool, selectedFolders map[string]bool, allFolders []HomeFolderInfo) []string {
 	// Start with basic system exclusions that should always be excluded
 	excludePatterns := []string{
 		"/dev/*",      // Device files
@@ -402,6 +402,19 @@ func GetSelectiveRestoreExclusions(restoreConfig, restoreWindowMgrs bool) []stri
 			".local/*",
 			"*/.local/*",
 		}...)
+	}
+
+	// Exclude deselected folders (CRITICAL: prevents overwriting user's existing folders)
+	if selectedFolders != nil && allFolders != nil {
+		for _, folder := range allFolders {
+			folderName := filepath.Base(folder.Path)
+			// Skip if folder is selected, always included, or is a hidden folder
+			if selectedFolders[folder.Path] || folder.AlwaysInclude || !folder.IsVisible {
+				continue
+			}
+			// Add deselected visible folder to exclusions
+			excludePatterns = append(excludePatterns, folderName+"/*")
+		}
 	}
 
 	return excludePatterns
