@@ -103,9 +103,16 @@ func InitialModel() Model {
 		subfolderCache:    make(map[string][]HomeFolderInfo), // NEW: Initialize subfolder cache
 		restoreConfig:     true,                              // Default to true
 		restoreWindowMgrs: true,                              // Default to true
-		width:             100,
-		height:            30,
+		width:             80,                                // More reasonable default for smaller terminals
+		height:            24,                                // Standard minimum terminal height
 	}
+}
+
+// SetInitialDimensions sets the initial terminal dimensions for the model.
+// This should be called before starting the TUI to ensure proper initial sizing.
+func (m *Model) SetInitialDimensions(width, height int) {
+	m.width = width
+	m.height = height
 }
 
 // Init implements tea.Model.Init() and returns any initial commands.
@@ -124,21 +131,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 
-		// Ensure minimum usable dimensions
-		if m.width < 80 {
-			m.width = 80
+		// Ensure minimum usable dimensions - more flexible for smaller terminals
+		if m.width < 60 {
+			m.width = 60
 		}
-		if m.height < 24 {
-			m.height = 24
+		if m.height < 20 {
+			m.height = 20
 		}
 
-		// Cap maximum dimensions for consistent rendering
-		if m.width > 200 {
-			m.width = 200
-		}
-		if m.height > 60 {
-			m.height = 60
-		}
+		// Cap maximum dimensions for consistent rendering - removed arbitrary caps
+		// Let the terminal use its full size for better readability
 
 		return m, nil
 
@@ -672,49 +674,153 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 
 		case "esc":
-			if m.screen == screens.ScreenError {
-				// Return to main menu from error
+			// Make ESC behave consistently like selecting "Back" option for all screens
+			switch m.screen {
+			case screens.ScreenMain:
+				// ESC on main menu should exit (like selecting Exit)
+				return m, tea.Quit
+
+			case screens.ScreenBackup:
+				// Back to main menu (like selecting "Back")
+				m.screen = screens.ScreenMain
+				m.cursor = 0
+				m.choices = screens.MainMenuChoices
+				return m, nil
+
+			case screens.ScreenRestore:
+				// Back to main menu (like selecting "Back")
+				m.screen = screens.ScreenMain
+				m.cursor = 0
+				m.choices = screens.MainMenuChoices
+				return m, nil
+
+			case screens.ScreenVerify:
+				// Back to main menu (like selecting "Back")
+				m.screen = screens.ScreenMain
+				m.cursor = 0
+				m.choices = screens.MainMenuChoices
+				return m, nil
+
+			case screens.ScreenAbout:
+				// Back to main menu
+				m.screen = screens.ScreenMain
+				m.cursor = 0
+				m.choices = screens.MainMenuChoices
+				return m, nil
+
+			case screens.ScreenRestoreOptions:
+				// Back to restore menu (like selecting "Back")
+				m.screen = screens.ScreenRestore
+				m.cursor = 0
+				m.choices = screens.RestoreMenuChoices
+				m.restoreOptionsConfigured = false
+				return m, nil
+
+			case screens.ScreenDriveSelect:
+				// Back to previous menu based on operation
+				if strings.Contains(m.operation, "backup") {
+					if m.operation == "home_backup" {
+						m.screen = screens.ScreenBackup
+						m.choices = screens.BackupMenuChoices
+					} else {
+						m.screen = screens.ScreenBackup
+						m.choices = screens.BackupMenuChoices
+					}
+				} else if strings.Contains(m.operation, "restore") {
+					m.screen = screens.ScreenRestoreOptions
+					m.choices = screens.RestoreOptionsChoices
+				} else if strings.Contains(m.operation, "verify") {
+					m.screen = screens.ScreenVerify
+					m.choices = screens.VerifyMenuChoices
+				} else {
+					m.screen = screens.ScreenMain
+					m.choices = screens.MainMenuChoices
+				}
+				m.cursor = 0
+				return m, nil
+
+			case screens.ScreenHomeFolderSelect:
+				// Back to backup menu
+				m.screen = screens.ScreenBackup
+				m.cursor = 0
+				m.choices = screens.BackupMenuChoices
+				// Reset folder selections
+				m.selectedFolders = make(map[string]bool)
+				m.totalBackupSize = 0
+				return m, nil
+
+			case screens.ScreenHomeSubfolderSelect:
+				// Back to parent folder view
+				m.currentFolderPath = ""
+				m.folderBreadcrumb = []string{}
+				m.screen = screens.ScreenHomeFolderSelect
+				m.cursor = 0
+				m.message = ""
+				return m, nil
+
+			case screens.ScreenRestoreFolderSelect:
+				// Back to restore options
+				m.screen = screens.ScreenRestoreOptions
+				m.cursor = 0
+				m.choices = screens.RestoreOptionsChoices
+				m.selectedRestoreFolders = make(map[string]bool)
+				m.totalRestoreSize = 0
+				return m, nil
+
+			case screens.ScreenConfirm:
+				// Back to main menu (safest option for confirmation screens)
+				resetBackupState()
+				m.screen = screens.ScreenMain
+				m.cursor = 0
+				m.choices = screens.MainMenuChoices
+				m.confirmation = ""
+				return m, nil
+
+			case screens.ScreenError:
+				// Any key dismisses error screen and returns to main menu
 				resetBackupState()
 				m.screen = screens.ScreenMain
 				m.message = ""
 				m.cursor = 0
 				m.choices = screens.MainMenuChoices
 				m.errorRequiresManualDismissal = false
+				m.restoreOptionsConfigured = false
 				return m, nil
-			} else if m.screen == screens.ScreenHomeSubfolderSelect {
-				// NEW: Return to parent folder view from subfolder screen
 
-				m.currentFolderPath = ""
-				m.folderBreadcrumb = []string{}
-				m.screen = screens.ScreenHomeFolderSelect
-				m.cursor = 0
-				m.message = "" // Clear any temporary messages
-				return m, nil
-			} else if m.screen == screens.ScreenRestoreFolderSelect {
-				// Return to restore menu from folder selection
+			case screens.ScreenComplete:
+				// Any key dismisses completion screen and returns to main menu
 				resetBackupState()
-				m.screen = screens.ScreenRestore
+				m.screen = screens.ScreenMain
+				m.message = ""
 				m.cursor = 0
-				m.choices = screens.RestoreMenuChoices
-				m.selectedRestoreFolders = make(map[string]bool)
-				m.totalRestoreSize = 0
+				m.choices = screens.MainMenuChoices
+				m.restoreOptionsConfigured = false
 				return m, nil
-			} else if m.screen == screens.ScreenVerificationErrors {
-				// NEW: Return to main menu from verification errors screen
+
+			case screens.ScreenVerificationErrors:
+				// Back to main menu
 				resetBackupState()
 				m.screen = screens.ScreenMain
 				m.cursor = 0
 				m.choices = screens.MainMenuChoices
-				m.verificationErrors = []string{} // Clear error list
+				m.verificationErrors = []string{}
 				m.errorScrollOffset = 0
 				return m, nil
-			} else if m.screen != screens.ScreenMain {
-				// Reset backup state when returning to main menu
+
+			case screens.ScreenProgress:
+				// ESC during progress should cancel operation (like Ctrl+C)
+				m.canceling = true
+				m.message = "Canceling operation... Please wait for cleanup to complete."
+				CancelBackup()
+				return m, nil
+
+			default:
+				// Fallback: go to main menu
 				resetBackupState()
 				m.screen = screens.ScreenMain
 				m.cursor = 0
 				m.choices = screens.MainMenuChoices
-				m.restoreOptionsConfigured = false // Reset restore flow state
+				m.restoreOptionsConfigured = false
 			}
 			return m, nil
 

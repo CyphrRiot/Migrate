@@ -25,6 +25,7 @@ import (
 	"migrate/internal"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"golang.org/x/term"
 )
 
 // lockFilePath defines the location of the singleton instance lock file.
@@ -70,6 +71,114 @@ func createInstanceLock() error {
 // This should be called when the application exits, either normally or via signal.
 func removeInstanceLock() {
 	os.Remove(lockFilePath)
+}
+
+// getTerminalSize returns the current terminal width and height
+// with reasonable fallbacks for when detection fails
+func getTerminalSize() (int, int) {
+	width, height, err := term.GetSize(int(os.Stdout.Fd()))
+	if err != nil {
+		// Fallback to reasonable defaults if detection fails
+		return 80, 24
+	}
+
+	// Ensure minimum usable dimensions
+	if width < 60 {
+		width = 60
+	}
+	if height < 20 {
+		height = 20
+	}
+
+	return width, height
+}
+
+// createResponsiveErrorBox creates a terminal-responsive error box
+func createResponsiveErrorBox(title, message string, details []string) string {
+	termWidth, _ := getTerminalSize()
+
+	// Calculate box width - leave margins on both sides
+	boxWidth := termWidth - 4
+	if boxWidth < 40 {
+		boxWidth = 40
+	}
+	if boxWidth > 80 {
+		boxWidth = 80 // Cap for readability
+	}
+
+	// Create responsive content
+	var lines []string
+
+	// Title line
+	titlePadding := (boxWidth - len(title) - 2) / 2
+	if titlePadding < 1 {
+		titlePadding = 1
+	}
+	titleLine := "│" + strings.Repeat(" ", titlePadding) + title + strings.Repeat(" ", boxWidth-len(title)-titlePadding-1) + "│"
+
+	// Content lines - wrap text to fit
+	contentWidth := boxWidth - 4 // Account for borders and padding
+
+	lines = append(lines, "┌"+strings.Repeat("─", boxWidth-2)+"┐")
+	lines = append(lines, titleLine)
+	lines = append(lines, "├"+strings.Repeat("─", boxWidth-2)+"┤")
+	lines = append(lines, "│"+strings.Repeat(" ", boxWidth-2)+"│")
+
+	// Add message
+	if message != "" {
+		wrappedMessage := wrapText(message, contentWidth)
+		for _, line := range wrappedMessage {
+			padding := contentWidth - len(line)
+			lines = append(lines, "│  "+line+strings.Repeat(" ", padding)+"  │")
+		}
+		lines = append(lines, "│"+strings.Repeat(" ", boxWidth-2)+"│")
+	}
+
+	// Add details
+	for _, detail := range details {
+		wrappedDetail := wrapText(detail, contentWidth)
+		for _, line := range wrappedDetail {
+			padding := contentWidth - len(line)
+			lines = append(lines, "│  "+line+strings.Repeat(" ", padding)+"  │")
+		}
+	}
+
+	lines = append(lines, "│"+strings.Repeat(" ", boxWidth-2)+"│")
+	lines = append(lines, "└"+strings.Repeat("─", boxWidth-2)+"┘")
+
+	return strings.Join(lines, "\n")
+}
+
+// wrapText wraps text to fit within the specified width
+func wrapText(text string, width int) []string {
+	if width < 10 {
+		width = 10 // Minimum reasonable width
+	}
+
+	words := strings.Fields(text)
+	if len(words) == 0 {
+		return []string{text}
+	}
+
+	var lines []string
+	var currentLine string
+
+	for _, word := range words {
+		if len(currentLine) == 0 {
+			currentLine = word
+		} else if len(currentLine)+1+len(word) <= width {
+			currentLine += " " + word
+		} else {
+			lines = append(lines, currentLine)
+			currentLine = word
+		}
+	}
+
+	if len(currentLine) > 0 {
+		lines = append(lines, currentLine)
+	}
+
+	return lines
 }
 
 func main() {
@@ -142,20 +251,16 @@ func runAsRoot() {
 		fmt.Println("⚠️  " + err.Error())
 		fmt.Println()
 
-		// Pretty error display
-		fmt.Println("┌─────────────────────────────────────────┐")
-		fmt.Println("│        🚫 Migration In Progress         │")
-		fmt.Println("├─────────────────────────────────────────┤")
-		fmt.Println("│                                         │")
-		fmt.Println("│  Another migrate process is already     │")
-		fmt.Println("│  running. Please wait for it to         │")
-		fmt.Println("│  complete before starting a new one.    │")
-		fmt.Println("│                                         │")
-		fmt.Println("│  💡 If you're sure no other migrate     │")
-		fmt.Println("│     is running, remove the lock file:   │")
-		fmt.Println("│     sudo rm /tmp/migrate.lock           │")
-		fmt.Println("│                                         │")
-		fmt.Println("└─────────────────────────────────────────┘")
+		// Responsive error display
+		errorBox := createResponsiveErrorBox(
+			"🚫 Migration In Progress",
+			"Another migrate process is already running. Please wait for it to complete before starting a new one.",
+			[]string{
+				"💡 If you're sure no other migrate is running, remove the lock file:",
+				"   sudo rm /tmp/migrate.lock",
+			},
+		)
+		fmt.Println(errorBox)
 		fmt.Println()
 		os.Exit(1)
 	}
@@ -186,8 +291,13 @@ func runAsRoot() {
 		os.Exit(1)
 	}()
 
-	// Always run the beautiful TUI
+	// Always run the beautiful TUI with proper initial terminal size
+	termWidth, termHeight := getTerminalSize()
 	m := internal.InitialModel()
+
+	// Set initial terminal dimensions before starting
+	m.SetInitialDimensions(termWidth, termHeight)
+
 	p := tea.NewProgram(m, tea.WithAltScreen())
 
 	if _, err := p.Run(); err != nil {

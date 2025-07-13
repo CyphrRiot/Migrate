@@ -1226,8 +1226,10 @@ func (m Model) renderHomeFolderSelect() string {
 
 		// Build the final line using lipgloss.JoinHorizontal for proper alignment
 		if rightStyled != "" {
+			// Calculate dynamic left column width based on terminal size
+			leftColWidth := max(30, min(50, m.width*40/100)) // 40% of width, between 30-50 chars
 			line := lipgloss.JoinHorizontal(lipgloss.Left,
-				lipgloss.NewStyle().Width(50).Render(leftStyled),
+				lipgloss.NewStyle().Width(leftColWidth).Render(leftStyled),
 				rightStyled,
 			)
 			s.WriteString(line + "\n")
@@ -1352,9 +1354,12 @@ func (m Model) renderHomeSubfolderSelect() string {
 		}
 
 		// Build the final line
+		// Build the final line using lipgloss.JoinHorizontal for proper alignment
 		if rightStyled != "" {
+			// Calculate dynamic left column width based on terminal size
+			leftColWidth := max(30, min(50, m.width*40/100)) // 40% of width, between 30-50 chars
 			line := lipgloss.JoinHorizontal(lipgloss.Left,
-				lipgloss.NewStyle().Width(50).Render(leftStyled),
+				lipgloss.NewStyle().Width(leftColWidth).Render(leftStyled),
 				rightStyled,
 			)
 			s.WriteString(line + "\n")
@@ -1797,9 +1802,12 @@ func (m Model) renderRestoreFolderSelect() string {
 		}
 
 		// Build the final line
+		// Build the final line using lipgloss.JoinHorizontal for proper alignment
 		if rightStyled != "" {
+			// Calculate dynamic left column width based on terminal size
+			leftColWidth := max(30, min(50, m.width*40/100)) // 40% of width, between 30-50 chars
 			line := lipgloss.JoinHorizontal(lipgloss.Left,
-				lipgloss.NewStyle().Width(50).Render(leftStyled),
+				lipgloss.NewStyle().Width(leftColWidth).Render(leftStyled),
 				rightStyled,
 			)
 			s.WriteString(line + "\n")
@@ -1893,15 +1901,39 @@ func min(a, b int) int {
 	return b
 }
 
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
 // safeRenderWidth calculates a safe border width for consistent rendering across terminals.
 // This function ensures borders display properly regardless of terminal size or font.
 func safeRenderWidth(termWidth int) int {
-	// Reduced margin for borders to give more space for content (3 chars on each side)
-	width := termWidth - 6
+	// Dynamic margin calculation based on terminal size
+	var margin int
+	if termWidth < 70 {
+		margin = 4 // Smaller margin for very small terminals
+	} else if termWidth < 100 {
+		margin = 6 // Standard margin for medium terminals
+	} else {
+		margin = 8 // Larger margin for big terminals
+	}
 
-	// Enforce minimum width for readability
-	if width < 70 {
-		width = 70
+	width := termWidth - margin
+
+	// More flexible minimum width for smaller terminals
+	minWidth := 40
+	if termWidth >= 60 {
+		minWidth = 50
+	}
+	if termWidth >= 80 {
+		minWidth = 60
+	}
+
+	if width < minWidth {
+		width = minWidth
 	}
 
 	// Cap maximum width to prevent overly wide content
