@@ -653,11 +653,11 @@ func (m Model) renderProgress() string {
 	title := titleStyle.Render(AppDesc)
 	s.WriteString(title + "\n")
 	version := versionStyle.Render(GetSubtitle()) // Use dimmer versionStyle instead of subtitleStyle
-	s.WriteString(version + "\n\n")
+	s.WriteString(version + "\n")
 
 	// Operation title
 	if m.canceling {
-		s.WriteString(titleStyle.Render("🛑 Canceling Operation") + "\n\n")
+		s.WriteString(titleStyle.Render("🛑 Canceling Operation") + "\n")
 	} else {
 		// Make title specific to the operation type
 		var operationTitle string
@@ -668,7 +668,7 @@ func (m Model) renderProgress() string {
 		} else {
 			operationTitle = "⚙️ Operation in Progress"
 		}
-		s.WriteString(titleStyle.Render(operationTitle) + "\n\n")
+		s.WriteString(titleStyle.Render(operationTitle) + "\n")
 	}
 
 	// Operation info - show source and destination drives with proper styling
@@ -681,49 +681,49 @@ func (m Model) renderProgress() string {
 		s.WriteString(backupTypeStyle.Render("📁 Backup Type:    Complete System") + "\n")
 		s.WriteString("📂 Source:         /\n")
 		s.WriteString("💾 Destination:    " + m.selectedDrive + "\n")
-		s.WriteString(logStyle.Render("📋 Log:            "+logPath) + "\n\n")
+		s.WriteString(logStyle.Render("📋 Log:            "+logPath) + "\n")
 	case "home_backup":
 		s.WriteString(backupTypeStyle.Render("📁 Backup Type:    Home Directory Only") + "\n")
 		s.WriteString("📂 Source:         ~/\n")
 		s.WriteString("💾 Destination:    " + m.selectedDrive + "\n")
-		s.WriteString(logStyle.Render("📋 Log:            "+logPath) + "\n\n")
+		s.WriteString(logStyle.Render("📋 Log:            "+logPath) + "\n")
 	case "auto_verify":
 		s.WriteString(backupTypeStyle.Render("🔍 Operation:      Backup Verification") + "\n")
 		s.WriteString("📂 Source:         " + m.selectedDrive + "\n")
-		s.WriteString(logStyle.Render("📋 Log:            "+logPath) + "\n\n")
+		s.WriteString(logStyle.Render("📋 Log:            "+logPath) + "\n")
 	case "system_verify":
 		s.WriteString(backupTypeStyle.Render("🔍 Operation:      System Backup Verification") + "\n")
 		s.WriteString("📂 Source:         " + m.selectedDrive + "\n")
-		s.WriteString(logStyle.Render("📋 Log:            "+logPath) + "\n\n")
+		s.WriteString(logStyle.Render("📋 Log:            "+logPath) + "\n")
 	case "home_verify":
 		s.WriteString(backupTypeStyle.Render("🔍 Operation:      Home Backup Verification") + "\n")
 		s.WriteString("📂 Source:         " + m.selectedDrive + "\n")
-		s.WriteString(logStyle.Render("📋 Log:            "+logPath) + "\n\n")
+		s.WriteString(logStyle.Render("📋 Log:            "+logPath) + "\n")
 	case "system_restore":
 		s.WriteString(backupTypeStyle.Render("⚡ Operation:      System Restore") + "\n")
 		s.WriteString("📂 Source:         " + m.selectedDrive + "\n")
 		s.WriteString("📂 Target:         /\n")
-		s.WriteString(logStyle.Render("📋 Log:            "+logPath) + "\n\n")
+		s.WriteString(logStyle.Render("📋 Log:            "+logPath) + "\n")
 	case "home_restore":
 		s.WriteString(backupTypeStyle.Render("⚡ Operation:      Home Directory Restore") + "\n")
 		s.WriteString("📂 Source:         " + m.selectedDrive + "\n")
 		s.WriteString("📂 Target:         ~/\n")
-		s.WriteString(logStyle.Render("📋 Log:            "+logPath) + "\n\n")
+		s.WriteString(logStyle.Render("📋 Log:            "+logPath) + "\n")
 	case "custom_restore":
 		s.WriteString(backupTypeStyle.Render("⚡ Operation:      Custom Restore") + "\n")
 		s.WriteString("📂 Source:         " + m.selectedDrive + "\n")
-		s.WriteString(logStyle.Render("📋 Log:            "+logPath) + "\n\n")
+		s.WriteString(logStyle.Render("📋 Log:            "+logPath) + "\n")
 	default:
 		// Format unknown operations nicely
 		opName := formatOperationName(m.operation)
 		s.WriteString(backupTypeStyle.Render(fmt.Sprintf("📋 Operation:      %s", opName)) + "\n")
-		s.WriteString(logStyle.Render("📋 Log:            "+logPath) + "\n\n")
+		s.WriteString(logStyle.Render("📋 Log:            "+logPath) + "\n")
 	}
 
 	// Progress bar (only show if not canceling)
 	if !m.canceling {
 		progressBar := m.renderProgressBarWithMessage(m.message)
-		s.WriteString(progressBar + "\n\n")
+		s.WriteString(progressBar + "\n")
 	}
 
 	// Status message with Tokyo Night gradient-matching styling
@@ -1115,7 +1115,7 @@ func (m Model) renderHomeFolderSelect() string {
 	}
 
 	// Compact instructions
-	s.WriteString("Choose folders to backup:\n\n")
+	s.WriteString("Choose folders to backup:\n")
 
 	// Get visible folders for display (filter out 0 B folders)
 	visibleFolders := make([]HomeFolderInfo, 0)
@@ -1254,7 +1254,7 @@ func (m Model) renderHomeFolderSelect() string {
 		Padding(0, 2).
 		Align(lipgloss.Center)
 
-	s.WriteString(totalSizeStyle.Render(totalSizeText) + "\n\n")
+	s.WriteString(totalSizeStyle.Render(totalSizeText) + "\n")
 
 	// Compact help text
 	help := helpStyle.Render("↑/↓: navigate • space: toggle • A: all • X: none")
