@@ -86,12 +86,12 @@ func CheckHomeBackupSpaceRequirements(externalDriveSize string) error {
 	return drives.ValidateHomeBackupSpace(externalDriveSize)
 }
 
-func checkRestoreSpaceRequirements(externalDriveSize string, externalMountPoint string) error {
-	return drives.ValidateRestoreSpace(externalDriveSize, externalMountPoint)
+func checkRestoreSpaceRequirements(externalDriveSize string, externalMountPoint string, targetPath string) error {
+	return drives.ValidateRestoreSpace(externalDriveSize, externalMountPoint, targetPath)
 }
 
-func checkSelectiveRestoreSpaceRequirements(restoreFolders []HomeFolderInfo, selectedFolders map[string]bool, restoreConfig bool, restoreWindowMgrs bool) error {
-	return drives.ValidateSelectiveRestoreSpace(restoreFolders, selectedFolders, restoreConfig, restoreWindowMgrs)
+func checkSelectiveRestoreSpaceRequirements(restoreFolders []HomeFolderInfo, selectedFolders map[string]bool, restoreConfig bool, restoreWindowMgrs bool, targetPath string) error {
+	return drives.ValidateSelectiveRestoreSpace(restoreFolders, selectedFolders, restoreConfig, restoreWindowMgrs, targetPath)
 }
 
 // Folder discovery functions - delegate to optimized modules

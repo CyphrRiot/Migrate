@@ -1150,9 +1150,10 @@ func (m Model) handleRestoreFolderSelection() (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
-		// CRITICAL SPACE CHECK: Verify internal drive has enough space BEFORE confirmation
+		// CRITICAL SPACE CHECK: Verify target partition has enough space BEFORE confirmation
+		// For home restores, check /home partition instead of root partition
 		// Use the new selective space checking function that only counts selected items
-		err := checkSelectiveRestoreSpaceRequirements(m.restoreFolders, m.selectedRestoreFolders, m.restoreConfig, m.restoreWindowMgrs)
+		err := checkSelectiveRestoreSpaceRequirements(m.restoreFolders, m.selectedRestoreFolders, m.restoreConfig, m.restoreWindowMgrs, "/home")
 		if err != nil {
 			// Show the space error immediately - don't proceed to confirmation
 			m.message = err.Error()
@@ -1326,7 +1327,8 @@ func (m Model) handleSelection() (tea.Model, tea.Cmd) {
 					// Check if we have selected restore folders (means it's a home backup with selections)
 					if len(m.selectedRestoreFolders) > 0 {
 						// This is actually a selective restore from a home backup - use selective space checking
-						err := checkSelectiveRestoreSpaceRequirements(m.restoreFolders, m.selectedRestoreFolders, m.restoreConfig, m.restoreWindowMgrs)
+						// Check /home partition for home restores
+						err := checkSelectiveRestoreSpaceRequirements(m.restoreFolders, m.selectedRestoreFolders, m.restoreConfig, m.restoreWindowMgrs, "/home")
 						if err != nil {
 							// Show the space error immediately - don't proceed with restore
 							m.message = err.Error()
@@ -1339,7 +1341,8 @@ func (m Model) handleSelection() (tea.Model, tea.Cmd) {
 						return m, startSelectiveRestore(m.selectedDrive, m.selectedRestoreFolders, m.restoreFolders, m.restoreConfig, m.restoreWindowMgrs)
 					} else {
 						// This is a true system restore from a system backup - use full backup space checking
-						err := checkRestoreSpaceRequirements("", m.selectedDrive)
+						// Check root partition for system restores
+						err := checkRestoreSpaceRequirements("", m.selectedDrive, "/")
 						if err != nil {
 							// Show the space error immediately - don't proceed with restore
 							m.message = err.Error()

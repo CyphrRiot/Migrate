@@ -1,4 +1,16 @@
+<div align="center">
+
 # Migrate
+
+![Version](https://img.shields.io/badge/version-1.0.62-4c1d95)
+![License](https://img.shields.io/badge/license-MIT-1e293b)
+![Language](https://img.shields.io/badge/language-Go-00ADD8?logo=go&logoColor=white)
+![Platform](https://img.shields.io/badge/platform-Linux-FCC624?logo=linux&logoColor=black)
+
+[![CyphrRiot on X](https://img.shields.io/badge/Follow-@CyphrRiot-1DA1F2?style=for-the-badge&logo=x&logoColor=white)](https://x.com/CyphrRiot)
+[![GitHub Profile](https://img.shields.io/badge/GitHub-CyphrRiot-181717?style=for-the-badge&logo=github&logoColor=white)](https://github.com/CyphrRiot)
+
+</div>
 
 A stunningly beautiful **Terminal** backup and restore tool built with [Bubble Tea](https://github.com/charmbracelet/bubbletea) and [Lipgloss](https://github.com/charmbracelet/lipgloss). Features Tokyo Night theming, pure Go implementation with zero external dependencies, and production-ready performance with selective backup capabilities.
 

@@ -755,7 +755,8 @@ func startRestore(sourcePath, targetPath string, restoreConfig, restoreWindowMgr
 
 		// Get the drive size from the source drive info (we need this to pass to checkRestoreSpaceRequirements)
 		// For restore, sourcePath is the mount point, so we can use it directly
-		err = checkRestoreSpaceRequirements("", sourcePath) // Pass empty driveSize, mountPoint as sourcePath
+		// CRITICAL FIX: Use actualTargetPath to check the correct partition (/ for system, /home for home restores)
+		err = checkRestoreSpaceRequirements("", sourcePath, actualTargetPath) // Pass empty driveSize, mountPoint as sourcePath, target path for partition check
 		if err != nil {
 			if logFile != nil {
 				fmt.Fprintf(logFile, "RESTORE SPACE CHECK FAILED: %v\n", err)

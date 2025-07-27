@@ -198,26 +198,30 @@ func ValidateHomeBackupSpace(externalDriveSize string) error {
 }
 
 // ValidateRestoreSpace validates space for restore operations.
-func ValidateRestoreSpace(externalDriveSize string, externalMountPoint string) error {
+func ValidateRestoreSpace(externalDriveSize string, externalMountPoint string, targetPath string) error {
 	// Get used space on external drive (backup size)
 	externalUsedSpace, err := GetUsedDiskSpace(externalMountPoint)
 	if err != nil {
 		return fmt.Errorf("failed to get backup drive usage: %v", err)
 	}
 
-	// Get total size of internal drive
+	// Get total size of target partition (could be / for system restore or /home for home restore)
+	if targetPath == "" {
+		targetPath = "/"
+	}
 	var stat syscall.Statfs_t
-	if err := syscall.Statfs("/", &stat); err != nil {
-		return fmt.Errorf("failed to get internal drive info: %v", err)
+	if err := syscall.Statfs(targetPath, &stat); err != nil {
+		return fmt.Errorf("failed to get target drive info for %s: %v", targetPath, err)
 	}
 
-	internalTotalSize := int64(stat.Blocks) * int64(stat.Bsize)
+	targetTotalSize := int64(stat.Blocks) * int64(stat.Bsize)
 
-	// Check: external_used_space <= internal_total_size
-	if externalUsedSpace > internalTotalSize {
-		return fmt.Errorf("⚠️ INSUFFICIENT SPACE for restore\n\nBackup size: %s\nInternal drive total: %s\n\nThe backup is too large to fit on your internal drive.\nYou need at least %s of total drive capacity.",
+	// Check: external_used_space <= target_total_size
+	if externalUsedSpace > targetTotalSize {
+		return fmt.Errorf("⚠️ INSUFFICIENT SPACE for restore\n\nBackup size: %s\nTarget partition (%s) total: %s\n\nThe backup is too large to fit on your target partition.\nYou need at least %s of total drive capacity.",
 			FormatBytes(externalUsedSpace),
-			FormatBytes(internalTotalSize),
+			targetPath,
+			FormatBytes(targetTotalSize),
 			FormatBytes(externalUsedSpace))
 	}
 
@@ -226,7 +230,7 @@ func ValidateRestoreSpace(externalDriveSize string, externalMountPoint string) e
 
 // ValidateSelectiveRestoreSpace validates space for selective folder restore.
 // Only counts the space needed for the folders the user actually selected to restore.
-func ValidateSelectiveRestoreSpace(restoreFolders []HomeFolderInfo, selectedFolders map[string]bool, restoreConfig bool, restoreWindowMgrs bool) error {
+func ValidateSelectiveRestoreSpace(restoreFolders []HomeFolderInfo, selectedFolders map[string]bool, restoreConfig bool, restoreWindowMgrs bool, targetPath string) error {
 	// Calculate space required for SELECTED items only
 	var totalSelectedSize int64
 
@@ -245,19 +249,23 @@ func ValidateSelectiveRestoreSpace(restoreFolders []HomeFolderInfo, selectedFold
 		totalSelectedSize += 50 * 1024 * 1024 // ~50MB estimate for window managers
 	}
 
-	// Get total size of internal drive
+	// Get total size of target partition (could be / for system restore or /home for home restore)
+	if targetPath == "" {
+		targetPath = "/"
+	}
 	var stat syscall.Statfs_t
-	if err := syscall.Statfs("/", &stat); err != nil {
-		return fmt.Errorf("failed to get internal drive info: %v", err)
+	if err := syscall.Statfs(targetPath, &stat); err != nil {
+		return fmt.Errorf("failed to get target drive info for %s: %v", targetPath, err)
 	}
 
-	internalTotalSize := int64(stat.Blocks) * int64(stat.Bsize)
+	targetTotalSize := int64(stat.Blocks) * int64(stat.Bsize)
 
-	// Check: selected_restore_size <= internal_total_size
-	if totalSelectedSize > internalTotalSize {
-		return fmt.Errorf("⚠️ INSUFFICIENT SPACE for restore\n\nSelected items size: %s\nInternal drive total: %s\n\nThe selected items are too large to fit on your internal drive.\nYou need at least %s of total drive capacity.",
+	// Check: selected_restore_size <= target_total_size
+	if totalSelectedSize > targetTotalSize {
+		return fmt.Errorf("⚠️ INSUFFICIENT SPACE for restore\n\nSelected items size: %s\nTarget partition (%s) total: %s\n\nThe selected items are too large to fit on your target partition.\nYou need at least %s of total drive capacity.",
 			FormatBytes(totalSelectedSize),
-			FormatBytes(internalTotalSize),
+			targetPath,
+			FormatBytes(targetTotalSize),
 			FormatBytes(totalSelectedSize))
 	}
 
