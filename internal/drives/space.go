@@ -207,15 +207,15 @@ func ValidateRestoreSpace(externalDriveSize string, externalMountPoint string) e
 
 	// Get total size of internal drive
 	var stat syscall.Statfs_t
-	if err := syscall.Statfs("/home", &stat); err != nil {
-		return fmt.Errorf("failed to get home drive info: %v", err)
+	if err := syscall.Statfs("/", &stat); err != nil {
+		return fmt.Errorf("failed to get internal drive info: %v", err)
 	}
 
 	internalTotalSize := int64(stat.Blocks) * int64(stat.Bsize)
 
 	// Check: external_used_space <= internal_total_size
 	if externalUsedSpace > internalTotalSize {
-		return fmt.Errorf("⚠️ INSUFFICIENT SPACE for restore\n\nBackup size: %s\nHome drive total: %s\n\nThe backup is too large to fit on your home drive.\nYou need at least %s of total drive capacity.",
+		return fmt.Errorf("⚠️ INSUFFICIENT SPACE for restore\n\nBackup size: %s\nInternal drive total: %s\n\nThe backup is too large to fit on your internal drive.\nYou need at least %s of total drive capacity.",
 			FormatBytes(externalUsedSpace),
 			FormatBytes(internalTotalSize),
 			FormatBytes(externalUsedSpace))
@@ -247,15 +247,15 @@ func ValidateSelectiveRestoreSpace(restoreFolders []HomeFolderInfo, selectedFold
 
 	// Get total size of internal drive
 	var stat syscall.Statfs_t
-	if err := syscall.Statfs("/home", &stat); err != nil {
-		return fmt.Errorf("failed to get home drive info: %v", err)
+	if err := syscall.Statfs("/", &stat); err != nil {
+		return fmt.Errorf("failed to get internal drive info: %v", err)
 	}
 
 	internalTotalSize := int64(stat.Blocks) * int64(stat.Bsize)
 
 	// Check: selected_restore_size <= internal_total_size
 	if totalSelectedSize > internalTotalSize {
-		return fmt.Errorf("⚠️ INSUFFICIENT SPACE for restore\n\nSelected items size: %s\nHome drive total: %s\n\nThe selected items are too large to fit on your home drive.\nYou need at least %s of total drive capacity.",
+		return fmt.Errorf("⚠️ INSUFFICIENT SPACE for restore\n\nSelected items size: %s\nInternal drive total: %s\n\nThe selected items are too large to fit on your internal drive.\nYou need at least %s of total drive capacity.",
 			FormatBytes(totalSelectedSize),
 			FormatBytes(internalTotalSize),
 			FormatBytes(totalSelectedSize))
