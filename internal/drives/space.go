@@ -3,7 +3,10 @@
 package drives
 
 import (
+	"bufio"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"syscall"
 )
@@ -209,9 +212,17 @@ func ValidateRestoreSpace(externalDriveSize string, externalMountPoint string, t
 	if targetPath == "" {
 		targetPath = "/"
 	}
+
+	// FIXED: Find the actual mount point that contains the target path
+	// This ensures we check the correct partition (e.g., /home instead of /)
+	actualMountPoint, err := findMountPointForPath(targetPath)
+	if err != nil {
+		return fmt.Errorf("failed to find mount point for %s: %v", targetPath, err)
+	}
+
 	var stat syscall.Statfs_t
-	if err := syscall.Statfs(targetPath, &stat); err != nil {
-		return fmt.Errorf("failed to get target drive info for %s: %v", targetPath, err)
+	if err := syscall.Statfs(actualMountPoint, &stat); err != nil {
+		return fmt.Errorf("failed to get target drive info for %s: %v", actualMountPoint, err)
 	}
 
 	targetTotalSize := int64(stat.Blocks) * int64(stat.Bsize)
@@ -220,7 +231,7 @@ func ValidateRestoreSpace(externalDriveSize string, externalMountPoint string, t
 	if externalUsedSpace > targetTotalSize {
 		return fmt.Errorf("⚠️ INSUFFICIENT SPACE for restore\n\nBackup size: %s\nTarget partition (%s) total: %s\n\nThe backup is too large to fit on your target partition.\nYou need at least %s of total drive capacity.",
 			FormatBytes(externalUsedSpace),
-			targetPath,
+			actualMountPoint,
 			FormatBytes(targetTotalSize),
 			FormatBytes(externalUsedSpace))
 	}
@@ -253,9 +264,17 @@ func ValidateSelectiveRestoreSpace(restoreFolders []HomeFolderInfo, selectedFold
 	if targetPath == "" {
 		targetPath = "/"
 	}
+
+	// FIXED: Find the actual mount point that contains the target path
+	// This ensures we check the correct partition (e.g., /home instead of /)
+	actualMountPoint, err := findMountPointForPath(targetPath)
+	if err != nil {
+		return fmt.Errorf("failed to find mount point for %s: %v", targetPath, err)
+	}
+
 	var stat syscall.Statfs_t
-	if err := syscall.Statfs(targetPath, &stat); err != nil {
-		return fmt.Errorf("failed to get target drive info for %s: %v", targetPath, err)
+	if err := syscall.Statfs(actualMountPoint, &stat); err != nil {
+		return fmt.Errorf("failed to get target drive info for %s: %v", actualMountPoint, err)
 	}
 
 	targetTotalSize := int64(stat.Blocks) * int64(stat.Bsize)
@@ -264,10 +283,61 @@ func ValidateSelectiveRestoreSpace(restoreFolders []HomeFolderInfo, selectedFold
 	if totalSelectedSize > targetTotalSize {
 		return fmt.Errorf("⚠️ INSUFFICIENT SPACE for restore\n\nSelected items size: %s\nTarget partition (%s) total: %s\n\nThe selected items are too large to fit on your target partition.\nYou need at least %s of total drive capacity.",
 			FormatBytes(totalSelectedSize),
-			targetPath,
+			actualMountPoint,
 			FormatBytes(targetTotalSize),
 			FormatBytes(totalSelectedSize))
 	}
 
 	return nil
+}
+
+// findMountPointForPath finds the mount point that contains the given path.
+// This ensures we check the correct partition for space validation.
+func findMountPointForPath(targetPath string) (string, error) {
+	// Clean the path to handle relative paths and symlinks
+	cleanPath, err := filepath.Abs(targetPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to get absolute path for %s: %v", targetPath, err)
+	}
+
+	// Read /proc/mounts to get all mount points
+	file, err := os.Open("/proc/mounts")
+	if err != nil {
+		return "", fmt.Errorf("failed to open /proc/mounts: %v", err)
+	}
+	defer file.Close()
+
+	var bestMatch string
+	var bestMatchLen int
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := scanner.Text()
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+
+		mountPoint := fields[1]
+
+		// Check if the target path is under this mount point
+		if strings.HasPrefix(cleanPath, mountPoint) {
+			// Use the longest matching mount point (most specific)
+			if len(mountPoint) > bestMatchLen {
+				bestMatch = mountPoint
+				bestMatchLen = len(mountPoint)
+			}
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return "", fmt.Errorf("error reading /proc/mounts: %v", err)
+	}
+
+	if bestMatch == "" {
+		// Fallback to root if no mount point found
+		return "/", nil
+	}
+
+	return bestMatch, nil
 }
