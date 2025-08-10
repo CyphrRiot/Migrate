@@ -47,6 +47,22 @@ func shouldExcludeFile(filePath string, excludePatterns []string, sourcePath str
 		relPath = filePath // Fallback to absolute if conversion fails
 	}
 
+	// Direct exclusion for git-related files - bypass pattern matching complexity
+	filename := filepath.Base(filePath)
+	if filename == ".gitignore" || filename == ".gitattributes" || filename == ".gitmodules" {
+		return true
+	}
+
+	// Direct exclusion for .github directories
+	if strings.Contains(filePath, "/.github/") || strings.HasSuffix(filePath, "/.github") {
+		return true
+	}
+
+	// Direct exclusion for .git directories
+	if strings.Contains(filePath, "/.git/") || strings.HasSuffix(filePath, "/.git") {
+		return true
+	}
+
 	for _, pattern := range excludePatterns {
 		// Skip empty patterns
 		if pattern == "" {
@@ -58,6 +74,7 @@ func shouldExcludeFile(filePath string, excludePatterns []string, sourcePath str
 			return true
 		}
 	}
+
 	return false
 }
 
@@ -136,6 +153,14 @@ func matchesPathPattern(path, pattern string) bool {
 		matched, err := filepath.Match(pattern, path)
 		if err == nil && matched {
 			return true
+		}
+
+		// Handle patterns like "*/filename" (e.g., "*/.gitignore")
+		if strings.HasPrefix(pattern, "*/") && !strings.HasSuffix(pattern, "/*") {
+			suffix := strings.TrimPrefix(pattern, "*/")
+			if strings.HasSuffix(path, "/"+suffix) {
+				return true
+			}
 		}
 
 		// Handle patterns like "*/something/*"

@@ -5,15 +5,18 @@
 
 .PHONY: build clean install uninstall run test static
 
+# Build flags for smaller binaries
+BUILD_FLAGS = -a -ldflags '-s -w -extldflags "-static"'
+
 # Build the application (static binary) - NEVER use `go build` directly!
 build:
 	@mkdir -p bin
-	CGO_ENABLED=0 go build -a -ldflags '-extldflags "-static"' -o bin/migrate .
+	CGO_ENABLED=0 go build $(BUILD_FLAGS) -o bin/migrate .
 
 # Build static binary (explicit target) - NEVER use `go build` directly!
 static:
 	@mkdir -p bin
-	CGO_ENABLED=0 go build -a -ldflags '-extldflags "-static"' -o bin/migrate .
+	CGO_ENABLED=0 go build $(BUILD_FLAGS) -o bin/migrate .
 
 # Clean build artifacts (including any stray root binary)
 clean:
@@ -47,7 +50,7 @@ run: build check
 
 # Test build
 test:
-	CGO_ENABLED=0 go build -a -ldflags '-extldflags "-static"' -o /tmp/migrate-test .
+	CGO_ENABLED=0 go build $(BUILD_FLAGS) -o /tmp/migrate-test .
 	rm /tmp/migrate-test
 
 # Development run (with go run)

@@ -116,6 +116,10 @@ func GetHomeBackupExclusions() []string {
 		".local/share/containers/*",
 		".git/*",
 		"*/.git/*",
+		".gitignore",
+		"*/.gitignore",
+		".github/*",
+		"*/.github/*",
 		// Signal app cache
 		".config/Signal/blob_storage/*",
 		".config/Signal/drafts.noindex/*",

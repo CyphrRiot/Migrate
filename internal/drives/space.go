@@ -80,6 +80,215 @@ func ValidateBackupSpace(externalDriveSize string) error {
 	return nil
 }
 
+// ValidateMountedBackupSpace validates that a mounted drive has sufficient space for system backup.
+// Uses intelligent incremental backup space calculation.
+func ValidateMountedBackupSpace(mountPoint string) error {
+	// Get used space on internal drive (what we need to backup)
+	internalUsedSpace, err := GetUsedDiskSpace("/")
+	if err != nil {
+		return fmt.Errorf("failed to get internal drive usage: %v", err)
+	}
+
+	// Get available space on the mounted external drive
+	availableSpace, err := GetAvailableDiskSpace(mountPoint)
+	if err != nil {
+		return fmt.Errorf("failed to get available space on backup drive: %v", err)
+	}
+
+	// Check if there's an existing backup
+	existingBackupSize := int64(0)
+	hasExistingBackup := false
+	if _, err := os.Stat(filepath.Join(mountPoint, "BACKUP-INFO.txt")); err == nil {
+		// Existing backup detected - get its size
+		existingBackupSize, _ = GetUsedDiskSpace(mountPoint)
+		hasExistingBackup = true
+	}
+
+	var spaceNeeded int64
+	if hasExistingBackup {
+		// Incremental backup with delete-first: deletion frees space before copying
+		// We only need buffer space for temporary operations during sync
+		// The delete phase will free approximately the same space that copy phase uses
+
+		// Conservative buffer: 10GB for temporary files during sync operations
+		bufferSpace := int64(10 * 1024 * 1024 * 1024) // 10GB buffer
+		spaceNeeded = bufferSpace
+
+		// For very small systems, use 5% of internal space as minimum buffer
+		minBuffer := int64(float64(internalUsedSpace) * 0.05) // 5% of system size
+		if minBuffer < bufferSpace {
+			minBuffer = bufferSpace
+		}
+		spaceNeeded = minBuffer
+	} else {
+		// First backup: need full space
+		spaceNeeded = internalUsedSpace
+	}
+
+	// Check: space_needed <= external_available_space
+	if spaceNeeded > availableSpace {
+		if hasExistingBackup {
+			return fmt.Errorf("⚠️ INSUFFICIENT SPACE for incremental backup\n\nInternal drive used: %s\nExisting backup size: %s\nBuffer space needed: %s\nExternal drive available: %s\n\nIncremental backup uses delete-first to free space before copying.\nYou need at least %s of available space for sync operations.",
+				FormatBytes(internalUsedSpace),
+				FormatBytes(existingBackupSize),
+				FormatBytes(spaceNeeded),
+				FormatBytes(availableSpace),
+				FormatBytes(spaceNeeded))
+		} else {
+			return fmt.Errorf("⚠️ INSUFFICIENT SPACE for backup\n\nInternal drive used: %s\nExternal drive available: %s\n\nThe backup drive doesn't have enough free space.\nYou need at least %s of available space.",
+				FormatBytes(internalUsedSpace),
+				FormatBytes(availableSpace),
+				FormatBytes(internalUsedSpace))
+		}
+	}
+
+	return nil
+}
+
+// ValidateMountedHomeBackupSpace validates that a mounted drive has sufficient space for home backup.
+// Uses intelligent incremental backup space calculation.
+func ValidateMountedHomeBackupSpace(mountPoint string) error {
+	// Get home directory size
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("failed to get home directory: %v", err)
+	}
+
+	homeDirSize, err := CalculateDirectorySize(homeDir)
+	if err != nil {
+		return fmt.Errorf("failed to calculate home directory size: %v", err)
+	}
+
+	// Get available space on the mounted external drive
+	availableSpace, err := GetAvailableDiskSpace(mountPoint)
+	if err != nil {
+		return fmt.Errorf("failed to get available space on backup drive: %v", err)
+	}
+
+	// Check if there's an existing backup
+	existingBackupSize := int64(0)
+	hasExistingBackup := false
+	if _, err := os.Stat(filepath.Join(mountPoint, "BACKUP-INFO.txt")); err == nil {
+		// Existing backup detected - get its size
+		existingBackupSize, _ = GetUsedDiskSpace(mountPoint)
+		hasExistingBackup = true
+	}
+
+	var spaceNeeded int64
+	if hasExistingBackup {
+		// Incremental backup: estimate 15% change for home directories (more volatile than system)
+		estimatedChangePercent := 0.15 // 15% change estimate
+		estimatedChanges := int64(float64(homeDirSize) * estimatedChangePercent)
+		spaceNeeded = estimatedChanges
+
+		// Minimum safety buffer of 500MB for small home directories
+		minBuffer := int64(500 * 1024 * 1024) // 500MB
+		if spaceNeeded < minBuffer {
+			spaceNeeded = minBuffer
+		}
+	} else {
+		// First backup: need full space
+		spaceNeeded = homeDirSize
+	}
+
+	// Check: space_needed <= external_available_space
+	if spaceNeeded > availableSpace {
+		if hasExistingBackup {
+			return fmt.Errorf("⚠️ INSUFFICIENT SPACE for incremental home backup\n\nHome directory size: %s\nExisting backup size: %s\nEstimated changes: %s\nExternal drive available: %s\n\nIncremental backup needs space for changed files only.\nYou need at least %s of available space.",
+				FormatBytes(homeDirSize),
+				FormatBytes(existingBackupSize),
+				FormatBytes(spaceNeeded),
+				FormatBytes(availableSpace),
+				FormatBytes(spaceNeeded))
+		} else {
+			return fmt.Errorf("⚠️ INSUFFICIENT SPACE for home backup\n\nHome directory size: %s\nExternal drive available: %s\n\nThe backup drive doesn't have enough free space.\nYou need at least %s of available space.",
+				FormatBytes(homeDirSize),
+				FormatBytes(availableSpace),
+				FormatBytes(homeDirSize))
+		}
+	}
+
+	return nil
+}
+
+// ValidateSelectiveBackupSpaceOnMounted validates space for selective home backup on mounted drive.
+// Checks actual available space and accounts for existing backup overlap during sync.
+func ValidateSelectiveBackupSpaceOnMounted(homeFolders []HomeFolderInfo, selectedFolders map[string]bool, subfolderCache map[string][]HomeFolderInfo, mountPoint string) error {
+	// Calculate total size of selected folders
+	totalSelectedSize := int64(0)
+
+	for _, folder := range homeFolders {
+		if folder.AlwaysInclude {
+			// Hidden folders are always included (dotfiles/dotdirs)
+			totalSelectedSize += folder.Size
+		} else if folder.IsVisible {
+			// Handle visible folders with potential subfolders
+			if folder.HasSubfolders {
+				// Check if any subfolders are cached (user has drilled down)
+				if subfolders, exists := subfolderCache[folder.Path]; exists {
+					// User has drilled down - calculate based on individual subfolder selections
+					subfolderTotal := int64(0)
+					for _, subfolder := range subfolders {
+						if selectedFolders[subfolder.Path] {
+							subfolderTotal += subfolder.Size
+						}
+					}
+					totalSelectedSize += subfolderTotal
+				} else {
+					// User hasn't drilled down - use parent folder selection
+					if selectedFolders[folder.Path] {
+						totalSelectedSize += folder.Size
+					}
+				}
+			} else {
+				// Simple folder without subfolders
+				if selectedFolders[folder.Path] {
+					totalSelectedSize += folder.Size
+				}
+			}
+		}
+	}
+
+	// Get available space on the mounted external drive
+	availableSpace, err := GetAvailableDiskSpace(mountPoint)
+	if err != nil {
+		return fmt.Errorf("failed to get available space on backup drive: %v", err)
+	}
+
+	// Check if there's an existing backup that might need to coexist temporarily
+	existingBackupSize := int64(0)
+	if _, err := os.Stat(filepath.Join(mountPoint, "BACKUP-INFO.txt")); err == nil {
+		// Existing backup detected - get its size
+		existingBackupSize, _ = GetUsedDiskSpace(mountPoint)
+	}
+
+	// Calculate space needed: new backup + existing backup (temporary overlap during sync)
+	spaceNeeded := totalSelectedSize
+	if existingBackupSize > 0 {
+		// Need space for both old and new backup during sync process
+		spaceNeeded = totalSelectedSize + existingBackupSize
+	}
+
+	// Check: space_needed <= external_available_space
+	if spaceNeeded > availableSpace {
+		if existingBackupSize > 0 {
+			return fmt.Errorf("⚠️ INSUFFICIENT SPACE for selective home backup\n\nSelected folders size: %s\nExisting backup size: %s\nSpace needed (peak during sync): %s\nExternal drive available: %s\n\nDuring backup, both old and new files exist temporarily.\nYou need at least %s of available space.",
+				FormatBytes(totalSelectedSize),
+				FormatBytes(existingBackupSize),
+				FormatBytes(spaceNeeded),
+				FormatBytes(availableSpace),
+				FormatBytes(spaceNeeded))
+		} else {
+			return fmt.Errorf("⚠️ INSUFFICIENT SPACE for selective home backup\n\nSelected folders size: %s\nExternal drive available: %s\n\nThe backup drive doesn't have enough free space.\nYou need at least %s of available space.",
+				FormatBytes(totalSelectedSize),
+				FormatBytes(availableSpace),
+				FormatBytes(totalSelectedSize))
+		}
+	}
+
+	return nil
+}
+
 // ValidateSelectiveBackupSpace validates space for selective home backup.
 // FIXED: Now properly handles hierarchical folder selections from the UI selection map.
 func ValidateSelectiveBackupSpace(homeFolders []HomeFolderInfo, selectedFolders map[string]bool, subfolderCache map[string][]HomeFolderInfo, externalDriveSize string) error {

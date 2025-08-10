@@ -7,14 +7,15 @@ var (
 		"🚀 Backup System",
 		"🔍 Verify Backup",
 		"🔄 Restore System",
+		"⚙️ Restore Settings",
 		"ℹ️ About",
 		"❌ Exit",
 	}
 
 	// BackupMenuChoices defines the backup menu options
 	BackupMenuChoices = []string{
-		"📁 Complete System Backup",
 		"🏠 Home Directory Only",
+		"📁 Complete System Backup",
 		"⬅️ Back",
 	}
 
@@ -36,6 +37,13 @@ var (
 		"☑️ Restore Configuration (~/.config)",
 		"☑️ Restore Window Managers (Hyprland, GNOME, etc.)",
 		"✅ Continue",
+		"⬅️ Back",
+	}
+
+	// RestoreSettingsMenuChoices defines the restore settings menu options
+	RestoreSettingsMenuChoices = []string{
+		"⚙️ Restore Configuration Files (~/.config)",
+		"📁 Restore Local Data (~/.local)",
 		"⬅️ Back",
 	}
 
@@ -65,6 +73,8 @@ func GetMenuChoices(screen Screen) []string {
 		return VerifyMenuChoices
 	case ScreenRestoreOptions:
 		return RestoreOptionsChoices
+	case ScreenRestoreSettings:
+		return RestoreSettingsMenuChoices
 	case ScreenConfirm:
 		return ConfirmationChoices
 	default:
@@ -88,9 +98,11 @@ func GetMainMenuAction(index int) MenuAction {
 		return MenuAction{Screen: ScreenVerify}
 	case 2: // Restore
 		return MenuAction{Screen: ScreenRestore}
-	case 3: // About
+	case 3: // Restore Settings
+		return MenuAction{Screen: ScreenRestoreSettings}
+	case 4: // About
 		return MenuAction{Screen: ScreenAbout}
-	case 4: // Exit
+	case 5: // Exit
 		return MenuAction{} // Special case, handled separately
 	default:
 		return MenuAction{}
@@ -100,15 +112,15 @@ func GetMainMenuAction(index int) MenuAction {
 // GetBackupMenuAction returns the action for a backup menu selection
 func GetBackupMenuAction(index int) MenuAction {
 	switch index {
-	case 0: // Complete System Backup
-		return MenuAction{
-			Screen:    ScreenDriveSelect,
-			Operation: "system_backup",
-		}
-	case 1: // Home Directory Only
+	case 0: // Home Directory Only
 		return MenuAction{
 			Screen:    ScreenHomeFolderSelect,
 			Operation: "home_backup",
+		}
+	case 1: // Complete System Backup
+		return MenuAction{
+			Screen:    ScreenDriveSelect,
+			Operation: "system_backup",
 		}
 	case 2: // Back
 		return MenuAction{Screen: ScreenMain}

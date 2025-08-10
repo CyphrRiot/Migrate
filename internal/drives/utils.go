@@ -6,7 +6,15 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"syscall"
+)
+
+// Atomic counters for scanning progress - same pattern as backup operations
+var (
+	foldersScanned     int64  // total folders scanned so far
+	totalFoldersToScan int64  // estimated total folders to scan
+	currentFolderName  string // name of folder currently being scanned
 )
 
 // getUsedDiskSpace provides backward compatibility wrapper for GetUsedDiskSpace.
@@ -33,6 +41,22 @@ func GetUsedDiskSpace(path string) (int64, error) {
 	usedBytes := totalBytes - freeBytes
 
 	return usedBytes, nil
+}
+
+// GetAvailableDiskSpace returns the available (free) space on the filesystem containing the given path.
+func GetAvailableDiskSpace(path string) (int64, error) {
+	var stat syscall.Statfs_t
+	err := syscall.Statfs(path, &stat)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get filesystem stats for %s: %v", path, err)
+	}
+
+	// Calculate available space for non-root users
+	// stat.Bavail = free blocks available to non-root users
+	// stat.Bsize = block size
+	availableBytes := int64(stat.Bavail) * int64(stat.Bsize)
+
+	return availableBytes, nil
 }
 
 // FormatBytes formats byte counts into human-readable size with proper units and formatting.
@@ -124,6 +148,22 @@ func IsImportantSystemFolder(name string) bool {
 // DiscoverHomeFolders analyzes the user's home directory for selective backup operations.
 // Scans all directories, calculates sizes, and categorizes them as visible or hidden.
 func DiscoverHomeFolders() ([]HomeFolderInfo, error) {
+	// DETAILED LOGGING TO DEBUG HANGING
+	logFile, _ := os.OpenFile("/tmp/migrate_scan_debug.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if logFile != nil {
+		defer logFile.Close()
+		fmt.Fprintf(logFile, "=== SCAN START ===\n")
+	}
+
+	// Reset scanning counters
+	atomic.StoreInt64(&foldersScanned, 0)
+	atomic.StoreInt64(&totalFoldersToScan, 0)
+	currentFolderName = ""
+
+	if logFile != nil {
+		fmt.Fprintf(logFile, "Step 1: Counters reset\n")
+	}
+
 	// Get the original user's home directory, not root's
 	homeDir := os.Getenv("SUDO_USER")
 	if homeDir != "" {
@@ -132,16 +172,44 @@ func DiscoverHomeFolders() ([]HomeFolderInfo, error) {
 		var err error
 		homeDir, err = os.UserHomeDir()
 		if err != nil {
+			if logFile != nil {
+				fmt.Fprintf(logFile, "ERROR: Failed to get home dir: %v\n", err)
+			}
 			return nil, err
 		}
 	}
 
+	if logFile != nil {
+		fmt.Fprintf(logFile, "Step 2: Home dir determined: %s\n", homeDir)
+	}
+
+	if logFile != nil {
+		fmt.Fprintf(logFile, "Step 3: About to call os.ReadDir(%s)\n", homeDir)
+	}
+
 	entries, err := os.ReadDir(homeDir)
 	if err != nil {
+		if logFile != nil {
+			fmt.Fprintf(logFile, "ERROR: os.ReadDir failed: %v\n", err)
+		}
 		return nil, err
 	}
 
+	if logFile != nil {
+		fmt.Fprintf(logFile, "Step 4: os.ReadDir succeeded, found %d entries\n", len(entries))
+	}
+
+	// Count directories first so we can show progress
+	dirCount := int64(0)
+	for _, entry := range entries {
+		if entry.IsDir() {
+			dirCount++
+		}
+	}
+	atomic.StoreInt64(&totalFoldersToScan, dirCount)
+
 	var folders []HomeFolderInfo
+	folderIndex := int64(0)
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
@@ -151,10 +219,23 @@ func DiscoverHomeFolders() ([]HomeFolderInfo, error) {
 		path := filepath.Join(homeDir, name)
 		isHidden := name[0] == '.'
 
+		if logFile != nil {
+			fmt.Fprintf(logFile, "Step 5: Processing folder %d: %s\n", folderIndex+1, name)
+		}
+
+		// Update progress counters
+		folderIndex++
+		atomic.StoreInt64(&foldersScanned, folderIndex)
+		currentFolderName = name
+
 		// Calculate folder size
 		size, err := CalculateDirectorySize(path)
 		if err != nil {
 			size = 0
+		}
+
+		if logFile != nil {
+			fmt.Fprintf(logFile, "Step 6: Size set to 0 for %s\n", name)
 		}
 
 		// Check if folder has subdirectories
@@ -181,10 +262,33 @@ func DiscoverHomeFolders() ([]HomeFolderInfo, error) {
 			ParentPath:    "",
 		}
 
+		if logFile != nil {
+			fmt.Fprintf(logFile, "Step 9: Created folder struct for %s\n", name)
+		}
+
 		folders = append(folders, folder)
+
+		if logFile != nil {
+			fmt.Fprintf(logFile, "Step 10: Added %s to folders list\n", name)
+		}
+	}
+
+	// Clear progress when done
+	currentFolderName = ""
+
+	if logFile != nil {
+		fmt.Fprintf(logFile, "Step 11: SCAN COMPLETE - returning %d folders\n", len(folders))
+		for i, folder := range folders {
+			fmt.Fprintf(logFile, "  Folder %d: %s (size: %d, visible: %v)\n", i, folder.Name, folder.Size, folder.IsVisible)
+		}
 	}
 
 	return folders, nil
+}
+
+// GetScanProgress returns current scanning progress for UI display
+func GetScanProgress() (int64, int64, string) {
+	return atomic.LoadInt64(&foldersScanned), atomic.LoadInt64(&totalFoldersToScan), currentFolderName
 }
 
 // DiscoverSubfolders analyzes subdirectories within a parent folder for granular selection.

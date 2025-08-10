@@ -23,9 +23,11 @@ func (h *MainMenuHandler) HandleSelection(cursor int) (screen screens.Screen, op
 		return screens.ScreenVerify, "", screens.VerifyMenuChoices, nil
 	case 2: // Restore
 		return screens.ScreenRestore, "", screens.RestoreMenuChoices, nil
-	case 3: // About
+	case 3: // Restore Settings
+		return screens.ScreenRestoreSettings, "", screens.RestoreSettingsMenuChoices, nil
+	case 4: // About
 		return screens.ScreenAbout, "", nil, nil
-	case 4: // Exit
+	case 5: // Exit
 		return screens.ScreenMain, "", nil, tea.Quit
 	}
 	return screens.ScreenMain, "", screens.MainMenuChoices, nil

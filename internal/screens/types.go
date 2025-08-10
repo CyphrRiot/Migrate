@@ -16,6 +16,7 @@ const (
 	ScreenError
 	ScreenComplete
 	ScreenRestoreOptions
+	ScreenRestoreSettings
 	ScreenHomeFolderSelect
 	ScreenHomeSubfolderSelect
 	ScreenVerificationErrors
@@ -47,6 +48,8 @@ func (s Screen) String() string {
 		return "Complete"
 	case ScreenRestoreOptions:
 		return "Restore Options"
+	case ScreenRestoreSettings:
+		return "Restore Settings"
 	case ScreenHomeFolderSelect:
 		return "Home Folder Selection"
 	case ScreenHomeSubfolderSelect:
