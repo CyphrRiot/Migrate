@@ -341,22 +341,7 @@ func performPureGoBackup(config BackupConfig, logFile *os.File) error {
 	}
 
 	// REGULAR BACKUP: Sync entire source directory with smart hierarchical support
-	if config.IsSelectiveBackup {
-		err = syncDirectoriesWithSelectiveInclusions(config.SourcePath, config.DestinationPath, config.ExcludePatterns, config.SelectedSubfolders, logFile)
-	} else {
-		err = syncDirectoriesWithExclusions(config.SourcePath, config.DestinationPath, config.ExcludePatterns, logFile)
-	}
-	if err != nil {
-		if logFile != nil {
-			fmt.Fprintf(logFile, "ERROR during sync: %v\n", err)
-		}
-		return err
-	}
-
-	// Mark sync phase as complete
-	syncPhaseComplete = true
-
-	// Phase 2: Delete files that exist in backup but not in source (--delete behavior)
+	// Phase 1: Delete files that exist in backup but not in source (--delete behavior FIRST)
 	if logFile != nil {
 		fmt.Fprintf(logFile, "Starting deletion phase (removing files not in source)\n")
 	}
@@ -373,6 +358,29 @@ func performPureGoBackup(config BackupConfig, logFile *os.File) error {
 		}
 		return fmt.Errorf("deletion phase failed: %v", err)
 	}
+
+	// Mark deletion phase as complete
+	deletionPhaseActive = false
+
+	// Phase 2: Copy/sync files AFTER deletion to prevent space spike
+	if logFile != nil {
+		fmt.Fprintf(logFile, "Starting sync phase (copying files)\n")
+	}
+
+	if config.IsSelectiveBackup {
+		err = syncDirectoriesWithSelectiveInclusions(config.SourcePath, config.DestinationPath, config.ExcludePatterns, config.SelectedSubfolders, logFile)
+	} else {
+		err = syncDirectoriesWithExclusions(config.SourcePath, config.DestinationPath, config.ExcludePatterns, logFile)
+	}
+	if err != nil {
+		if logFile != nil {
+			fmt.Fprintf(logFile, "ERROR during sync: %v\n", err)
+		}
+		return err
+	}
+
+	// Mark sync phase as complete
+	syncPhaseComplete = true
 
 	// Mark deletion phase as complete
 	deletionPhaseActive = false
@@ -792,6 +800,150 @@ func startSelectiveRestore(sourcePath string, selectedFolders map[string]bool, a
 	}
 }
 
+// startConfigRestore starts a restore operation for only the .config directory
+func startConfigRestore(sourcePath string) tea.Cmd {
+	return func() tea.Msg {
+		// Reset all backup state before starting (reuse backup progress system)
+		resetBackupState()
+
+		// Start config restore in background
+		go runConfigRestoreSilently(sourcePath)
+		return ProgressUpdate{Percentage: -1, Message: "Starting configuration restore...", Done: false}
+	}
+}
+
+// startLocalRestore starts a restore operation for only the .local directory
+func startLocalRestore(sourcePath string) tea.Cmd {
+	return func() tea.Msg {
+		// Reset all backup state before starting (reuse backup progress system)
+		resetBackupState()
+
+		// Start local data restore in background
+		go runLocalRestoreSilently(sourcePath)
+		return ProgressUpdate{Percentage: -1, Message: "Starting local data restore...", Done: false}
+	}
+}
+
+// runConfigRestoreSilently performs the actual .config restore operation in the background
+func runConfigRestoreSilently(sourcePath string) {
+	// Reset cancellation flag at start
+	resetBackupCancel()
+
+	// Initialize TUI state like other operations
+	tuiBackupCompleted = false
+	tuiBackupError = nil
+	tuiBackupCancelling = false
+
+	// Setup logging
+	logPath := getLogFilePath()
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		tuiBackupCompleted = true
+		tuiBackupError = fmt.Errorf("failed to setup logging: %v", err)
+		return
+	}
+	defer logFile.Close()
+
+	fmt.Fprintf(logFile, "\n=== CONFIG RESTORE STARTED: %s ===\n", time.Now().Format(time.RFC3339))
+	fmt.Fprintf(logFile, "Source: %s/.config\n", sourcePath)
+
+	// Get target directory (user's home/.config)
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		tuiBackupCompleted = true
+		tuiBackupError = fmt.Errorf("failed to get home directory: %v", err)
+		return
+	}
+	targetPath := filepath.Join(homeDir, ".config")
+
+	// Check if source .config exists
+	sourceConfigPath := filepath.Join(sourcePath, ".config")
+	if _, err := os.Stat(sourceConfigPath); err != nil {
+		tuiBackupCompleted = true
+		tuiBackupError = fmt.Errorf("configuration folder not found in backup")
+		return
+	}
+
+	// Create target directory if it doesn't exist
+	if err := os.MkdirAll(targetPath, 0755); err != nil {
+		tuiBackupCompleted = true
+		tuiBackupError = fmt.Errorf("failed to create target directory: %v", err)
+		return
+	}
+
+	// Perform the actual sync
+	err = syncDirectories(sourceConfigPath, targetPath, logFile)
+	if err != nil {
+		tuiBackupCompleted = true
+		tuiBackupError = fmt.Errorf("configuration restore failed: %v", err)
+		return
+	}
+
+	tuiBackupCompleted = true
+	tuiBackupError = nil
+	fmt.Fprintf(logFile, "=== CONFIG RESTORE COMPLETED: %s ===\n", time.Now().Format(time.RFC3339))
+}
+
+// runLocalRestoreSilently performs the actual .local restore operation in the background
+func runLocalRestoreSilently(sourcePath string) {
+	// Reset cancellation flag at start
+	resetBackupCancel()
+
+	// Initialize TUI state like other operations
+	tuiBackupCompleted = false
+	tuiBackupError = nil
+	tuiBackupCancelling = false
+
+	// Setup logging
+	logPath := getLogFilePath()
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		tuiBackupCompleted = true
+		tuiBackupError = fmt.Errorf("failed to setup logging: %v", err)
+		return
+	}
+	defer logFile.Close()
+
+	fmt.Fprintf(logFile, "\n=== LOCAL DATA RESTORE STARTED: %s ===\n", time.Now().Format(time.RFC3339))
+	fmt.Fprintf(logFile, "Source: %s/.local\n", sourcePath)
+
+	// Get target directory (user's home/.local)
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		tuiBackupCompleted = true
+		tuiBackupError = fmt.Errorf("failed to get home directory: %v", err)
+		return
+	}
+	targetPath := filepath.Join(homeDir, ".local")
+
+	// Check if source .local exists
+	sourceLocalPath := filepath.Join(sourcePath, ".local")
+	if _, err := os.Stat(sourceLocalPath); err != nil {
+		tuiBackupCompleted = true
+		tuiBackupError = fmt.Errorf("local data folder not found in backup")
+		return
+	}
+
+	// Create target directory if it doesn't exist
+	if err := os.MkdirAll(targetPath, 0755); err != nil {
+		tuiBackupCompleted = true
+		tuiBackupError = fmt.Errorf("failed to create target directory: %v", err)
+		return
+	}
+
+	// Perform the actual sync
+	err = syncDirectories(sourceLocalPath, targetPath, logFile)
+	if err != nil {
+		tuiBackupCompleted = true
+		tuiBackupError = fmt.Errorf("local data restore failed: %v", err)
+		return
+	}
+
+	tuiBackupCompleted = true
+	tuiBackupError = nil
+	fmt.Fprintf(logFile, "=== LOCAL DATA RESTORE COMPLETED: %s ===\n", time.Now().Format(time.RFC3339))
+}
+
 // runSelectiveRestoreSilently performs the actual selective restore operation in the background.
 // Uses the same pattern as runBackupSilently to provide proper progress tracking.
 func runSelectiveRestoreSilently(sourcePath string, selectedFolders map[string]bool, allFolders []HomeFolderInfo, restoreConfig, restoreWindowMgrs bool) {
@@ -877,24 +1029,17 @@ func performSelectiveRestore(backupPath, targetPath string, selectedFolders map[
 		// Get the folder name from the backup path
 		folderName := filepath.Base(folder.Path)
 
+		// CRITICAL FIX: Completely exclude .config and .local from regular restore
+		// These are now handled by the separate "Restore Settings" menu option
+		if folderName == ".config" || folderName == ".local" {
+			if logFile != nil {
+				fmt.Fprintf(logFile, "Skipping %s (use 'Restore Settings' menu for these folders)\n", folderName)
+			}
+			continue
+		}
+
 		// Skip if not selected and not always included
 		if !selectedFolders[folder.Path] && !folder.AlwaysInclude {
-			continue
-		}
-
-		// Apply config/window manager filters
-		if !restoreConfig && folderName == ".config" {
-			if logFile != nil {
-				fmt.Fprintf(logFile, "Skipping .config (restore config disabled)\n")
-			}
-			continue
-		}
-
-		// CRITICAL FIX: Skip .local folder entirely when Window Managers deselected
-		if !restoreWindowMgrs && folderName == ".local" {
-			if logFile != nil {
-				fmt.Fprintf(logFile, "Skipping .local (restore window managers disabled)\n")
-			}
 			continue
 		}
 
@@ -1589,6 +1734,14 @@ func runVerificationSilently(operationType, mountPoint string) {
 		fmt.Fprintf(logFile, "Exclusion patterns: %v\n", excludePatterns)
 		fmt.Fprintf(logFile, "Starting verification...\n")
 	}
+
+	// Debug: Write backup type and exclusions to debug file
+	debugFile := "/tmp/migrate_verification_debug"
+	debugContent := fmt.Sprintf("Backup type: %s\nExclusion patterns:\n", backupType)
+	for _, pattern := range excludePatterns {
+		debugContent += fmt.Sprintf("  %s\n", pattern)
+	}
+	ioutil.WriteFile(debugFile, []byte(debugContent), 0644)
 
 	// Perform the actual verification
 	err = performStandaloneVerification(sourcePath, mountPoint, excludePatterns, logFile)

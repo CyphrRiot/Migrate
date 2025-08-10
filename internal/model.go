@@ -154,6 +154,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.choices[len(m.drives)] = "⬅️ Back"
 		return m, nil
 
+	case ScanProgress:
+		// Update scanning progress message only if still on folder selection screen
+		if m.screen == screens.ScreenHomeFolderSelect && len(m.homeFolders) == 0 {
+			if msg.total > 0 {
+				m.message = fmt.Sprintf("🔍 Scanning %s... (%d/%d)", msg.folderName, msg.current, msg.total)
+			}
+			// Continue getting progress updates only while on folder selection screen
+			return m, ScanProgressCmd()
+		}
+		// Stop progress updates if we've moved to a different screen
+		return m, nil
+
 	case HomeFoldersDiscovered:
 		if msg.error != nil {
 			m.message = fmt.Sprintf("Failed to scan home directory: %v", msg.error)
@@ -162,77 +174,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			})
 		}
 
+		// DEBUG: Log what folders were discovered
+		if logFile, err := os.OpenFile("/tmp/migrate_folders_debug.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
+			fmt.Fprintf(logFile, "=== HomeFoldersDiscovered ===\n")
+			fmt.Fprintf(logFile, "Number of folders: %d\n", len(msg.folders))
+			for i, folder := range msg.folders {
+				fmt.Fprintf(logFile, "  Folder %d: %s (size: %d, visible: %v)\n", i, folder.Name, folder.Size, folder.IsVisible)
+			}
+			logFile.Close()
+		}
+
 		m.homeFolders = msg.folders
 		m.cursor = 0 // Default to "Continue with selection" option
 
-		// Load saved configuration to restore previous selections
-		config, err := LoadSelectiveBackupConfig()
-		if err != nil {
-			// Failed to load config - use defaults (all visible folders selected)
-			m.selectedFolders = make(map[string]bool)
-			for _, folder := range m.homeFolders {
-				if folder.IsVisible {
-					m.selectedFolders[folder.Path] = true
-				}
-			}
-			m.message = fmt.Sprintf("Using default selections (config load failed: %v)", err)
-		} else {
-			// Successfully loaded config - restore previous selections
-			m.selectedFolders = make(map[string]bool)
-
-			// Apply saved selections to discovered folders
-			for _, folder := range m.homeFolders {
-				if folder.IsVisible {
-					// Check if we have a saved preference for this folder
-					if savedSelection, exists := config.FolderSelections[folder.Path]; exists {
-						m.selectedFolders[folder.Path] = savedSelection
-					} else {
-						// New folder not in saved config - default to selected
-						m.selectedFolders[folder.Path] = true
-					}
-				} else {
-					// Hidden folders are always "selected" but not shown in UI
-					m.selectedFolders[folder.Path] = true
-				}
-			}
-
-			// Restore cached subfolders from saved config
-			if len(config.SubfolderCache) > 0 {
-				m.subfolderCache = ConvertSavedSubfoldersToHomeFolders(config.SubfolderCache)
-
-				// Apply saved subfolder selections
-				for parentPath, subfolders := range m.subfolderCache {
-					for i := range subfolders {
-						if savedSelection, exists := config.FolderSelections[subfolders[i].Path]; exists {
-							subfolders[i].Selected = savedSelection
-							m.selectedFolders[subfolders[i].Path] = savedSelection
-						}
-					}
-					m.subfolderCache[parentPath] = subfolders
-				}
-			}
-
-			// Clean up any old selections for folders that no longer exist
-			m.selectedFolders = CleanupOldSelections(m.selectedFolders)
-
-			// Restore navigation state if saved (optional - user-friendly feature)
-			if config.LastFolderPath != "" {
-				m.currentFolderPath = config.LastFolderPath
-				m.folderBreadcrumb = config.LastBreadcrumb
-			}
-
-			// Only show "Restored" message during restore operations, not backup operations
-			if strings.Contains(m.operation, "restore") {
-				selectedCount := 0
-				for _, selected := range m.selectedFolders {
-					if selected {
-						selectedCount++
-					}
-				}
-				m.message = fmt.Sprintf("✅ Restored previous folder selections (%d folders)", selectedCount)
-			} else {
-				// For backup operations, don't show confusing "Restored" message
-				m.message = ""
+		// Don't use cache file - always start with fresh selections (all visible folders selected)
+		m.selectedFolders = make(map[string]bool)
+		for _, folder := range m.homeFolders {
+			if folder.IsVisible {
+				m.selectedFolders[folder.Path] = true
 			}
 		}
 
@@ -383,8 +342,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 				m.confirmation = fmt.Sprintf("Ready to backup %s\n\n%sDestination: %s (%s)\nType: %s\nMounted at: %s\n\nProceed with backup?",
 					backupTypeDesc, sourceSize, msg.drivePath, msg.driveSize, msg.driveType, msg.mountPoint)
-			} else if strings.Contains(m.operation, "restore") {
-				// For restore, first detect backup type
+			} else if strings.Contains(m.operation, "restore") || m.operation == "config_restore" || m.operation == "local_restore" {
+				// For restore operations, first detect backup type
 				// Write debug info
 				os.WriteFile(debugFile+"_restore", []byte(fmt.Sprintf("Starting backup type detection for restore at: %s", msg.mountPoint)), 0644)
 
@@ -406,7 +365,36 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				buf = fmt.Appendf(buf, "Backup type detected: %s", backupType)
 				os.WriteFile(debugFile+"_restore_type", buf, 0644)
 
-				if backupType == "home" {
+				// Handle specific settings restore operations
+				if m.operation == "config_restore" {
+					// Config restore - check if .config exists in backup
+					configPath := filepath.Join(msg.mountPoint, ".config")
+					if _, err := os.Stat(configPath); err != nil {
+						errorMsg := fmt.Sprintf("❌ Configuration folder not found\n\nThe backup does not contain a .config directory.\n\nMake sure this backup contains home directory data.")
+						m.message = errorMsg
+						m.errorRequiresManualDismissal = true
+						m.lastScreen = m.screen
+						m.screen = screens.ScreenError
+						return m, nil
+					}
+
+					m.confirmation = fmt.Sprintf("Ready to restore CONFIGURATION FILES\n\nSource: %s/.config\nDestination: ~/.config\nDrive: %s (%s)\n\n⚠️ This will OVERWRITE existing configuration files!\n\nProceed with restore?",
+						msg.mountPoint, msg.drivePath, msg.driveSize)
+				} else if m.operation == "local_restore" {
+					// Local data restore - check if .local exists in backup
+					localPath := filepath.Join(msg.mountPoint, ".local")
+					if _, err := os.Stat(localPath); err != nil {
+						errorMsg := fmt.Sprintf("❌ Local data folder not found\n\nThe backup does not contain a .local directory.\n\nMake sure this backup contains home directory data.")
+						m.message = errorMsg
+						m.errorRequiresManualDismissal = true
+						m.lastScreen = m.screen
+						m.screen = screens.ScreenError
+						return m, nil
+					}
+
+					m.confirmation = fmt.Sprintf("Ready to restore LOCAL DATA\n\nSource: %s/.local\nDestination: ~/.local\nDrive: %s (%s)\n\n⚠️ This will OVERWRITE existing local data!\n\nProceed with restore?",
+						msg.mountPoint, msg.drivePath, msg.driveSize)
+				} else if backupType == "home" {
 					// It's a home backup - change operation type and proceed with folder selection
 					os.WriteFile(debugFile+"_restore_home_backup", []byte("Home backup detected, checking restore flow"), 0644)
 
@@ -502,7 +490,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				strings.Contains(errorMsg, "permission denied") ||
 				strings.Contains(errorMsg, "cannot determine backup type") ||
 				strings.Contains(errorMsg, "no valid backup found") ||
-				strings.Contains(errorMsg, "error 32") {
+				strings.Contains(errorMsg, "error 32") ||
+				strings.Contains(errorMsg, "OUT OF SPACE") ||
+				strings.Contains(errorMsg, "out of space") ||
+				strings.Contains(errorMsg, "no space left") ||
+				strings.Contains(errorMsg, "disk full") ||
+				strings.Contains(errorMsg, "insufficient disk space") {
 				// Critical system error - needs manual dismissal
 				m.message = errorMsg
 				m.errorRequiresManualDismissal = true
@@ -695,6 +688,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 
 			case screens.ScreenVerify:
+				// Back to main menu (like selecting "Back")
+				m.screen = screens.ScreenMain
+				m.cursor = 0
+				m.choices = screens.MainMenuChoices
+				return m, nil
+
+			case screens.ScreenRestoreSettings:
 				// Back to main menu (like selecting "Back")
 				m.screen = screens.ScreenMain
 				m.cursor = 0
@@ -945,18 +945,56 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 
-		case "enter", " ":
+		case "enter":
 			return m.handleSelection()
+
+		case " ":
+			// SPACE: Toggle folder selection
+			if m.screen == screens.ScreenHomeFolderSelect {
+				numControls := 2
+				if m.cursor >= numControls {
+					folderIndex := m.cursor - numControls
+					visibleFolders := m.getVisibleFoldersNonEmpty()
+					if folderIndex < len(visibleFolders) {
+						folder := visibleFolders[folderIndex]
+
+						// Use smart toggle for folders with subfolders, simple toggle for others
+						if folder.HasSubfolders {
+							m.toggleParentFolder(folder)
+						} else {
+							m.selectedFolders[folder.Path] = !m.selectedFolders[folder.Path]
+						}
+
+						m.calculateTotalBackupSize()
+						m.autoSaveSelections()
+					}
+				}
+			} else if m.screen == screens.ScreenRestoreFolderSelect {
+				numControls := 2
+				numConfigItems := 2
+				if m.cursor >= numControls+numConfigItems {
+					folderIndex := m.cursor - numControls - numConfigItems
+					visibleFolders := m.getVisibleRestoreFolders()
+					if folderIndex < len(visibleFolders) {
+						folder := visibleFolders[folderIndex]
+						if !folder.AlwaysInclude {
+							m.selectedRestoreFolders[folder.Path] = !m.selectedRestoreFolders[folder.Path]
+							m.calculateTotalRestoreSize()
+						}
+					}
+				}
+			}
+			return m, nil
 
 		case "a", "A":
 			if m.screen == screens.ScreenHomeFolderSelect {
-				// Select all visible NON-EMPTY folders
-				visibleFolders := m.getVisibleFoldersNonEmpty()
-				for _, folder := range visibleFolders {
-					m.selectedFolders[folder.Path] = true
+				// Select all visible folders
+				for _, folder := range m.homeFolders {
+					if folder.IsVisible {
+						m.selectedFolders[folder.Path] = true
+					}
 				}
 				m.calculateTotalBackupSize()
-				m.autoSaveSelections() // Auto-save when user selects all
 			} else if m.screen == screens.ScreenRestoreFolderSelect {
 				// Select all visible folders for restore
 				for _, folder := range m.restoreFolders {
@@ -970,13 +1008,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "n", "N", "x", "X":
 			if m.screen == screens.ScreenHomeFolderSelect {
-				// Deselect all visible NON-EMPTY folders
-				visibleFolders := m.getVisibleFoldersNonEmpty()
-				for _, folder := range visibleFolders {
-					m.selectedFolders[folder.Path] = false
+				// Deselect all visible folders
+				for _, folder := range m.homeFolders {
+					if folder.IsVisible {
+						m.selectedFolders[folder.Path] = false
+					}
 				}
 				m.calculateTotalBackupSize()
-				m.autoSaveSelections() // Auto-save when user deselects all
 			} else if m.screen == screens.ScreenRestoreFolderSelect {
 				// Deselect all visible folders for restore
 				for _, folder := range m.restoreFolders {
@@ -1094,15 +1132,15 @@ func (m Model) handleBackupMenuSelection() (tea.Model, tea.Cmd) {
 		m.cursor = 0
 	}
 
-	// Return the appropriate command based on selection
-	switch m.cursor {
-	case 0: // Complete System Backup
+	// Execute the appropriate command based on the screen set by handler
+	if m.screen == screens.ScreenHomeFolderSelect {
+		// Start both scanning and progress updates
+		return m, tea.Batch(DiscoverHomeFoldersCmd(), ScanProgressCmd())
+	} else if m.screen == screens.ScreenDriveSelect {
 		return m, LoadDrives()
-	case 1: // Home Directory Only
-		return m, DiscoverHomeFoldersCmd()
-	default:
-		return m, nil
 	}
+
+	return m, nil
 }
 
 // handleRestoreMenuSelection handles selection logic for the restore menu screen
@@ -1130,6 +1168,38 @@ func (m Model) handleRestoreMenuSelection() (tea.Model, tea.Cmd) {
 	}
 
 	// Since we go directly to drive selection now, load drives
+	if screen == screens.ScreenDriveSelect {
+		return m, LoadDrives()
+	}
+
+	return m, nil
+}
+
+// handleRestoreSettingsMenuSelection handles restore settings menu selections
+func (m Model) handleRestoreSettingsMenuSelection() (tea.Model, tea.Cmd) {
+	// Log restore settings menu selection
+	if logPath := getLogFilePath(); logPath != "" {
+
+	}
+
+	handler := handlers.NewRestoreSettingsMenuHandler()
+	screen, operation, choices, _ := handler.HandleSelection(m.cursor)
+
+	m.screen = screen
+	if operation != "" {
+		m.operation = operation
+	}
+	if choices != nil {
+		m.choices = choices
+		m.cursor = 0
+	}
+
+	// Log the result of restore settings menu selection
+	if logPath := getLogFilePath(); logPath != "" {
+
+	}
+
+	// Since we go directly to drive selection for settings restore, load drives
 	if screen == screens.ScreenDriveSelect {
 		return m, LoadDrives()
 	}
@@ -1277,6 +1347,8 @@ func (m Model) handleSelection() (tea.Model, tea.Cmd) {
 		return m.handleBackupMenuSelection()
 	case screens.ScreenRestore:
 		return m.handleRestoreMenuSelection()
+	case screens.ScreenRestoreSettings:
+		return m.handleRestoreSettingsMenuSelection()
 	case screens.ScreenRestoreFolderSelect:
 		return m.handleRestoreFolderSelection()
 	case screens.ScreenVerify:
@@ -1393,6 +1465,24 @@ func (m Model) handleSelection() (tea.Model, tea.Cmd) {
 							return state.CylonAnimateMsg{}
 						}),
 					)
+				case "config_restore":
+					// Restore only .config directory
+					return m, tea.Batch(
+						startConfigRestore(m.selectedDrive),
+						CheckTUIBackupProgress(),
+						tea.Tick(100*time.Millisecond, func(t time.Time) tea.Msg {
+							return state.CylonAnimateMsg{}
+						}),
+					)
+				case "local_restore":
+					// Restore only .local directory
+					return m, tea.Batch(
+						startLocalRestore(m.selectedDrive),
+						CheckTUIBackupProgress(),
+						tea.Tick(100*time.Millisecond, func(t time.Time) tea.Msg {
+							return state.CylonAnimateMsg{}
+						}),
+					)
 				default:
 					// Fallback - use universal backup system
 					return m, startUniversalBackup(m.operation, m.selectedDrive, nil, nil)
@@ -1443,6 +1533,8 @@ func (m Model) handleSelection() (tea.Model, tea.Cmd) {
 					})
 				}
 
+				// Clear any scanning progress messages
+				m.message = ""
 				m.screen = screens.ScreenDriveSelect
 				m.cursor = 0
 				return m, LoadDrives()
@@ -1554,6 +1646,15 @@ func (m Model) handleSelection() (tea.Model, tea.Cmd) {
 
 			// Check the operation type
 			if strings.Contains(m.operation, "backup") {
+				// DEBUG: Log operation type for debugging space check issue
+				if logPath := getLogFilePath(); logPath != "" {
+					if logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
+						fmt.Fprintf(logFile, "DEBUG SPACE CHECK: operation='%s', homeFolders=%d, selectedFolders=%d\n",
+							m.operation, len(m.homeFolders), len(m.selectedFolders))
+						logFile.Close()
+					}
+				}
+
 				// For backup: mount drive for destination with appropriate space check
 				if m.operation == "home_backup" {
 					// FIXED: Pass selected folders for accurate space checking
@@ -1730,7 +1831,7 @@ func (m Model) getVisibleFolders() []HomeFolderInfo {
 func (m Model) getVisibleFoldersNonEmpty() []HomeFolderInfo {
 	visibleFolders := make([]HomeFolderInfo, 0)
 	for _, folder := range m.homeFolders {
-		if folder.IsVisible && folder.Size > 0 { // Only show non-empty visible folders
+		if folder.IsVisible { // Show all visible folders regardless of size
 			visibleFolders = append(visibleFolders, folder)
 		}
 	}
@@ -1893,6 +1994,8 @@ func (m Model) View() string {
 		return m.renderBackupMenu()
 	case screens.ScreenRestore:
 		return m.renderRestoreMenu()
+	case screens.ScreenRestoreSettings:
+		return m.renderRestoreSettingsMenu()
 	case screens.ScreenRestoreOptions:
 		return m.renderRestoreOptions()
 	case screens.ScreenVerify:

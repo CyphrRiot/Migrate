@@ -431,9 +431,10 @@ func (m Model) renderBackupMenu() string {
 		}
 	}
 
-	// Enhanced info box
-	info := infoBoxStyle.Render(`📁 Complete System: Full 1:1 backup of entire system
-🏠 Home Directory: Personal files and settings only`)
+	// Enhanced info box with proper width constraint
+	availableWidth := safeRenderWidth(m.width) - 8 // More padding for border and margins
+	info := infoBoxStyle.Width(availableWidth).Render(`📁 Complete System: Full system backup
+🏠 Home Directory: Personal files only`)
 
 	s.WriteString(info)
 
@@ -477,6 +478,37 @@ func (m Model) renderRestoreMenu() string {
 	return safeCenterContent(m.width, m.height, content)
 }
 
+// renderRestoreSettingsMenu renders the restore settings menu
+func (m Model) renderRestoreSettingsMenu() string {
+	var s strings.Builder
+
+	// Header with ASCII art (same as other menus)
+	ascii := asciiStyle.Render(MigrateASCII)
+	s.WriteString(ascii + "\n")
+	s.WriteString(titleStyle.Render("⚙️ Restore Settings") + "\n\n")
+
+	// Menu options with beautiful styling
+	for i, choice := range m.choices {
+		if m.cursor == i {
+			s.WriteString(selectedMenuItemStyle.Render("❯ "+choice) + "\n")
+		} else {
+			s.WriteString(menuItemStyle.Render("  "+choice) + "\n")
+		}
+	}
+
+	// Enhanced info box with description
+	info := infoStyle.Render("💡 Restore specific configuration and data directories")
+	s.WriteString("\n" + info)
+
+	// Help text
+	help := m.renderHelp()
+	s.WriteString("\n" + help)
+
+	// Center the content with beautiful border
+	content := borderStyle.Width(safeRenderWidth(m.width)).Render(s.String())
+	return safeCenterContent(m.width, m.height, content)
+}
+
 // Render verify menu
 func (m Model) renderVerifyMenu() string {
 	var s strings.Builder
@@ -495,14 +527,15 @@ func (m Model) renderVerifyMenu() string {
 		}
 	}
 
-	// Enhanced info box
-	info := infoBoxStyle.Render(`🔍 Auto-Detection:  Automatically detects backup type (Complete System vs Home Directory)
-🛡️  Fast Analysis:    Quickly scans backup contents to determine what to verify`)
+	// Enhanced info box with proper width constraint
+	availableWidth := safeRenderWidth(m.width) - 8 // More padding for border and margins
+	info := infoBoxStyle.Width(availableWidth).Render(`🔍 Auto-Detection: Detects backup type automatically
+🛡️ Fast Analysis: Scans backup contents`)
 
 	s.WriteString(info)
 
-	// Additional verification info
-	verifyInfo := infoBoxStyle.Render("🔍 Verification compares backup files with source using SHA256 checksums")
+	// Additional verification info with width constraint
+	verifyInfo := infoBoxStyle.Width(availableWidth).Render("🔍 Compares backup files with source using SHA256 checksums")
 	s.WriteString("\n" + verifyInfo)
 
 	// Help text
@@ -532,14 +565,15 @@ func (m Model) renderRestoreOptions() string {
 		}
 	}
 
-	// Enhanced info box
-	info := infoBoxStyle.Render(`⚙️  Configuration:     Restores user settings, app configs, and preferences
-🪟  Window Managers:   Restores desktop environments and window manager configs`)
+	// Enhanced info box with proper width constraint
+	availableWidth := safeRenderWidth(m.width) - 8 // More padding for border and margins
+	info := infoBoxStyle.Width(availableWidth).Render(`⚙️ Configuration: User settings and app configs
+🪟 Window Managers: Desktop environments`)
 
 	s.WriteString(info)
 
-	// Additional restore info
-	restoreInfo := infoBoxStyle.Render("⚠️  Both options are enabled by default. Uncheck to skip specific restore categories.")
+	// Additional restore info with width constraint
+	restoreInfo := infoBoxStyle.Width(availableWidth).Render("⚠️ Both enabled by default. Uncheck to skip categories.")
 	s.WriteString("\n" + restoreInfo)
 
 	// Help text
@@ -555,41 +589,30 @@ func (m Model) renderRestoreOptions() string {
 func (m Model) renderAbout() string {
 	var s strings.Builder
 
-	// Header with ASCII art (consistent with other screens)
-	ascii := asciiStyle.Render(MigrateASCII)
-	s.WriteString(ascii + "\n")
+	// Header - simple and clean
 	s.WriteString(titleStyle.Render("ℹ️ About Migrate") + "\n\n")
 
-	// About content with enhanced data visualization
-	features := []string{
-		renderDataMetric("Implementation", "Pure Go", "⚡"),
-		renderDataMetric("Dependencies", "Zero external", "🛡️"),
-		renderDataMetric("UI Framework", "Bubble Tea + Lipgloss", "🎨"),
-		renderDataMetric("Progress Tracking", "Real-time file-based", "📊"),
-		renderDataMetric("Deduplication", "SHA256 checksums", "🔍"),
-		renderDataMetric("Encryption", "LUKS drive support", "🔐"),
-		renderDataMetric("Sync Method", "rsync --delete equivalent", "🔄"),
-		renderDataMetric("Portability", "Static binary", "📦"),
-	}
+	// Version and description
+	s.WriteString(subtitleStyle.Render("Migrate v1.1 - Beautiful Live System Backup & Restore") + "\n\n")
 
-	aboutContent := GetAboutText() + "\n\n" +
-		"Created by " + AppAuthor + "\n\n" +
-		"🔗 GitHub: https://github.com/CyphrRiot/Migrate\n" +
-		"🐦 X: https://x.com/CyphrRiot\n\n" +
-		"✨ Authentic Tokyo Night interface with neon gradient progress bars\n\n" +
-		"Key Features:\n" +
-		strings.Join(features, "\n") + "\n\n" +
-		"Press any key to return to main menu"
+	// Author and links
+	s.WriteString(menuItemStyle.Render("👤 Created by Cypher Riot") + "\n")
+	s.WriteString(menuItemStyle.Render("🔗 GitHub: github.com/CyphrRiot/Migrate") + "\n")
+	s.WriteString(menuItemStyle.Render("🐦 X: @CyphrRiot") + "\n\n")
 
-	info := lipgloss.NewStyle().
-		Foreground(textColor).
-		Margin(0, 2).
-		Align(lipgloss.Left).
-		Render(aboutContent)
+	// Key features - compact format
+	s.WriteString(subtitleStyle.Render("✨ Key Features") + "\n")
+	s.WriteString(menuItemStyle.Render("⚡ Pure Go implementation, zero dependencies") + "\n")
+	s.WriteString(menuItemStyle.Render("🎨 Beautiful TUI with Tokyo Night theme") + "\n")
+	s.WriteString(menuItemStyle.Render("📊 Real-time progress with file tracking") + "\n")
+	s.WriteString(menuItemStyle.Render("🔍 SHA256 deduplication & integrity checks") + "\n")
+	s.WriteString(menuItemStyle.Render("🔄 rsync --delete equivalent behavior") + "\n")
 
-	s.WriteString(info)
+	// Help text
+	help := m.renderHelp()
+	s.WriteString(help)
 
-	// Center the content with beautiful border
+	// Center the content with responsive border
 	content := borderStyle.Width(safeRenderWidth(m.width)).Render(s.String())
 	return safeCenterContent(m.width, m.height, content)
 }
@@ -614,8 +637,9 @@ func (m Model) renderConfirmation() string {
 		confirmStyle = infoStyle
 	}
 
-	// Confirmation message with appropriate styling
-	confirmMsg := confirmStyle.Render(m.confirmation)
+	// Confirmation message with appropriate styling and width constraint
+	availableWidth := safeRenderWidth(m.width) - 8 // More padding for border and margins
+	confirmMsg := confirmStyle.Width(availableWidth).Render(m.confirmation)
 	s.WriteString(confirmMsg + "\n\n")
 
 	// Yes/No options
@@ -934,8 +958,9 @@ func (m Model) renderDriveSelect() string {
 			s.WriteString(warningStyle.Render("⚠️  No external drives found") + "\n")
 		}
 	} else {
-		// Show available drives
-		info := infoBoxStyle.Render("Select a drive to mount.")
+		// Show available drives with width constraint
+		availableWidth := safeRenderWidth(m.width) - 8 // More padding for border and margins
+		info := infoBoxStyle.Width(availableWidth).Render("Select a drive to mount.")
 		s.WriteString(info + "\n\n")
 
 		// Add LUKS warning
@@ -1107,7 +1132,12 @@ func (m Model) renderHomeFolderSelect() string {
 
 	// If still loading
 	if len(m.homeFolders) == 0 {
-		s.WriteString(infoBoxStyle.Render("🔍 Scanning home directory...") + "\n")
+		// Show progress message if available, otherwise default message
+		progressMessage := "🔍 Scanning home directory..."
+		if m.message != "" && strings.Contains(m.message, "Scanning") {
+			progressMessage = m.message
+		}
+		s.WriteString(infoBoxStyle.Width(safeRenderWidth(m.width)-8).Render(progressMessage) + "\n")
 		help := helpStyle.Render("Please wait...")
 		s.WriteString("\n" + help)
 		content := borderStyle.Width(safeRenderWidth(m.width)).Render(s.String())
@@ -1120,7 +1150,7 @@ func (m Model) renderHomeFolderSelect() string {
 	// Get visible folders for display (filter out 0 B folders)
 	visibleFolders := make([]HomeFolderInfo, 0)
 	for _, folder := range m.homeFolders {
-		if folder.IsVisible && folder.Size > 0 { // Only show non-empty visible folders
+		if folder.IsVisible { // Show all visible folders regardless of size
 			visibleFolders = append(visibleFolders, folder)
 		}
 	}
@@ -1649,7 +1679,7 @@ func (m Model) renderRestoreFolderSelect() string {
 
 	// If still loading
 	if len(m.restoreFolders) == 0 {
-		s.WriteString(infoBoxStyle.Render("🔍 Scanning backup...") + "\n")
+		s.WriteString(infoBoxStyle.Width(safeRenderWidth(m.width)-8).Render("🔍 Scanning backup...") + "\n")
 		help := helpStyle.Render("Please wait...")
 		s.WriteString("\n" + help)
 		content := borderStyle.Width(safeRenderWidth(m.width)).Render(s.String())

@@ -5,6 +5,7 @@ package internal
 import (
 	"fmt"
 	"os"
+	"time"
 
 	"migrate/internal/drives"
 
@@ -60,6 +61,12 @@ type RestoreFoldersDiscovered struct {
 	error   error
 }
 
+type ScanProgress struct {
+	current    int64
+	total      int64
+	folderName string
+}
+
 // Drive detection functions - delegate to optimized modules
 func LoadDrives() tea.Cmd {
 	return drives.LoadDrives()
@@ -78,8 +85,23 @@ func checkBackupSpaceRequirements(externalDriveSize string) error {
 	return drives.ValidateBackupSpace(externalDriveSize)
 }
 
+// checkMountedBackupSpaceRequirements validates space on a mounted drive
+func checkMountedBackupSpaceRequirements(mountPoint string) error {
+	return drives.ValidateMountedBackupSpace(mountPoint)
+}
+
+// checkMountedHomeBackupSpaceRequirements validates space for home backup on mounted drive
+func checkMountedHomeBackupSpaceRequirements(mountPoint string) error {
+	return drives.ValidateMountedHomeBackupSpace(mountPoint)
+}
+
 func CheckSelectiveHomeBackupSpaceRequirements(homeFolders []HomeFolderInfo, selectedFolders map[string]bool, subfolderCache map[string][]HomeFolderInfo, externalDriveSize string) error {
 	return drives.ValidateSelectiveBackupSpace(homeFolders, selectedFolders, subfolderCache, externalDriveSize)
+}
+
+// CheckSelectiveHomeBackupSpaceRequirementsOnMounted validates space for selective backup on mounted drive
+func CheckSelectiveHomeBackupSpaceRequirementsOnMounted(homeFolders []HomeFolderInfo, selectedFolders map[string]bool, subfolderCache map[string][]HomeFolderInfo, mountPoint string) error {
+	return drives.ValidateSelectiveBackupSpaceOnMounted(homeFolders, selectedFolders, subfolderCache, mountPoint)
 }
 
 func CheckHomeBackupSpaceRequirements(externalDriveSize string) error {
@@ -103,6 +125,21 @@ func DiscoverHomeFoldersCmd() tea.Cmd {
 			error:   err,
 		}
 	}
+}
+
+// ScanProgressCmd returns progress updates during folder scanning
+func ScanProgressCmd() tea.Cmd {
+	return tea.Tick(500*time.Millisecond, func(t time.Time) tea.Msg {
+		current, total, folderName := drives.GetScanProgress()
+		if total == 0 || current >= total {
+			return nil // Scanning not active or complete
+		}
+		return ScanProgress{
+			current:    current,
+			total:      total,
+			folderName: folderName,
+		}
+	})
 }
 
 func DiscoverSubfoldersCmd(parentPath string) tea.Cmd {
@@ -183,19 +220,6 @@ func mountDriveForHomeBackup(drive DriveInfo) tea.Cmd {
 
 func mountDriveForOperation(drive DriveInfo, operationType string) tea.Cmd {
 	return func() tea.Msg {
-		// Check space requirements based on operation type
-		var err error
-		switch operationType {
-		case "system_backup":
-			err = checkBackupSpaceRequirements(drive.Size)
-		case "home_backup":
-			err = CheckHomeBackupSpaceRequirements(drive.Size)
-		}
-
-		if err != nil {
-			return BackupDriveStatus{error: err}
-		}
-
 		// Handle encrypted drives
 		if drive.Encrypted {
 			mapperName := "luks-" + drive.UUID
@@ -210,9 +234,23 @@ func mountDriveForOperation(drive DriveInfo, operationType string) tea.Cmd {
 			}
 		}
 
-		// Mount the drive
+		// Mount the drive first
 		mountPoint, err := drives.MountRegularDrive(drive)
 		if err != nil {
+			return BackupDriveStatus{error: err}
+		}
+
+		// Check space requirements on mounted drive (actual available space)
+		switch operationType {
+		case "system_backup":
+			err = checkMountedBackupSpaceRequirements(mountPoint)
+		case "home_backup":
+			err = checkMountedHomeBackupSpaceRequirements(mountPoint)
+		}
+
+		if err != nil {
+			// Unmount the drive since space check failed
+			drives.UnmountBackupDrive(mountPoint)
 			return BackupDriveStatus{error: err}
 		}
 
@@ -221,7 +259,6 @@ func mountDriveForOperation(drive DriveInfo, operationType string) tea.Cmd {
 			driveSize:  drive.Size,
 			driveType:  drive.Filesystem,
 			mountPoint: mountPoint,
-			needsMount: false,
 		}
 	}
 }
