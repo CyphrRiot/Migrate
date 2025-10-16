@@ -29,6 +29,7 @@ import (
 	"syscall"
 	"time"
 
+	"golang.org/x/sys/unix"
 	"migrate/internal/drives"
 )
 
@@ -632,12 +633,13 @@ func syncDirectoriesWithExclusions(src, dst string, excludePatterns []string, lo
 	return err
 }
 
-// copyFileEfficient performs optimized file copying with variable buffer sizes and metadata preservation.
+// copyFileEfficient performs optimized file copying with zero-copy fast paths and atomic rename.
 // Features:
-//   - Dynamic buffer sizing (64KB standard, 1MB for files >100MB)
-//   - Automatic directory creation for destination path
-//   - Complete metadata preservation (permissions, ownership, timestamps)
-//   - Assumes files have already been determined to be different (no duplicate checking)
+//   - Attempt kernel-space copy via sendfile when possible
+//   - Fallback to buffered io.Copy with adaptive buffer sizes
+//   - Preallocate space for large files using Fallocate to reduce fragmentation
+//   - Write to a temporary .migrate.part file, fsync, then atomic rename to the final path
+//   - Preserve mode, ownership, and timestamps from source
 func copyFileEfficient(src, dst string) error {
 	// Open source file
 	srcFile, err := os.Open(src)
@@ -646,46 +648,171 @@ func copyFileEfficient(src, dst string) error {
 	}
 	defer srcFile.Close()
 
-	// Get source file info
+	// Stat source
 	fi, err := srcFile.Stat()
 	if err != nil {
 		return err
 	}
 
-	// Create destination directory if needed
+	// Ensure destination directory exists
 	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
 		return err
 	}
 
-	// Create destination file
-	dstFile, err := os.Create(dst)
-	if err != nil {
-		return err
-	}
-	defer dstFile.Close()
+	// Temporary path for atomic write
+	tmpPath := dst + ".migrate.part"
+	// Clean up any stale temp file (best-effort)
+	_ = os.Remove(tmpPath)
 
-	// OPTIMIZED: Modern SSD/NVMe buffer sizes for maximum performance
-	bufSize := 256 * 1024         // 256KB default (4x faster than old 64KB)
-	if fi.Size() > 10*1024*1024 { // Files >10MB get 2MB buffer
-		bufSize = 2 * 1024 * 1024
-	}
-	if fi.Size() > 100*1024*1024 { // Files >100MB get 4MB buffer for NVMe
-		bufSize = 4 * 1024 * 1024
-	}
-
-	// Copy file contents with optimized buffer
-	buffer := make([]byte, bufSize)
-	_, err = io.CopyBuffer(dstFile, srcFile, buffer)
+	// Create temp destination file
+	dstFile, err := os.OpenFile(tmpPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
 	if err != nil {
 		return err
 	}
 
-	// Set permissions and ownership
-	stat, ok := fi.Sys().(*syscall.Stat_t)
-	if ok {
-		os.Chmod(dst, fi.Mode())
-		os.Chown(dst, int(stat.Uid), int(stat.Gid))
-		os.Chtimes(dst, fi.ModTime(), fi.ModTime())
+	// If large file, try to preallocate space (best-effort)
+	if fi.Size() > 64*1024*1024 { // >64MB
+		_ = syscall.Fallocate(int(dstFile.Fd()), 0, 0, fi.Size())
+	}
+
+	// Try zero-copy fast path with copy_file_range first
+	var copied int64 = 0
+	var useBuffered bool = false
+	if fi.Size() > 0 {
+		for copied < fi.Size() {
+			remaining := fi.Size() - copied
+			var chunk int64 = remaining
+			if chunk > 1<<30 { // 1GB per iteration cap
+				chunk = 1 << 30
+			}
+
+			n, err := unix.CopyFileRange(int(srcFile.Fd()), nil, int(dstFile.Fd()), nil, int(chunk), 0)
+			if n > 0 {
+				copied += int64(n)
+			}
+			if err == nil {
+				if n == 0 {
+					// EOF
+					break
+				}
+				continue
+			}
+
+			// CFR unsupported or cross-device, fall back to sendfile path below
+			if errno, ok := err.(syscall.Errno); ok {
+				switch errno {
+				case syscall.EINTR, syscall.EAGAIN:
+					continue
+				case syscall.EINVAL, syscall.ENOSYS, syscall.EXDEV, syscall.EOVERFLOW:
+					// abandon CFR path; we will try sendfile next
+					copied = 0 // restart offset logic for sendfile path
+					goto try_sendfile
+				default:
+					copied = 0
+					goto try_sendfile
+				}
+			} else {
+				copied = 0
+				goto try_sendfile
+			}
+		}
+	}
+
+try_sendfile:
+	// Try zero-copy fast path with sendfile
+	if fi.Size() > 0 && copied == 0 {
+		var off int64 = 0
+		for copied < fi.Size() && !useBuffered {
+			remaining := fi.Size() - copied
+			count := remaining
+			if count > 1<<30 {
+				count = 1 << 30
+			}
+
+			n, err := syscall.Sendfile(int(dstFile.Fd()), int(srcFile.Fd()), &off, int(count))
+			if n > 0 {
+				copied += int64(n)
+			}
+			if err == nil {
+				if n == 0 {
+					break
+				}
+				continue
+			}
+
+			// Handle errno to decide fallback vs retry
+			if errno, ok := err.(syscall.Errno); ok {
+				switch errno {
+				case syscall.EINTR, syscall.EAGAIN:
+					continue // retry
+				case syscall.EINVAL, syscall.ENOSYS, syscall.EXDEV, syscall.EOVERFLOW:
+					useBuffered = true // fallback
+				default:
+					useBuffered = true // unknown error, fallback to buffered
+				}
+			} else {
+				useBuffered = true
+			}
+		}
+	}
+
+	// If needed, finish via buffered copy from current position
+	if useBuffered {
+		// Seek source to current offset (off == copied when using &off)
+		if _, err := srcFile.Seek(copied, io.SeekStart); err != nil {
+			dstFile.Close()
+			_ = os.Remove(tmpPath)
+			return err
+		}
+
+		// Adaptive buffer sizes (keep your previous tuning)
+		bufSize := 256 * 1024
+		if fi.Size() > 10*1024*1024 {
+			bufSize = 2 * 1024 * 1024
+		}
+		if fi.Size() > 100*1024*1024 {
+			bufSize = 4 * 1024 * 1024
+		}
+		buffer := make([]byte, bufSize)
+
+		if _, err := io.CopyBuffer(dstFile, srcFile, buffer); err != nil {
+			dstFile.Close()
+			_ = os.Remove(tmpPath)
+			return err
+		}
+	}
+
+	// Sync file contents to disk (best-effort)
+	if err := dstFile.Sync(); err != nil {
+		// Not fatal, but safer to report and abort to avoid partials
+		dstFile.Close()
+		_ = os.Remove(tmpPath)
+		return err
+	}
+
+	// Close before rename
+	if err := dstFile.Close(); err != nil {
+		_ = os.Remove(tmpPath)
+		return err
+	}
+
+	// Atomic rename into place
+	if err := os.Rename(tmpPath, dst); err != nil {
+		_ = os.Remove(tmpPath)
+		return err
+	}
+
+	// Fsync parent directory to durably record the rename (best-effort)
+	if dirf, err := os.Open(filepath.Dir(dst)); err == nil {
+		_ = dirf.Sync()
+		_ = dirf.Close()
+	}
+
+	// Preserve metadata
+	if stat, ok := fi.Sys().(*syscall.Stat_t); ok {
+		_ = os.Chmod(dst, fi.Mode())
+		_ = os.Chown(dst, int(stat.Uid), int(stat.Gid))
+		_ = os.Chtimes(dst, fi.ModTime(), fi.ModTime())
 	}
 
 	return nil

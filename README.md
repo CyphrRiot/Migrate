@@ -2,7 +2,7 @@
 
 # Migrate
 
-![Version](https://img.shields.io/badge/version-1.0.62-4c1d95)
+![Version](https://img.shields.io/badge/version-1.2-4c1d95)
 ![License](https://img.shields.io/badge/license-MIT-1e293b)
 ![Language](https://img.shields.io/badge/language-Go-00ADD8?logo=go&logoColor=white)
 ![Platform](https://img.shields.io/badge/platform-Linux-FCC624?logo=linux&logoColor=black)
