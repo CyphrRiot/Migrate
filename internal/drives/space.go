@@ -3,12 +3,10 @@
 package drives
 
 import (
-	"bufio"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 )
 
 // ParseDriveSize converts human-readable size strings to bytes.
@@ -429,12 +427,10 @@ func ValidateRestoreSpace(externalDriveSize string, externalMountPoint string, t
 		return fmt.Errorf("failed to find mount point for %s: %v", targetPath, err)
 	}
 
-	var stat syscall.Statfs_t
-	if err := syscall.Statfs(actualMountPoint, &stat); err != nil {
+	targetTotalSize, _, _, err := GetDiskStats(actualMountPoint)
+	if err != nil {
 		return fmt.Errorf("failed to get target drive info for %s: %v", actualMountPoint, err)
 	}
-
-	targetTotalSize := int64(stat.Blocks) * int64(stat.Bsize)
 
 	// Check: external_used_space <= target_total_size
 	if externalUsedSpace > targetTotalSize {
@@ -481,12 +477,10 @@ func ValidateSelectiveRestoreSpace(restoreFolders []HomeFolderInfo, selectedFold
 		return fmt.Errorf("failed to find mount point for %s: %v", targetPath, err)
 	}
 
-	var stat syscall.Statfs_t
-	if err := syscall.Statfs(actualMountPoint, &stat); err != nil {
+	targetTotalSize, _, _, err := GetDiskStats(actualMountPoint)
+	if err != nil {
 		return fmt.Errorf("failed to get target drive info for %s: %v", actualMountPoint, err)
 	}
-
-	targetTotalSize := int64(stat.Blocks) * int64(stat.Bsize)
 
 	// Check: selected_restore_size <= target_total_size
 	if totalSelectedSize > targetTotalSize {
@@ -500,53 +494,3 @@ func ValidateSelectiveRestoreSpace(restoreFolders []HomeFolderInfo, selectedFold
 	return nil
 }
 
-// findMountPointForPath finds the mount point that contains the given path.
-// This ensures we check the correct partition for space validation.
-func findMountPointForPath(targetPath string) (string, error) {
-	// Clean the path to handle relative paths and symlinks
-	cleanPath, err := filepath.Abs(targetPath)
-	if err != nil {
-		return "", fmt.Errorf("failed to get absolute path for %s: %v", targetPath, err)
-	}
-
-	// Read /proc/mounts to get all mount points
-	file, err := os.Open("/proc/mounts")
-	if err != nil {
-		return "", fmt.Errorf("failed to open /proc/mounts: %v", err)
-	}
-	defer file.Close()
-
-	var bestMatch string
-	var bestMatchLen int
-
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		line := scanner.Text()
-		fields := strings.Fields(line)
-		if len(fields) < 2 {
-			continue
-		}
-
-		mountPoint := fields[1]
-
-		// Check if the target path is under this mount point
-		if strings.HasPrefix(cleanPath, mountPoint) {
-			// Use the longest matching mount point (most specific)
-			if len(mountPoint) > bestMatchLen {
-				bestMatch = mountPoint
-				bestMatchLen = len(mountPoint)
-			}
-		}
-	}
-
-	if err := scanner.Err(); err != nil {
-		return "", fmt.Errorf("error reading /proc/mounts: %v", err)
-	}
-
-	if bestMatch == "" {
-		// Fallback to root if no mount point found
-		return "/", nil
-	}
-
-	return bestMatch, nil
-}

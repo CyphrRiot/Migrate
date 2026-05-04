@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
+	"os/user"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -606,11 +607,13 @@ func calculateRealProgress() (float64, string) {
 
 				// Add current directory info if available - FIXED WIDTH with truncation
 				if currentDirectory != "" {
-					// Clean up the path - remove /home/grendel prefix and show just the relative folder
+					// Clean up the path - remove home directory prefix and show just the relative folder
 					displayPath := currentDirectory
-					displayPath = strings.TrimPrefix(displayPath, "/home/grendel/")
-					if displayPath == "" {
-						displayPath = "~"
+					if homeDir, err := os.UserHomeDir(); err == nil {
+						displayPath = strings.TrimPrefix(displayPath, homeDir)
+						if displayPath == "" {
+							displayPath = "~"
+						}
 					}
 					// Truncate if too long
 					if len(displayPath) > 57 {
@@ -651,11 +654,13 @@ func calculateRealProgress() (float64, string) {
 
 				// Add current directory info if available - FIXED WIDTH with truncation
 				if currentDirectory != "" {
-					// Clean up the path - remove /home/grendel prefix and show just the relative folder
+					// Clean up the path - remove home directory prefix and show just the relative folder
 					displayPath := currentDirectory
-					displayPath = strings.TrimPrefix(displayPath, "/home/grendel/")
-					if displayPath == "" {
-						displayPath = "~"
+					if homeDir, err := os.UserHomeDir(); err == nil {
+						displayPath = strings.TrimPrefix(displayPath, homeDir)
+						if displayPath == "" {
+							displayPath = "~"
+						}
 					}
 					// Truncate if too long
 					if len(displayPath) > 57 {
@@ -733,11 +738,24 @@ func startRestore(sourcePath, targetPath string, restoreConfig, restoreWindowMgr
 		case "home":
 			if targetPath == "/" {
 				// Home backup → auto-target home directory
-				username := getCurrentUser()
-				actualTargetPath = "/home/" + username
-				operationDesc = fmt.Sprintf("HOME RESTORE (Home backup to /home/%s)", username)
+				var homeDir string
+				if sudoUser := os.Getenv("SUDO_USER"); sudoUser != "" {
+					if u, err := user.Lookup(sudoUser); err == nil {
+						homeDir = u.HomeDir
+					} else {
+						homeDir, _ = os.UserHomeDir()
+					}
+				} else {
+					var err error
+					homeDir, err = os.UserHomeDir()
+					if err != nil {
+						homeDir = "/tmp"
+					}
+				}
+				actualTargetPath = homeDir
+				operationDesc = fmt.Sprintf("HOME RESTORE (Home backup to %s)", homeDir)
 				if logFile != nil {
-					fmt.Fprintf(logFile, "Auto-targeting home backup to /home/%s\n", username)
+					fmt.Fprintf(logFile, "Auto-targeting home backup to %s\n", homeDir)
 				}
 			} else {
 				// Home backup → custom path (user specified)
@@ -969,7 +987,17 @@ func runSelectiveRestoreSilently(sourcePath string, selectedFolders map[string]b
 	// Get home directory as target - handle SUDO_USER properly
 	var homeDir string
 	if sudoUser := os.Getenv("SUDO_USER"); sudoUser != "" {
-		homeDir = "/home/" + sudoUser
+		if u, err := user.Lookup(sudoUser); err == nil {
+			homeDir = u.HomeDir
+		} else {
+			var homeErr error
+			homeDir, homeErr = os.UserHomeDir()
+			if homeErr != nil {
+				tuiBackupCompleted = true
+				tuiBackupError = fmt.Errorf("failed to get home directory: %v", homeErr)
+				return
+			}
+		}
 	} else {
 		homeDir, err = os.UserHomeDir()
 		if err != nil {
@@ -1321,6 +1349,17 @@ func getCurrentUser() string {
 	return "unknown"
 }
 
+// getHomeDir returns the home directory of the actual user, handling sudo context.
+// Uses os/user.Lookup for SUDO_USER to avoid hardcoded /home/ paths.
+func getHomeDir() (string, error) {
+	if sudoUser := os.Getenv("SUDO_USER"); sudoUser != "" {
+		if u, err := user.Lookup(sudoUser); err == nil {
+			return u.HomeDir, nil
+		}
+	}
+	return os.UserHomeDir()
+}
+
 // syncDirectoriesWithOptions copies files from source to destination with selective restore options.
 // This is similar to syncDirectories but allows filtering based on restore preferences.
 func syncDirectoriesWithOptions(sourcePath, destPath string, restoreConfig, restoreWindowMgrs bool, logFile *os.File) error {
@@ -1530,11 +1569,9 @@ func createBackupConfig(operationType, mountPoint string, selectedFolders map[st
 
 	case "home_backup":
 		// Handle SUDO_USER properly - get the actual user's home directory
-		var homeDir string
-		if sudoUser := os.Getenv("SUDO_USER"); sudoUser != "" {
-			homeDir = "/home/" + sudoUser
-		} else {
-			homeDir, _ = os.UserHomeDir()
+		homeDir, err := getHomeDir()
+		if err != nil {
+			return BackupConfig{}, fmt.Errorf("failed to get home directory: %v", err)
 		}
 
 		config = BackupConfig{
@@ -1549,11 +1586,9 @@ func createBackupConfig(operationType, mountPoint string, selectedFolders map[st
 
 	case "selective_home_backup":
 		// Handle SUDO_USER properly - get the actual user's home directory
-		var homeDir string
-		if sudoUser := os.Getenv("SUDO_USER"); sudoUser != "" {
-			homeDir = "/home/" + sudoUser
-		} else {
-			homeDir, _ = os.UserHomeDir()
+		homeDir, err := getHomeDir()
+		if err != nil {
+			return BackupConfig{}, fmt.Errorf("failed to get home directory: %v", err)
 		}
 
 		config = BackupConfig{
@@ -1670,8 +1705,13 @@ func runVerificationSilently(operationType, mountPoint string) {
 			return
 		}
 		// Get the actual user's home directory
-		username := getCurrentUser()
-		sourcePath = "/home/" + username
+		var errHomeDir error
+		sourcePath, errHomeDir = getHomeDir()
+		if errHomeDir != nil {
+			tuiBackupCompleted = true
+			tuiBackupError = fmt.Errorf("failed to get home directory: %v", errHomeDir)
+			return
+		}
 
 	case "auto_verify":
 		// Auto-detection: Set source path based on detected backup type
@@ -1686,10 +1726,15 @@ func runVerificationSilently(operationType, mountPoint string) {
 			}
 		} else if backupType == "home" {
 			// Get the actual user's home directory
-			username := getCurrentUser()
-			sourcePath = "/home/" + username
+			var errHomeDir error
+			sourcePath, errHomeDir = getHomeDir()
+			if errHomeDir != nil {
+				tuiBackupCompleted = true
+				tuiBackupError = fmt.Errorf("failed to get home directory: %v", errHomeDir)
+				return
+			}
 			if logFile != nil {
-				fmt.Fprintf(logFile, "Auto-verify: Verifying home directory backup for user: %s\n", username)
+				fmt.Fprintf(logFile, "Auto-verify: Verifying home directory backup for user: %s\n", getCurrentUser())
 			}
 		} else {
 			tuiBackupCompleted = true

@@ -2,6 +2,10 @@
 bin/
 migrate
 
+# AI crap
+AGENTS.md
+.crush/
+
 # Development
 *.log
 *.tmp

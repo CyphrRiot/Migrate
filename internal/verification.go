@@ -88,7 +88,7 @@ func matchesVerificationPattern(fullPath, relPath, pattern string) bool {
 		}
 		// Also try matching the pattern without leading slash against relPath
 		// This handles the case where pattern is "/home/*/.cache/gopls/*"
-		// and relPath is "home/grendel/.cache/gopls/..."
+		// and relPath is "home/user/.cache/gopls/..."
 		patternWithoutSlash := strings.TrimPrefix(pattern, "/")
 		if matchesPathPattern(relPath, patternWithoutSlash) {
 			return true

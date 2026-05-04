@@ -29,7 +29,6 @@ import (
 	"syscall"
 	"time"
 
-	"golang.org/x/sys/unix"
 	"migrate/internal/drives"
 )
 
@@ -672,88 +671,19 @@ func copyFileEfficient(src, dst string) error {
 
 	// If large file, try to preallocate space (best-effort)
 	if fi.Size() > 64*1024*1024 { // >64MB
-		_ = syscall.Fallocate(int(dstFile.Fd()), 0, 0, fi.Size())
+		_ = tryFallocate(int(dstFile.Fd()), 0, fi.Size())
 	}
 
 	// Try zero-copy fast path with copy_file_range first
 	var copied int64 = 0
 	var useBuffered bool = false
 	if fi.Size() > 0 {
-		for copied < fi.Size() {
-			remaining := fi.Size() - copied
-			var chunk int64 = remaining
-			if chunk > 1<<30 { // 1GB per iteration cap
-				chunk = 1 << 30
-			}
-
-			n, err := unix.CopyFileRange(int(srcFile.Fd()), nil, int(dstFile.Fd()), nil, int(chunk), 0)
-			if n > 0 {
-				copied += int64(n)
-			}
-			if err == nil {
-				if n == 0 {
-					// EOF
-					break
-				}
-				continue
-			}
-
-			// CFR unsupported or cross-device, fall back to sendfile path below
-			if errno, ok := err.(syscall.Errno); ok {
-				switch errno {
-				case syscall.EINTR, syscall.EAGAIN:
-					continue
-				case syscall.EINVAL, syscall.ENOSYS, syscall.EXDEV, syscall.EOVERFLOW:
-					// abandon CFR path; we will try sendfile next
-					copied = 0 // restart offset logic for sendfile path
-					goto try_sendfile
-				default:
-					copied = 0
-					goto try_sendfile
-				}
-			} else {
-				copied = 0
-				goto try_sendfile
-			}
-		}
+		copied, useBuffered = tryCopyFileRange(int(srcFile.Fd()), int(dstFile.Fd()), fi.Size())
 	}
 
-try_sendfile:
-	// Try zero-copy fast path with sendfile
-	if fi.Size() > 0 && copied == 0 {
-		var off int64 = 0
-		for copied < fi.Size() && !useBuffered {
-			remaining := fi.Size() - copied
-			count := remaining
-			if count > 1<<30 {
-				count = 1 << 30
-			}
-
-			n, err := syscall.Sendfile(int(dstFile.Fd()), int(srcFile.Fd()), &off, int(count))
-			if n > 0 {
-				copied += int64(n)
-			}
-			if err == nil {
-				if n == 0 {
-					break
-				}
-				continue
-			}
-
-			// Handle errno to decide fallback vs retry
-			if errno, ok := err.(syscall.Errno); ok {
-				switch errno {
-				case syscall.EINTR, syscall.EAGAIN:
-					continue // retry
-				case syscall.EINVAL, syscall.ENOSYS, syscall.EXDEV, syscall.EOVERFLOW:
-					useBuffered = true // fallback
-				default:
-					useBuffered = true // unknown error, fallback to buffered
-				}
-			} else {
-				useBuffered = true
-			}
-		}
+	if !useBuffered && copied == 0 {
+		// Try sendfile
+		copied, useBuffered = trySendfile(int(srcFile.Fd()), int(dstFile.Fd()), fi.Size())
 	}
 
 	// If needed, finish via buffered copy from current position
@@ -1235,19 +1165,11 @@ func GetHomeDirSize() (int64, error) {
 // Uses syscalls for fast filesystem statistics instead of walking directory trees.
 // Returns the actual bytes consumed on the backup drive.
 func getActualBackupSize(backupMount string) (int64, error) {
-	// Use Go's built-in syscall to get filesystem usage
-	var stat syscall.Statfs_t
-	err := syscall.Statfs(backupMount, &stat)
+	total, _, avail, err := drives.GetDiskStats(backupMount)
 	if err != nil {
 		return 0, err
 	}
-
-	// Calculate used bytes: (total - available) * block_size
-	totalBytes := stat.Blocks * uint64(stat.Bsize)
-	availableBytes := stat.Bavail * uint64(stat.Bsize)
-	usedBytes := totalBytes - availableBytes
-
-	return int64(usedBytes), nil
+	return total - avail, nil
 }
 
 // getDirectorySize is an alias for getUsedDiskSpace optimized for backup drive progress tracking.
@@ -1348,19 +1270,16 @@ func isSpaceError(err error) bool {
 
 // getSpaceErrorDetails provides detailed space information for error messages
 func getSpaceErrorDetails(path string) string {
-	var stat syscall.Statfs_t
-	if err := syscall.Statfs(path, &stat); err != nil {
+	total, _, avail, err := drives.GetDiskStats(path)
+	if err != nil {
 		return "Unable to get disk space information"
 	}
 
-	totalBytes := stat.Blocks * uint64(stat.Bsize)
-	freeBytes := stat.Bavail * uint64(stat.Bsize)
-	usedBytes := totalBytes - freeBytes
-
+	used := total - avail
 	return fmt.Sprintf("Disk Space Information:\n  Total: %s\n  Used:  %s\n  Free:  %s",
-		FormatBytes(int64(totalBytes)),
-		FormatBytes(int64(usedBytes)),
-		FormatBytes(int64(freeBytes)))
+		FormatBytes(total),
+		FormatBytes(used),
+		FormatBytes(avail))
 }
 
 // isFileInSelectedFolders checks if a file path is within any selected folder

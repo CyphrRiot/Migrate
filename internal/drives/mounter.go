@@ -3,7 +3,6 @@
 package drives
 
 import (
-	"bufio"
 	"fmt"
 	"os"
 	"os/exec"
@@ -11,32 +10,6 @@ import (
 	"strings"
 	"syscall"
 )
-
-// CheckAnyBackupMounted scans for mounted external drives using pure Go (no external commands).
-// Returns the mount point and true if an external backup drive is currently mounted.
-// OPTIMIZED: Uses buffered scanning instead of reading entire file into memory.
-func CheckAnyBackupMounted() (string, bool) {
-	file, err := os.Open("/proc/mounts")
-	if err != nil {
-		return "", false
-	}
-	defer file.Close()
-
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		fields := strings.Fields(scanner.Text())
-		if len(fields) >= 2 {
-			mountPoint := fields[1]
-			// OPTIMIZED: Check prefix first (faster than Contains)
-			if strings.HasPrefix(mountPoint, "/run/media/") ||
-				strings.HasPrefix(mountPoint, "/mnt/") {
-				return mountPoint, true
-			}
-		}
-	}
-
-	return "", false
-}
 
 // UnmountBackupDrive safely unmounts and cleans up an external backup drive.
 // Handles both regular drives and LUKS encrypted drives with proper cleanup.
@@ -67,46 +40,6 @@ func UnmountBackupDrive(mountPoint string) error {
 	}
 
 	return nil
-}
-
-// FindMountPointForDevice replaces findmnt with native /proc/mounts parsing
-// Returns the mount point for a given device path
-func FindMountPointForDevice(device string) (string, error) {
-	file, err := os.Open("/proc/mounts")
-	if err != nil {
-		return "", err
-	}
-	defer file.Close()
-
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		fields := strings.Fields(scanner.Text())
-		if len(fields) >= 2 && fields[0] == device {
-			return fields[1], nil // Return mount point
-		}
-	}
-
-	return "", fmt.Errorf("device not found in /proc/mounts")
-}
-
-// GetDeviceFromProcMounts finds the device path for a given mount point by parsing /proc/mounts.
-// OPTIMIZED: Uses buffered scanning and early termination for better performance.
-func GetDeviceFromProcMounts(mountPoint string) (string, error) {
-	file, err := os.Open("/proc/mounts")
-	if err != nil {
-		return "", err
-	}
-	defer file.Close()
-
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		fields := strings.Fields(scanner.Text())
-		if len(fields) >= 2 && fields[1] == mountPoint {
-			return fields[0], nil // Return device path
-		}
-	}
-
-	return "", fmt.Errorf("mount point %s not found", mountPoint)
 }
 
 // MountRegularDrive handles mounting of standard (non-encrypted) external drives.

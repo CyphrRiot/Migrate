@@ -5,9 +5,9 @@ package drives
 import (
 	"fmt"
 	"os"
+	"os/user"
 	"path/filepath"
 	"sync/atomic"
-	"syscall"
 )
 
 // Atomic counters for scanning progress - same pattern as backup operations
@@ -26,37 +26,20 @@ func getUsedDiskSpace(path string) (int64, error) {
 // Returns the actual used bytes on the filesystem containing the specified path.
 // Uses syscall.Statfs for accurate filesystem statistics.
 func GetUsedDiskSpace(path string) (int64, error) {
-	var stat syscall.Statfs_t
-	err := syscall.Statfs(path, &stat)
+	total, free, _, err := GetDiskStats(path)
 	if err != nil {
-		return 0, fmt.Errorf("failed to get filesystem stats for %s: %v", path, err)
+		return 0, err
 	}
-
-	// Calculate used space: total - free
-	// stat.Blocks = total blocks
-	// stat.Bfree = free blocks (including reserved for root)
-	// stat.Bsize = block size
-	totalBytes := int64(stat.Blocks) * int64(stat.Bsize)
-	freeBytes := int64(stat.Bfree) * int64(stat.Bsize)
-	usedBytes := totalBytes - freeBytes
-
-	return usedBytes, nil
+	return total - free, nil
 }
 
 // GetAvailableDiskSpace returns the available (free) space on the filesystem containing the given path.
 func GetAvailableDiskSpace(path string) (int64, error) {
-	var stat syscall.Statfs_t
-	err := syscall.Statfs(path, &stat)
+	_, _, avail, err := GetDiskStats(path)
 	if err != nil {
-		return 0, fmt.Errorf("failed to get filesystem stats for %s: %v", path, err)
+		return 0, err
 	}
-
-	// Calculate available space for non-root users
-	// stat.Bavail = free blocks available to non-root users
-	// stat.Bsize = block size
-	availableBytes := int64(stat.Bavail) * int64(stat.Bsize)
-
-	return availableBytes, nil
+	return avail, nil
 }
 
 // FormatBytes formats byte counts into human-readable size with proper units and formatting.
@@ -167,7 +150,18 @@ func DiscoverHomeFolders() ([]HomeFolderInfo, error) {
 	// Get the original user's home directory, not root's
 	homeDir := os.Getenv("SUDO_USER")
 	if homeDir != "" {
-		homeDir = "/home/" + homeDir
+		if u, err := user.Lookup(homeDir); err == nil {
+			homeDir = u.HomeDir
+		} else {
+			var homeErr error
+			homeDir, homeErr = os.UserHomeDir()
+			if homeErr != nil {
+				if logFile != nil {
+					fmt.Fprintf(logFile, "ERROR: Failed to get home dir: %v\n", homeErr)
+				}
+				return nil, homeErr
+			}
+		}
 	} else {
 		var err error
 		homeDir, err = os.UserHomeDir()

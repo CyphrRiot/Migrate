@@ -13,6 +13,7 @@ package internal
 import (
 	"migrate/internal/drives"
 	"os"
+	"os/user"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -484,7 +485,11 @@ func getLogFilePath() string {
 	var homeDir string
 	if sudoUser := os.Getenv("SUDO_USER"); sudoUser != "" {
 		// Running with sudo - use original user's home directory
-		homeDir = "/home/" + sudoUser
+		if u, err := user.Lookup(sudoUser); err == nil {
+			homeDir = u.HomeDir
+		} else {
+			homeDir, _ = os.UserHomeDir()
+		}
 	} else {
 		// Not running with sudo - use current user's home directory
 		var err error

@@ -1,3 +1,5 @@
+//go:build linux
+
 // Package drives provides drive detection, mounting, and management functionality.
 // This module handles drive discovery and enumeration using lsblk.
 package drives
@@ -119,14 +121,6 @@ func hasExternalMountPoint(device *LsblkDevice) bool {
 		}
 	}
 	return false
-}
-
-// isExternalMount checks if a mount point is in a typical external location.
-// OPTIMIZED: Single string check instead of multiple Contains calls.
-func isExternalMount(mountpoint string) bool {
-	return strings.Contains(mountpoint, "/run/media/") ||
-		strings.Contains(mountpoint, "/mnt/") ||
-		strings.Contains(mountpoint, "/media/")
 }
 
 // extractMountedFilesystems extracts all mounted filesystems from a device hierarchy.

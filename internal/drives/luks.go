@@ -44,7 +44,7 @@ func mountLUKSDrive(drive DriveInfo) (string, error) {
 			if mountPoint, err := FindMountPointForDevice(mapperPath); err == nil {
 				return mountPoint, nil
 			}
-			return "/run/media/grendel/Grendel", nil // Fallback for known case
+			return "", fmt.Errorf("could not find mount point for already-mounted device %s", mapperPath)
 		}
 		return "", fmt.Errorf("failed to mount unlocked drive: %v", err)
 	}
