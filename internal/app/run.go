@@ -26,7 +26,7 @@ func Run(perm platform.PrivLevel) {
 			"Another migrate process is already running. Please wait for it to complete before starting a new one.",
 			[]string{
 				"💡 If you're sure no other migrate is running, remove the lock file:",
-				"   sudo rm " + lockFilePath,
+				"   doas rm " + lockFilePath,
 			},
 		)
 		fmt.Println(errorBox)

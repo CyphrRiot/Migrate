@@ -18,13 +18,13 @@ func CreateResponsiveErrorBox(title, message string, details []string) string {
 	}
 
 	var lines []string
-	contentWidth := boxWidth - 4
+	contentWidth := boxWidth - 6
 
 	titlePadding := (boxWidth - len(title) - 2) / 2
 	if titlePadding < 1 {
 		titlePadding = 1
 	}
-	titleLine := "│" + strings.Repeat(" ", titlePadding) + title + strings.Repeat(" ", boxWidth-len(title)-titlePadding-1) + "│"
+	titleLine := "│" + strings.Repeat(" ", titlePadding) + title + strings.Repeat(" ", boxWidth-len(title)-titlePadding-2) + "│"
 
 	lines = append(lines, "┌"+strings.Repeat("─", boxWidth-2)+"┐")
 	lines = append(lines, titleLine)
