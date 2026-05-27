@@ -17,7 +17,7 @@ import (
 // Run initializes and starts the Migrate TUI application.
 // It handles singleton locking, dependency checks, signal handling,
 // and Bubble Tea program execution.
-func Run() {
+func Run(perm platform.PrivLevel) {
 	if err := CheckSingleInstance(); err != nil {
 		fmt.Println("⚠️  " + err.Error())
 		fmt.Println()
@@ -56,7 +56,7 @@ func Run() {
 	}()
 
 	termWidth, termHeight := GetTerminalSize()
-	m := internal.InitialModel()
+	m := internal.InitialModel(perm)
 	m.SetInitialDimensions(termWidth, termHeight)
 
 	p := tea.NewProgram(m, tea.WithAltScreen())

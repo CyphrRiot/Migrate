@@ -6,6 +6,6 @@ import (
 )
 
 func main() {
-	platform.EnsureRoot()
-	app.Run()
+	perm := platform.CheckPrivileges()
+	app.Run(perm)
 }

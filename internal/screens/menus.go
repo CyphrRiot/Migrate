@@ -12,10 +12,27 @@ var (
 		"❌ Exit",
 	}
 
+	// MainMenuChoicesNonRoot defines the main menu options when running as non-root user
+	MainMenuChoicesNonRoot = []string{
+		"🚀 Backup System",
+		"⚙️ Backup System Settings",
+		"🔍 Verify Backup",
+		"🔄 Restore System",
+		"ℹ️ About",
+		"❌ Exit",
+	}
+
 	// BackupMenuChoices defines the backup menu options
 	BackupMenuChoices = []string{
 		"🏠 Home Directory Only",
 		"📁 Complete System Backup",
+		"⬅️ Back",
+	}
+
+	// BackupMenuChoicesNonRoot defines the backup menu options when running as non-root user
+	BackupMenuChoicesNonRoot = []string{
+		"🏠 Home Directory Only",
+		"⚙️ Backup System Settings (/etc)",
 		"⬅️ Back",
 	}
 
@@ -109,6 +126,26 @@ func GetMainMenuAction(index int) MenuAction {
 	}
 }
 
+// GetMainMenuActionNonRoot returns the action for a non-root main menu selection
+func GetMainMenuActionNonRoot(index int) MenuAction {
+	switch index {
+	case 0: // Backup
+		return MenuAction{Screen: ScreenBackup}
+	case 1: // Backup System Settings
+		return MenuAction{Screen: ScreenDriveSelect, Operation: "settings_backup"}
+	case 2: // Verify
+		return MenuAction{Screen: ScreenVerify}
+	case 3: // Restore
+		return MenuAction{Screen: ScreenRestore}
+	case 4: // About
+		return MenuAction{Screen: ScreenAbout}
+	case 5: // Exit
+		return MenuAction{} // Special case, handled separately
+	default:
+		return MenuAction{}
+	}
+}
+
 // GetBackupMenuAction returns the action for a backup menu selection
 func GetBackupMenuAction(index int) MenuAction {
 	switch index {
@@ -121,6 +158,26 @@ func GetBackupMenuAction(index int) MenuAction {
 		return MenuAction{
 			Screen:    ScreenDriveSelect,
 			Operation: "system_backup",
+		}
+	case 2: // Back
+		return MenuAction{Screen: ScreenMain}
+	default:
+		return MenuAction{}
+	}
+}
+
+// GetBackupMenuActionNonRoot returns the action for a non-root backup menu selection
+func GetBackupMenuActionNonRoot(index int) MenuAction {
+	switch index {
+	case 0: // Home Directory Only
+		return MenuAction{
+			Screen:    ScreenHomeFolderSelect,
+			Operation: "home_backup",
+		}
+	case 1: // Backup System Settings
+		return MenuAction{
+			Screen:    ScreenDriveSelect,
+			Operation: "settings_backup",
 		}
 	case 2: // Back
 		return MenuAction{Screen: ScreenMain}

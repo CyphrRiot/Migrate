@@ -4,6 +4,7 @@ package drives
 
 import (
 	"path/filepath"
+	"strings"
 	"syscall"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -43,12 +44,15 @@ func LoadDrives() tea.Cmd {
 			if label == "" {
 				label = "External Drive"
 			}
-
+			uuid := strings.ReplaceAll(mountpoint, "/", "-")
+			if uuid == "" || uuid == "-" {
+				uuid = label
+			}
 			drive := DriveInfo{
 				Device:     mountpoint,
 				Size:       sizeStr,
 				Label:      label,
-				UUID:       "",
+				UUID:       uuid,
 				Filesystem: fsnToString(stat.F_fstypename[:]),
 				Encrypted:  false,
 			}

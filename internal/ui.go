@@ -17,10 +17,14 @@ package internal
 import (
 	"fmt"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+
+	"migrate/internal/drives"
+	"migrate/internal/platform"
 )
 
 // GradientColors defines a color gradient with start and end points for smooth transitions.
@@ -283,10 +287,8 @@ var (
 				Padding(3, 4).                         // More generous padding
 				Margin(1, 2)                           // Better spacing
 
-	// Enhanced border system - Tokyo Night themed
+	// Content container without border (removed due to spacing issues)
 	borderStyle = lipgloss.NewStyle().
-			BorderStyle(lipgloss.RoundedBorder()).
-			BorderForeground(borderColor). // Tokyo Night border color
 			Padding(2, 3).
 			Margin(1)
 
@@ -351,9 +353,7 @@ var (
 				PaddingRight(2).
 				Background(primaryColor).    // Tokyo Night blue
 				Foreground(backgroundColor). // Tokyo Night dark bg as text
-				Bold(true).
-				Border(lipgloss.RoundedBorder()).
-				BorderForeground(blueGradient.End) // Deeper Tokyo Night blue border
+				Bold(true)
 
 	// Clean menu items
 	menuItemStyle = lipgloss.NewStyle().
@@ -711,6 +711,11 @@ func (m Model) renderProgress() string {
 		s.WriteString("📂 Source:         ~/\n")
 		s.WriteString("💾 Destination:    " + m.selectedDrive + "\n")
 		s.WriteString(logStyle.Render("📋 Log:            "+logPath) + "\n")
+	case "settings_backup":
+		s.WriteString(backupTypeStyle.Render("📁 Backup Type:    System Settings (/etc)") + "\n")
+		s.WriteString("📂 Source:         /etc\n")
+		s.WriteString("💾 Destination:    " + m.selectedDrive + "\n")
+		s.WriteString(logStyle.Render("📋 Log:            "+logPath) + "\n")
 	case "auto_verify":
 		s.WriteString(backupTypeStyle.Render("🔍 Operation:      Backup Verification") + "\n")
 		s.WriteString("📂 Source:         " + m.selectedDrive + "\n")
@@ -956,6 +961,10 @@ func (m Model) renderDriveSelect() string {
 			s.WriteString(infoBoxStyle.Render("🔍 Scanning for external drives...") + "\n")
 		} else {
 			s.WriteString(warningStyle.Render("⚠️  No external drives found") + "\n")
+			if m.privilege == platform.PrivUser {
+				mountHint := drives.GetMountHint()
+				s.WriteString(infoBoxStyle.Render(mountHint) + "\n")
+			}
 		}
 	} else {
 		// Show available drives with width constraint
@@ -963,9 +972,11 @@ func (m Model) renderDriveSelect() string {
 		info := infoBoxStyle.Width(availableWidth).Render("Select a drive to mount.")
 		s.WriteString(info + "\n\n")
 
-		// Add LUKS warning
-		luksWarning := warningStyle.Render("⚠️  LUKS encrypted drives must be unlocked manually first")
-		s.WriteString(luksWarning + "\n\n")
+		// Add LUKS warning (Linux-only)
+		if runtime.GOOS != "openbsd" {
+			luksWarning := warningStyle.Render("⚠️  LUKS encrypted drives must be unlocked manually first")
+			s.WriteString(luksWarning + "\n\n")
+		}
 
 		for i, choice := range m.choices {
 			if m.cursor == i {
@@ -1913,6 +1924,10 @@ func formatOperationName(operation string) string {
 		return "Home Directory Restore"
 	case "custom_restore":
 		return "Custom Restore"
+	case "settings_backup":
+		return "System Settings Backup"
+	case "settings_restore":
+		return "System Settings Restore"
 	default:
 		// Capitalize first letter and replace underscores with spaces
 		formatted := strings.ReplaceAll(operation, "_", " ")

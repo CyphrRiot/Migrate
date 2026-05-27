@@ -14,6 +14,7 @@ import (
 // Examples: "1.5T" -> 1,649,267,441,664 bytes, "500G" -> 537,109,987,328 bytes
 func ParseDriveSize(sizeStr string) (int64, error) {
 	sizeStr = strings.TrimSpace(sizeStr)
+	sizeStr = strings.ReplaceAll(sizeStr, " ", "")
 	if len(sizeStr) < 2 {
 		return 0, fmt.Errorf("invalid size string: %s", sizeStr)
 	}

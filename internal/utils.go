@@ -20,14 +20,8 @@ import (
 	"sync/atomic"
 )
 
-// Configuration constants for backup operations
-const (
-	// DefaultMount is the default mount point prefix for external drives
-	DefaultMount = "/run/media"
-)
 
-var (
-	// ExcludePatterns defines the basic filesystem paths to exclude (legacy - use GetSystemBackupExclusions for system backups).
+var (	// ExcludePatterns defines the basic filesystem paths to exclude (legacy - use GetSystemBackupExclusions for system backups).
 	// These patterns exclude only the most essential system-managed directories.
 	ExcludePatterns = []string{
 		"/dev/*",      // Device files

@@ -170,7 +170,7 @@ func mountSelectedDrive(drive DriveInfo) tea.Cmd {
 		if drive.Encrypted {
 			// Check if it's already unlocked by looking for the mapper device
 			mapperName := "luks-" + drive.UUID
-			mapperPath := "/dev/mapper/" + mapperName
+			mapperPath := drives.GetMapperPath(mapperName)
 
 			if _, err := os.Stat(mapperPath); os.IsNotExist(err) {
 				// LUKS drive is locked - show helpful error
@@ -223,7 +223,7 @@ func mountDriveForOperation(drive DriveInfo, operationType string) tea.Cmd {
 		// Handle encrypted drives
 		if drive.Encrypted {
 			mapperName := "luks-" + drive.UUID
-			mapperPath := "/dev/mapper/" + mapperName
+			mapperPath := drives.GetMapperPath(mapperName)
 
 			if _, err := os.Stat(mapperPath); os.IsNotExist(err) {
 				return PasswordRequiredMsg{
@@ -268,7 +268,7 @@ func mountDriveForRestore(drive DriveInfo) tea.Cmd {
 		// Handle encrypted drives
 		if drive.Encrypted {
 			mapperName := "luks-" + drive.UUID
-			mapperPath := "/dev/mapper/" + mapperName
+			mapperPath := drives.GetMapperPath(mapperName)
 
 			if _, err := os.Stat(mapperPath); os.IsNotExist(err) {
 				return PasswordRequiredMsg{

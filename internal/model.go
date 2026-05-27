@@ -16,6 +16,7 @@ package internal
 import (
 	"fmt"
 	"migrate/internal/handlers"
+	"migrate/internal/platform"
 	"migrate/internal/screens"
 	"migrate/internal/state"
 	"os"
@@ -70,6 +71,9 @@ type Model struct {
 	folderBreadcrumb  []string                    // ["Home", "Videos"] for navigation
 	subfolderCache    map[string][]HomeFolderInfo // Cache discovered subfolders
 
+	// Privilege level
+	privilege platform.PrivLevel
+
 	// Restore options
 	restoreConfig     bool // Restore ~/.config directory
 	restoreWindowMgrs bool // Restore window managers (Hyprland, GNOME, etc.)
@@ -90,7 +94,7 @@ type Model struct {
 // InitialModel creates and returns a new Model instance with default values.
 // This sets up the initial application state with the main menu active
 // and initializes all required maps and default dimensions.
-func InitialModel() Model {
+func InitialModel(perm platform.PrivLevel) Model {
 	// Log initial model creation
 	if logPath := getLogFilePath(); logPath != "" {
 
@@ -105,6 +109,7 @@ func InitialModel() Model {
 		restoreWindowMgrs: true,                              // Default to true
 		width:             80,                                // More reasonable default for smaller terminals
 		height:            24,                                // Standard minimum terminal height
+		privilege:         perm,
 	}
 }
 
@@ -414,6 +419,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.totalRestoreSize = 0
 					// Start discovering folders from backup
 					return m, DiscoverRestoreFoldersCmd(msg.mountPoint)
+				} else if backupType == "settings" {
+					// It's a settings backup - go directly to confirmation
+					m.selectedDrive = msg.mountPoint
+					m.operation = "settings_restore"
+					m.confirmation = fmt.Sprintf("Ready to restore SYSTEM SETTINGS\n\nSource: %s\nDrive: %s (%s)\n\n⚠️ This will OVERWRITE existing system settings!\n\nProceed with restore?",
+						msg.mountPoint, msg.drivePath, msg.driveSize)
+					m.screen = screens.ScreenConfirm
+					m.cursor = 0
+					return m, nil
 				}
 
 				// System backup detected - proceed with confirmation
@@ -531,9 +545,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				})
 			}
 
-			// Check if this was a backup operation completion
+				// Check if this was a backup operation completion
 			if strings.Contains(m.operation, "backup") && msg.Error == nil {
-				// Backup completed successfully, ask about unmounting
+				// Backup completed successfully
+				if m.privilege == platform.PrivUser {
+					// Non-root users cannot unmount drives they didn't mount - skip prompt
+					m.lastScreen = m.screen
+					m.screen = screens.ScreenComplete
+					return m, nil
+				}
+				// Ask about unmounting
 				m.confirmation = "🎉 Backup completed successfully!\n\nDo you want to unmount the backup drive?\n\nNote: Unmounting is recommended for safe removal."
 				m.operation = "unmount_backup"
 				m.screen = screens.ScreenConfirm
@@ -1094,7 +1115,7 @@ func (m Model) handleMainMenuSelection() (tea.Model, tea.Cmd) {
 	if logPath := getLogFilePath(); logPath != "" {
 
 	}
-	handler := handlers.NewMainMenuHandler()
+	handler := handlers.NewMainMenuHandler(m.privilege)
 	screen, operation, choices, cmd := handler.HandleSelection(m.cursor)
 
 	m.screen = screen
@@ -1120,7 +1141,7 @@ func (m Model) handleMainMenuSelection() (tea.Model, tea.Cmd) {
 // handleBackupMenuSelection handles selection logic for the backup menu screen
 // handleBackupMenuSelection processes backup menu selections and transitions to appropriate screens.
 func (m Model) handleBackupMenuSelection() (tea.Model, tea.Cmd) {
-	handler := handlers.NewBackupMenuHandler()
+	handler := handlers.NewBackupMenuHandler(m.privilege)
 	screen, operation, choices, _ := handler.HandleSelection(m.cursor)
 
 	m.screen = screen
@@ -1394,6 +1415,14 @@ func (m Model) handleSelection() (tea.Model, tea.Cmd) {
 							return state.CylonAnimateMsg{}
 						}),
 					)
+				case "settings_backup":
+					return m, tea.Batch(
+						startSettingsBackup(m.selectedDrive),
+						CheckTUIBackupProgress(),
+						tea.Tick(100*time.Millisecond, func(t time.Time) tea.Msg {
+							return state.CylonAnimateMsg{}
+						}),
+					)
 				case "system_restore":
 					// CRITICAL BUG FIX: Only call startRestore for actual system backups
 					// Check if we have selected restore folders (means it's a home backup with selections)
@@ -1431,6 +1460,23 @@ func (m Model) handleSelection() (tea.Model, tea.Cmd) {
 					// Space check already done in handleRestoreFolderSelection before confirmation
 					return m, tea.Batch(
 						startSelectiveRestore(m.selectedDrive, m.selectedRestoreFolders, m.restoreFolders, m.restoreConfig, m.restoreWindowMgrs),
+						CheckTUIBackupProgress(),
+						tea.Tick(100*time.Millisecond, func(t time.Time) tea.Msg {
+							return state.CylonAnimateMsg{}
+						}),
+					)
+				case "settings_restore":
+					targetPath := "/etc"
+					if m.privilege != platform.PrivRoot {
+						homeDir, err := os.UserHomeDir()
+						if err != nil {
+							m.message = fmt.Sprintf("Error resolving home directory: %v", err)
+							return m, nil
+						}
+						targetPath = filepath.Join(homeDir, "migrate-restored-etc")
+					}
+					return m, tea.Batch(
+						startRestore(m.selectedDrive, targetPath, false, false),
 						CheckTUIBackupProgress(),
 						tea.Tick(100*time.Millisecond, func(t time.Time) tea.Msg {
 							return state.CylonAnimateMsg{}

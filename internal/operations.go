@@ -21,6 +21,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -719,6 +720,7 @@ func startRestore(sourcePath, targetPath string, restoreConfig, restoreWindowMgr
 		// SMART TARGETING: Auto-determine restore destination based on backup type
 		var actualTargetPath string
 		var operationDesc string
+		actualSourcePath := sourcePath
 
 		switch backupType {
 		case "system":
@@ -763,6 +765,27 @@ func startRestore(sourcePath, targetPath string, restoreConfig, restoreWindowMgr
 				operationDesc = fmt.Sprintf("CUSTOM RESTORE (Home backup to %s)", targetPath)
 			}
 
+		case "settings":
+			// Locate the migrate-settings-* directory
+			if entries, err := ioutil.ReadDir(sourcePath); err == nil {
+				for _, entry := range entries {
+					if entry.IsDir() && strings.HasPrefix(entry.Name(), "migrate-settings-") {
+						actualSourcePath = filepath.Join(sourcePath, entry.Name(), "etc")
+						break
+					}
+				}
+			}
+			if targetPath == "/etc" {
+				actualTargetPath = "/etc"
+				operationDesc = "SETTINGS RESTORE (/etc)"
+			} else {
+				actualTargetPath = targetPath
+				operationDesc = fmt.Sprintf("SETTINGS RESTORE (to %s)", targetPath)
+			}
+			if logFile != nil {
+				fmt.Fprintf(logFile, "Settings backup source: %s\n", actualSourcePath)
+			}
+
 		default:
 			return ProgressUpdate{Error: fmt.Errorf("unknown backup type: %s", backupType)}
 		}
@@ -782,7 +805,7 @@ func startRestore(sourcePath, targetPath string, restoreConfig, restoreWindowMgr
 		// Get the drive size from the source drive info (we need this to pass to checkRestoreSpaceRequirements)
 		// For restore, sourcePath is the mount point, so we can use it directly
 		// CRITICAL FIX: Use actualTargetPath to check the correct partition (/ for system, /home for home restores)
-		err = checkRestoreSpaceRequirements("", sourcePath, actualTargetPath) // Pass empty driveSize, mountPoint as sourcePath, target path for partition check
+		err = checkRestoreSpaceRequirements("", actualSourcePath, actualTargetPath) // Pass empty driveSize, actualSourcePath as source, target path for partition check
 		if err != nil {
 			if logFile != nil {
 				fmt.Fprintf(logFile, "RESTORE SPACE CHECK FAILED: %v\n", err)
@@ -795,7 +818,7 @@ func startRestore(sourcePath, targetPath string, restoreConfig, restoreWindowMgr
 		}
 
 		// Perform the actual restore with options
-		err = performPureGoRestore(sourcePath, actualTargetPath, restoreConfig, restoreWindowMgrs, logFile)
+		err = performPureGoRestore(actualSourcePath, actualTargetPath, restoreConfig, restoreWindowMgrs, logFile)
 		if err != nil {
 			return ProgressUpdate{Error: fmt.Errorf("restore failed: %v", err)}
 		}
@@ -1288,6 +1311,15 @@ func detectBackupType(backupPath string) (string, error) {
 		}
 		ioutil.WriteFile(debugFile+"_result", []byte("Detected home backup"), 0644)
 		return "home", nil
+	} else if strings.Contains(contentStr, "Backup Type: System Settings") {
+		if logPath := getLogFilePath(); logPath != "" {
+			if logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
+				fmt.Fprintf(logFile, "DEBUG: Detected settings backup\n")
+				logFile.Close()
+			}
+		}
+		ioutil.WriteFile(debugFile+"_result", []byte("Detected settings backup"), 0644)
+		return "settings", nil
 	}
 
 	// Fallback: try to detect from folder structure
@@ -1298,6 +1330,27 @@ func detectBackupType(backupPath string) (string, error) {
 		}
 	}
 	ioutil.WriteFile(debugFile+"_fallback", []byte("Backup type not found in BACKUP-INFO.txt, trying folder structure detection"), 0644)
+
+	// Look for migrate-settings-* directories as settings backup fallback
+	if entries, err := ioutil.ReadDir(backupPath); err == nil {
+		for _, entry := range entries {
+			if entry.IsDir() && strings.HasPrefix(entry.Name(), "migrate-settings-") {
+				infoPath := filepath.Join(backupPath, entry.Name(), "BACKUP-INFO.txt")
+				if infoData, err := ioutil.ReadFile(infoPath); err == nil {
+					if strings.Contains(string(infoData), "Backup Type: System Settings") {
+						if logPath := getLogFilePath(); logPath != "" {
+							if logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
+								fmt.Fprintf(logFile, "DEBUG: Found %s with System Settings backup\n", entry.Name())
+								logFile.Close()
+							}
+						}
+						ioutil.WriteFile(debugFile+"_result_fallback", []byte("Found "+entry.Name()+" - assuming settings backup"), 0644)
+						return "settings", nil
+					}
+				}
+			}
+		}
+	}
 
 	if _, err := os.Stat(filepath.Join(backupPath, "etc")); err == nil {
 		// Has /etc directory - likely system backup
@@ -1632,6 +1685,104 @@ func startUniversalBackup(operationType, mountPoint string, selectedFolders map[
 		// Use the unified backup system
 		cmd := startBackup(config)
 		return cmd()
+	}
+}
+
+// startSettingsBackup creates a Bubble Tea command to initiate a settings backup.
+// Backs up readable files from /etc to <mountPoint>/migrate-settings-<hostname>-<date>/etc/.
+func startSettingsBackup(mountPoint string) tea.Cmd {
+	return func() tea.Msg {
+		resetBackupState()
+		go runSettingsBackupSilently(mountPoint)
+		return ProgressUpdate{Percentage: -1, Message: "Starting system settings backup...", Done: false}
+	}
+}
+
+// runSettingsBackupSilently performs the actual settings backup in the background.
+// Walks /etc recursively, skipping permission-denied files silently.
+func runSettingsBackupSilently(mountPoint string) {
+	resetBackupCancel()
+	tuiBackupCompleted = false
+	tuiBackupError = nil
+	tuiBackupCancelling = false
+
+	logPath := getLogFilePath()
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err == nil {
+		fmt.Fprintf(logFile, "\n=== SETTINGS BACKUP STARTED: %s ===\n", time.Now().Format(time.RFC3339))
+		defer logFile.Close()
+	}
+
+	backupStartTime = time.Now()
+
+	hostname, _ := os.Hostname()
+	backupDirName := fmt.Sprintf("migrate-settings-%s-%s", hostname, time.Now().Format("2006-01-02"))
+	backupRoot := filepath.Join(mountPoint, backupDirName)
+	destEtc := filepath.Join(backupRoot, "etc")
+
+	if err := os.MkdirAll(destEtc, 0755); err != nil {
+		tuiBackupCompleted = true
+		tuiBackupError = fmt.Errorf("failed to create backup directory: %v", err)
+		return
+	}
+
+	if err := createBackupInfo(backupRoot, "System Settings"); err != nil {
+		if logFile != nil {
+			fmt.Fprintf(logFile, "Failed to create backup info: %v\n", err)
+		}
+	}
+
+	directoryWalkComplete = true
+
+	err = filepath.WalkDir("/etc", func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() {
+			return nil
+		}
+
+		srcFile, err := os.Open(path)
+		if err != nil {
+			if os.IsPermission(err) {
+				if logFile != nil {
+					fmt.Fprintf(logFile, "Skipping permission-denied file: %s\n", path)
+				}
+			}
+			return nil
+		}
+		srcFile.Close()
+
+		relPath, _ := filepath.Rel("/etc", path)
+		dstPath := filepath.Join(destEtc, relPath)
+
+		if err := copyFileEfficient(path, dstPath); err != nil {
+			if logFile != nil {
+				fmt.Fprintf(logFile, "Error copying %s: %v\n", path, err)
+			}
+			return nil
+		}
+
+		atomic.AddInt64(&filesCopied, 1)
+		atomic.AddInt64(&totalFilesFound, 1)
+
+		return nil
+	})
+
+	syncPhaseComplete = true
+
+	if err != nil {
+		if logFile != nil {
+			fmt.Fprintf(logFile, "Settings backup error: %v\n", err)
+		}
+		tuiBackupCompleted = true
+		tuiBackupError = fmt.Errorf("settings backup failed: %v", err)
+	} else {
+		if logFile != nil {
+			fmt.Fprintf(logFile, "Settings backup completed: %d files copied\n", atomic.LoadInt64(&filesCopied))
+		}
+		tuiBackupCompleted = true
+		tuiBackupError = nil
 	}
 }
 
