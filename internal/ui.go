@@ -384,10 +384,9 @@ var (
 
 // MigrateASCII contains the ASCII art logo displayed in headers throughout the application.
 // Uses a sleek design that fits the Tokyo Night aesthetic.
-const MigrateASCII = `▖  ▖▘      ▗     ▐▘▄▖    ▗      ▜
-▛▖▞▌▌▛▌▛▘▀▌▜▘█▌  ▐ ▚ ▌▌▛▘▜▘█▌▛▛▌▐
-▌▝ ▌▌▙▌▌ █▌▐▖▙▖  ▐ ▄▌▙▌▄▌▐▖▙▖▌▌▌▐
-     ▄▌          ▝▘  ▄▌         ▀ `
+const MigrateASCII = `┏┓ ┏━┓┏━╸╻┏ ╻ ╻┏━┓ ┏┓   ┏━┓┏━╸┏━┓╺┳╸┏━┓┏━┓┏━╸
+┣┻┓┣━┫┃  ┣┻┓┃ ┃┣━┛ ┃╺╋╸ ┣┳┛┣╸ ┗━┓ ┃ ┃ ┃┣┳┛┣╸ 
+┗━┛╹ ╹┗━╸╹ ╹┗━┛╹   ┗━┛  ╹┗╸┗━╸┗━┛ ╹ ┗━┛╹┗╸┗━╸`
 
 // renderMainMenu renders the primary application menu screen.
 // Displays the main navigation options with the application header and help text.
