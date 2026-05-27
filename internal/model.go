@@ -46,6 +46,9 @@ type Model struct {
 	operation string  // Current operation identifier (e.g., "system_backup", "home_restore")
 	message   string  // Status or error message to display
 	canceling bool    // Flag indicating operation cancellation in progress
+	// Backup timing
+	backupElapsed time.Duration // Time since backup started
+	backupETA     time.Duration // Estimated remaining time
 
 	// Display dimensions
 	width  int // Terminal width for rendering
@@ -529,6 +532,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if !m.canceling {
 				m.progress = msg.Percentage
 				m.message = msg.Message
+				m.backupElapsed = msg.Elapsed
+				m.backupETA = msg.ETA
 			}
 		}
 

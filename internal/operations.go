@@ -93,10 +93,12 @@ type VerificationResult struct {
 // ProgressUpdate is a Bubble Tea message that reports operation progress.
 // Used for backup, restore, and verification operations.
 type ProgressUpdate struct {
-	Percentage float64 // Progress from 0.0 to 1.0, or -1 for indeterminate
-	Message    string  // Human-readable status message
-	Done       bool    // true when operation is complete
-	Error      error   // Non-nil if operation failed
+	Percentage float64       // Progress from 0.0 to 1.0, or -1 for indeterminate
+	Message    string        // Human-readable status message
+	Elapsed    time.Duration // Time since operation started
+	ETA        time.Duration // Estimated remaining time
+	Done       bool          // true when operation is complete
+	Error      error         // Non-nil if operation failed
 }
 
 // Global state variables for TUI operation tracking.
@@ -453,8 +455,10 @@ func CheckTUIBackupProgress() tea.Cmd {
 		// Only show regular progress if not cancelling
 		if !tuiBackupCancelling {
 			// Calculate real progress based on disk usage
-			progress, message := calculateRealProgress()
-			return ProgressUpdate{Percentage: progress, Message: message, Done: false}
+			progress, message, elapsed, eta := calculateRealProgress()
+			return ProgressUpdate{
+				Percentage: progress, Message: message,
+				Elapsed: elapsed, ETA: eta, Done: false}
 		}
 
 		// Default fallback (shouldn't reach here)
@@ -469,7 +473,7 @@ func CheckTUIBackupProgress() tea.Cmd {
 // - Deletion: 95-99% based on cleanup progress
 // - Verification: 95-100% (backup) or 0-100% (standalone)
 // Returns progress (0.0-1.0) and a descriptive status message.
-func calculateRealProgress() (float64, string) {
+func calculateRealProgress() (float64, string, time.Duration, time.Duration) {
 	// Initialize on first run
 	if backupStartTime.IsZero() {
 		backupStartTime = time.Now()
@@ -682,7 +686,20 @@ func calculateRealProgress() (float64, string) {
 		progress = 1.0
 	}
 
-	return progress, message
+	elapsed := time.Duration(0)
+	eta := time.Duration(0)
+	if !backupStartTime.IsZero() {
+		elapsed = time.Since(backupStartTime)
+		if progress > 0.01 {
+			remaining := time.Duration(float64(elapsed) * (1.0 - progress) / progress)
+			// Cap ETA at 24h to avoid absurd estimates
+			if remaining < 24*time.Hour {
+				eta = remaining
+			}
+		}
+	}
+
+	return progress, message, elapsed, eta
 }
 
 // startRestore creates a Bubble Tea command for restore operations.

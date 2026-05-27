@@ -124,6 +124,15 @@ func GetHomeBackupExclusions() []string {
 		".cache/go-build/*",
 		".cache/gopls/*",
 		".cache/golangci-lint/*",
+		// Rebuildable dev tool caches
+		".cargo/registry/*",
+		".cargo/git/*",
+		".rustup/*",
+		".npm/*",
+		".go/pkg/mod/*",
+		".cabal/*",
+		".stack/*",
+		".m2/repository/*",
 	}
 }
 

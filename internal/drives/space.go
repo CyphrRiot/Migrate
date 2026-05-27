@@ -19,9 +19,25 @@ func ParseDriveSize(sizeStr string) (int64, error) {
 		return 0, fmt.Errorf("invalid size string: %s", sizeStr)
 	}
 
-	// Get the unit (last character)
-	unit := strings.ToUpper(sizeStr[len(sizeStr)-1:])
-	numberStr := sizeStr[:len(sizeStr)-1]
+	// Extract unit (trailing alpha characters) and number part
+	// Handles: "1.5TB", "1.5T", "500G", "256.0 GB" (space already stripped)
+	unitIdx := len(sizeStr)
+	for unitIdx > 0 {
+		c := sizeStr[unitIdx-1]
+		if (c < 'a' || c > 'z') && (c < 'A' || c > 'Z') {
+			break
+		}
+		unitIdx--
+	}
+	unit := strings.ToUpper(sizeStr[unitIdx:])
+	// FormatBytes produces "X.X TB", "X.X GB" — take only the prefix letter
+	if len(unit) > 1 {
+		unit = unit[:1]
+	}
+	numberStr := sizeStr[:unitIdx]
+	if unit == "" || numberStr == "" {
+		return 0, fmt.Errorf("invalid size string: %s", sizeStr)
+	}
 
 	// Parse the number part
 	var number float64

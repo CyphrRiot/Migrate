@@ -376,6 +376,10 @@ var (
 			Align(lipgloss.Center).
 			Italic(true).
 			MarginTop(2)
+	timerStyle = lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#7aa2f7")).
+		PaddingTop(1)
+
 )
 
 // MigrateASCII contains the ASCII art logo displayed in headers throughout the application.
@@ -406,6 +410,28 @@ func (m Model) renderMainMenu() string {
 	// Help text
 	help := m.renderHelp()
 	s.WriteString("\n" + help)
+
+
+	timerLine := ""
+	if m.backupElapsed > 0 {
+		elapsed := fmt.Sprintf("%02d:%02d:%02d",
+			int(m.backupElapsed.Hours()),
+			int(m.backupElapsed.Minutes())%60,
+			int(m.backupElapsed.Seconds())%60)
+		if m.backupETA > 0 {
+			eta := fmt.Sprintf("%02d:%02d:%02d",
+				int(m.backupETA.Hours()),
+				int(m.backupETA.Minutes())%60,
+				int(m.backupETA.Seconds())%60)
+			timerLine = fmt.Sprintf("Total Time: %s  Estimated Completion: %s", elapsed, eta)
+		} else {
+			timerLine = fmt.Sprintf("Total Time: %s", elapsed)
+		}
+	}
+	if timerLine != "" {
+		s.WriteString("\n")
+		s.WriteString(timerStyle.Render(timerLine))
+	}
 
 	// Center the content with beautiful border
 	content := borderStyle.Width(safeRenderWidth(m.width)).Render(s.String())
@@ -971,6 +997,21 @@ func (m Model) renderDriveSelect() string {
 		availableWidth := safeRenderWidth(m.width) - 8 // More padding for border and margins
 		info := infoBoxStyle.Width(availableWidth).Render("Select a drive to mount.")
 		s.WriteString(info + "\n\n")
+
+	timerLine := ""
+	if m.backupElapsed > 0 {
+		elapsed := fmt.Sprintf("%02d:%02d:%02d", int(m.backupElapsed.Hours()), int(m.backupElapsed.Minutes())%60, int(m.backupElapsed.Seconds())%60)
+		if m.backupETA > 0 {
+			eta := fmt.Sprintf("%02d:%02d:%02d", int(m.backupETA.Hours()), int(m.backupETA.Minutes())%60, int(m.backupETA.Seconds())%60)
+			timerLine = fmt.Sprintf("Total Time: %s  Estimated Completion: %s", elapsed, eta)
+		} else {
+			timerLine = fmt.Sprintf("Total Time: %s", elapsed)
+		}
+	}
+	if timerLine != "" {
+		s.WriteString("\n")
+		s.WriteString(timerStyle.Render(timerLine))
+	}
 
 		// Add LUKS warning (Linux-only)
 		if runtime.GOOS != "openbsd" {
